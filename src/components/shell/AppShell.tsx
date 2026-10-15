@@ -51,15 +51,15 @@ export default function AppShell() {
           <span className="min-w-0 truncate text-muted-foreground">{user?.name || user?.email || "Account"}</span>
         </NavLink>
       </aside>
-      <main className="flex-1 min-w-0 pb-20 md:pb-0">
+      <main className="flex-1 min-w-0 pb-[calc(var(--tabbar-h)+1.5rem)] md:pb-0">
         <Outlet />
       </main>
       <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur safe-bottom">
-        <div className="grid grid-cols-4">
+        <div className="grid h-14 grid-cols-4">
           {tabs.map((t) => {
             const active = isActive(pathname, t.to);
             return (
-              <NavLink key={t.to} to={t.to} className={cn("flex flex-col items-center gap-0.5 py-2 text-[11px]", active ? "text-primary" : "text-muted-foreground")}>
+              <NavLink key={t.to} to={t.to} className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", active ? "text-primary" : "text-muted-foreground")}>
                 <span className="relative"><t.icon className="size-5" strokeWidth={active ? 2.4 : 1.8} />{t.to === "/settings" ? <SyncDot /> : null}</span>
                 <span>{t.to === "/" ? today : t.label}</span>
               </NavLink>

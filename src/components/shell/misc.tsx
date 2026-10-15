@@ -50,7 +50,7 @@ export function Fab({ onClick, label = "Add", className, icon }: { onClick: () =
     <Button
       aria-label={label}
       onClick={onClick}
-      className={cn("fixed bottom-20 right-4 md:bottom-8 md:right-8 z-30 size-14 rounded-full shadow-lg", className)}
+      className={cn("fixed bottom-[calc(var(--tabbar-h)+1.5rem)] right-4 md:bottom-8 md:right-8 z-30 size-14 rounded-full shadow-lg", className)}
       size="icon"
     >
       {icon ?? <Plus className="size-6" />}

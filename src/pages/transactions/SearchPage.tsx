@@ -81,7 +81,7 @@ export default function SearchPage() {
         {results ? <TransactionList txs={results} selectable={selectMode} selected={selected} onToggle={(id, v) => setSelected((s) => { const n = new Set(s); if (v) n.add(id); else n.delete(id); return n; })} emptyText="No matches" /> : null}
       </Page>
       {selectMode ? (
-        <div className="fixed bottom-16 md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t safe-bottom">
+        <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
           <div className="mx-auto max-w-3xl flex items-center gap-2 p-3 text-sm overflow-x-auto">
             <Button variant="outline" size="sm" onClick={() => setSelected(new Set((results ?? []).map((t) => t._id)))}>Select all</Button>
             <span className="text-muted-foreground">{selected.size} selected</span>

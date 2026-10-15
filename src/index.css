@@ -155,7 +155,9 @@ body { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 /* no link previews or text selection on long-press of app chrome, as in a native app */
 nav, button, [role="button"], a { -webkit-touch-callout: none; }
 nav { user-select: none; }
-.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+/* the phone tab bar: 3.5rem of tabs + its top border + the home-indicator area of an installed iPhone app */
+:root { --tabbar-h: calc(3.5rem + 1px + env(safe-area-inset-bottom)); }
+@utility safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 .tabular { font-variant-numeric: tabular-nums; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }

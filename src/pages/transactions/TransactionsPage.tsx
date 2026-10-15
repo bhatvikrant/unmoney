@@ -96,7 +96,7 @@ export default function TransactionsPage() {
         {view === "monthly" ? <MonthlyView month={month} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}
         {raw && view === "summary" ? <SummaryView txs={txs} month={month} range={range} /> : null}
       </Page>
-      {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[9.5rem] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
+      {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[calc(var(--tabbar-h)+6rem)] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
       <Fab onClick={() => nav(`/t/new?date=${addDate()}`)} />
       <FilterSheet open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>

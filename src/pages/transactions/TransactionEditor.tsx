@@ -351,7 +351,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         ) : null}
       </Page>
 
-      <div className="fixed bottom-16 md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t safe-bottom">
+      <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
         <div className="mx-auto max-w-3xl flex gap-2 p-3">
           <Button className="flex-1" disabled={busy} onClick={() => save("save")}>Save</Button>
           {!isEdit ? <Button variant="outline" className="flex-1" disabled={busy} onClick={() => save("continue")}>Continue</Button> : null}
