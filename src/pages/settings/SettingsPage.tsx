@@ -3,6 +3,7 @@ import { useAuthActions } from "@convex-dev/auth/react";
 import { ChevronRight } from "lucide-react";
 import { useOp, useStore } from "@/lib/store";
 import { SyncStatusRow } from "@/components/shell/SyncStatus";
+import { InstallRow } from "./InstallRow";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -36,6 +37,7 @@ export default function SettingsPage() {
             right={<Button variant="outline" size="sm" onClick={onSignOut}>Sign out</Button>}
           />
           <SyncStatusRow />
+          <InstallRow />
         </Section>
         <Section title="Money">
           {link("Main currency", "/settings/currency", s.mainCurrency)}
@@ -72,7 +74,7 @@ export default function SettingsPage() {
         <Section title="Data">
           {link("Backup, restore, import & export", "/settings/backup")}
         </Section>
-        <p className="px-4 pt-6 text-xs text-muted-foreground">unmoney · works offline and syncs across your devices · install it from your browser's share or menu button to use it like an app.</p>
+        <p className="px-4 pt-6 text-xs text-muted-foreground">unmoney · works offline and syncs across your devices.</p>
       </Page>
     </>
   );

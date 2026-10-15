@@ -150,7 +150,11 @@
   --transfer: oklch(0.7 0 0);
 }
 html, body, #root { height: 100%; }
-body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+html, body { overscroll-behavior-y: none; }
+body { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+/* no link previews or text selection on long-press of app chrome, as in a native app */
+nav, button, [role="button"], a { -webkit-touch-callout: none; }
+nav { user-select: none; }
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 .tabular { font-variant-numeric: tabular-nums; }
 .no-scrollbar::-webkit-scrollbar { display: none; }

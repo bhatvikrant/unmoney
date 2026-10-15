@@ -22,11 +22,6 @@ export function applyTheme(theme: "system" | "light" | "dark", accent: string, c
     root.style.setProperty("--primary-foreground", a.fg);
     root.style.setProperty("--ring", a.primary);
   }
-  const meta = document.querySelector('meta[name="theme-color"]:not([media])') ?? (() => {
-    const m = document.createElement("meta");
-    m.name = "theme-color";
-    document.head.appendChild(m);
-    return m;
-  })();
-  (meta as HTMLMetaElement).content = dark ? "#0a0a0a" : "#ffffff";
+  // every theme-color tag, including the light/dark ones in index.html, so a chosen theme wins over the system one
+  for (const m of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) m.content = dark ? "#0a0a0a" : "#ffffff";
 }

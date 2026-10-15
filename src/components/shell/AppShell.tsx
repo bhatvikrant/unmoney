@@ -1,10 +1,12 @@
-import { NavLink, Outlet, useLocation } from "react-router";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { useCallback } from "react";
 import { BookOpen, ChartPie, Landmark, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { todayISO } from "../../../shared/dates";
 import { useApp, useCatchUpRepeats } from "@/lib/app";
 import { Avatar } from "./Avatar";
 import { SyncDot, SyncLine } from "./SyncStatus";
+import { useIosInstallHint } from "@/lib/pwa";
 
 const tabs = [
   { to: "/", icon: BookOpen, label: "Trans." },
@@ -21,6 +23,8 @@ function isActive(pathname: string, to: string) {
 
 export default function AppShell() {
   useCatchUpRepeats();
+  const nav = useNavigate();
+  useIosInstallHint(useCallback(() => nav("/settings"), [nav]));
   const { pathname } = useLocation();
   const { user } = useApp();
   const today = todayISO().slice(5).replace("-", "/");

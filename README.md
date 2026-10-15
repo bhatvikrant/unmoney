@@ -86,11 +86,20 @@ How it fits together:
 - `shared/views.ts` holds the read models (ledger, stats, budgets, search, exports) as pure functions over that snapshot, so nothing needs a server query.
 - `src/lib/store.tsx` keeps the replica, the queue and the id map in IndexedDB (`src/lib/db.ts`), streams the server's tables with `sync.table` subscriptions, replays queued ops on top, and drains the queue in order with the idempotent `sync.apply` mutation (`syncOps` table). A rejected op (for example a category deleted on another device meanwhile) is undone locally and reported in a toast.
 - Receipt photos are queued too: the file is kept in IndexedDB and uploaded when online. Photos already seen are cached by the service worker.
-- The service worker (`vite-plugin-pwa`) precaches the app shell, so the app opens with no connection at all. The first load on a new device, signing in, and creating an account still need a connection.
+- The service worker (`vite-plugin-pwa`) precaches the app shell, so the app opens with no connection at all. The first load on a new device, signing in, and creating an account still need a connection. When a new version is deployed, the app shows a "new version is ready" toast and reloads into it when you tap Reload (queued changes are in IndexedDB, so nothing is lost); installed apps check for a new version hourly and whenever they come back to the front.
 
 Conflicts are resolved last-writer-wins per op: two devices editing the same entry offline end up with whichever synced last.
 
 To try it: build (`npm run build`), serve `dist/` (`npm run preview`), open it once signed in, then switch the browser to offline in DevTools (Network › Offline) or turn off Wi-Fi, reload, and keep using the app.
+
+## Install on a phone
+
+unmoney is a PWA: installed, it opens full screen from the home screen with its own icon and works offline.
+
+- **Android (Chrome, Edge, Samsung Internet):** the browser offers to install it; Settings › Install app shows the same prompt. Long-press the icon for the Add transaction and Stats shortcuts.
+- **iPhone / iPad:** in Safari (or Chrome / Edge on iOS 16.4+), Share › Add to Home Screen. The app shows this hint once, and Settings › Install app explains it. The installed app has its own storage on iOS, so sign in once inside it.
+
+Icons in `public/` are generated from `public/icon.svg` with `npm run icons` (`pwa-assets.config.ts`); the manifest and service worker are configured in `vite.config.ts`, and `src/lib/pwa.ts` registers the worker and tracks install state.
 
 ## Layout
 
