@@ -141,7 +141,7 @@ export interface Ops {
   "repeats.remove": { args: { id: Id<"repeats"> }; result: void };
   "repeats.catchUp": { args: { today: string }; result: number };
 
-  "bookmarks.create": { args: { template: Template }; result: Id<"bookmarks"> };
+  "bookmarks.create": { args: { template: Template; transactionId?: Id<"transactions"> }; result: Id<"bookmarks"> };
   "bookmarks.update": { args: { id: Id<"bookmarks">; template: Template }; result: void };
   "bookmarks.remove": { args: { id: Id<"bookmarks"> }; result: void };
   "bookmarks.reorder": { args: { ids: Id<"bookmarks">[] }; result: void };
@@ -217,7 +217,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions"],
-  "bookmarks.create": ["accounts", "bookmarks"],
+  "bookmarks.create": ["accounts", "transactions", "bookmarks"],
   "bookmarks.update": ["bookmarks"],
   "bookmarks.remove": ["bookmarks"],
   "bookmarks.reorder": ["bookmarks"],
@@ -794,9 +794,11 @@ const handlers: Handlers = {
     return created;
   },
 
-  "bookmarks.create": (w, { template }) => {
+  "bookmarks.create": (w, { template, transactionId }) => {
     w.must("accounts", template.accountId, "Pick an account");
-    return w.insert("bookmarks", { order: w.snap.bookmarks.length, template });
+    // the entry may have been deleted meanwhile: keep the bookmark, drop the link
+    const linked = transactionId && w.get("transactions", transactionId) ? transactionId : undefined;
+    return w.insert("bookmarks", { order: w.snap.bookmarks.length, template, transactionId: linked });
   },
   "bookmarks.update": (w, { id, template }) => {
     w.must("bookmarks", id);
@@ -922,16 +924,17 @@ const handlers: Handlers = {
       if (!template.accountId) continue;
       repeatIds.set(r._id as string, w.insert("repeats", { ...s, template } as never));
     }
+    const txIds = new Map<string, Id<"transactions">>();
     for (const t of data.transactions ?? []) {
       const s = mapTemplate(strip(t));
       if (!s.accountId) continue;
-      w.insert("transactions", { ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [], repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined } as never);
+      txIds.set(t._id as string, w.insert("transactions", { ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [], repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined } as never));
     }
     for (const b of data.bookmarks ?? []) {
       const s = strip(b);
       const template = mapTemplate(s.template as Record<string, unknown>);
       if (!template.accountId) continue;
-      w.insert("bookmarks", { ...s, template } as never);
+      w.insert("bookmarks", { ...s, template, transactionId: s.transactionId ? txIds.get(s.transactionId as string) : undefined } as never);
     }
     for (const b of data.budgets ?? []) {
       const s = strip(b);

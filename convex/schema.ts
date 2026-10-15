@@ -151,6 +151,8 @@ export default defineSchema({
     userId: v.id("users"),
     order: v.number(),
     template: template,
+    /** The entry it was bookmarked from, so that entry can show a star. */
+    transactionId: v.optional(v.id("transactions")),
   }).index("by_user", ["userId"]),
 
   budgets: defineTable({

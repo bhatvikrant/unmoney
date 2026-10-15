@@ -1,8 +1,9 @@
 import { Fragment, useMemo } from "react";
 import { useNavigate } from "react-router";
-import { ArrowRight, Camera, Repeat } from "lucide-react";
+import { ArrowRight, Camera, Repeat, Star } from "lucide-react";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
+import { useView } from "@/lib/store";
 import { kindsOf, sumKinds } from "../../../shared/ledger";
 import { WEEKDAY_SHORT, parts, weekday } from "../../../shared/dates";
 import { Money } from "@/components/shell/Money";
@@ -12,8 +13,14 @@ import { Badge } from "@/components/ui/badge";
 
 export type Tx = Doc<"transactions">;
 
-export function TransactionRow({ tx, onClick, selected, onSelect, showDate }: {
-  tx: Tx; onClick?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; showDate?: boolean;
+/** Ids of the entries that have been bookmarked, for the star in each row. */
+function useBookmarkedIds(): Set<string> {
+  const { bookmarks } = useView();
+  return useMemo(() => new Set(bookmarks.flatMap((b) => (b.transactionId ? [b.transactionId as string] : []))), [bookmarks]);
+}
+
+export function TransactionRow({ tx, onClick, selected, onSelect, showDate, bookmarked }: {
+  tx: Tx; onClick?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; showDate?: boolean; bookmarked?: boolean;
 }) {
   const { accountName, categoryLabel, ledger, fmtSub } = useApp();
   const k = kindsOf(tx, ledger);
@@ -33,6 +40,7 @@ export function TransactionRow({ tx, onClick, selected, onSelect, showDate }: {
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate flex items-center gap-1.5">
+          {bookmarked ? <Star className="size-3 shrink-0 fill-amber-400 text-amber-400" aria-label="Bookmarked" /> : null}
           <span className="truncate">{title}</span>
           {tx.installmentIndex ? <Badge variant="secondary" className="text-[10px] px-1 py-0">{tx.installmentIndex}/{tx.installmentCount}</Badge> : null}
           {tx.repeatId && !tx.installmentIndex ? <Repeat className="size-3 text-muted-foreground shrink-0" /> : null}
@@ -71,6 +79,7 @@ export function TransactionList({ txs, selectable, selected, onToggle, emptyText
 }) {
   const nav = useNavigate();
   const { ledger } = useApp();
+  const bookmarked = useBookmarkedIds();
   const groups = useMemo(() => {
     const map = new Map<string, Tx[]>();
     for (const t of txs) {
@@ -94,6 +103,7 @@ export function TransactionList({ txs, selectable, selected, onToggle, emptyText
                 tx={t}
                 onClick={selectable ? () => onToggle?.(t._id, !selected?.has(t._id)) : () => nav(`/t/${t._id}`)}
                 selected={selected?.has(t._id)}
+                bookmarked={bookmarked.has(t._id)}
                 onSelect={selectable ? (v) => onToggle?.(t._id, v) : undefined}
               />
             ))}

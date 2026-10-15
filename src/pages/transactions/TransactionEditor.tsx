@@ -133,6 +133,8 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   const remove = useOp("transactions.remove");
   const copy = useOp("transactions.copy");
   const addBookmark = useOp("bookmarks.create");
+  const removeBookmark = useOp("bookmarks.remove");
+  const bookmarked = useMemo(() => (id ? view.bookmarks.find((b) => b.transactionId === id) : undefined), [view, id]);
   const tagList = useMemo(() => txTags(view), [view]);
   const wantSuggestions = settings.autocompleteEnabled && noteFocus && f.type !== "transfer";
   const suggestions = useMemo(() => (wantSuggestions ? noteSuggestions(view, f.note, f.type) : undefined), [view, wantSuggestions, f.note, f.type]);
@@ -215,11 +217,16 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
     }
   }
 
-  async function bookmark() {
+  async function toggleBookmark() {
     try {
+      if (bookmarked) {
+        await removeBookmark({ id: bookmarked._id });
+        toast("Bookmark removed");
+        return;
+      }
       const a = buildArgs();
-      await addBookmark({ template: { type: a.type, accountId: a.accountId, toAccountId: a.toAccountId, categoryId: a.categoryId, subcategoryId: a.subcategoryId, amount: a.amount, note: a.note, description: a.description, tags: a.tags, feeAmount: a.feeAmount } });
-      toast.success("Bookmarked");
+      await addBookmark({ transactionId: id, template: { type: a.type, accountId: a.accountId, toAccountId: a.toAccountId, categoryId: a.categoryId, subcategoryId: a.subcategoryId, amount: a.amount, note: a.note, description: a.description, tags: a.tags, feeAmount: a.feeAmount } });
+      toast.success("Bookmarked", { description: "Find it under the star on the Transactions tab." });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not bookmark");
     }
@@ -354,7 +361,10 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
             <div className="grid grid-cols-3 gap-2">
               <Button variant="outline" className="h-10 text-destructive hover:text-destructive" onClick={() => setConfirm("delete")}><Trash2 className="size-4" />Delete</Button>
               <Button variant="outline" className="h-10" onClick={() => setConfirm("copy")}><Copy className="size-4" />Copy</Button>
-              <Button variant="outline" className="h-10" onClick={bookmark}><Star className="size-4" />Bookmark</Button>
+              <Button variant="outline" className={cn("h-10", bookmarked && "border-amber-400/60 text-amber-500 hover:text-amber-500")} aria-pressed={!!bookmarked} onClick={toggleBookmark}>
+                <Star key={bookmarked ? "on" : "off"} className={cn("size-4", bookmarked && "fill-current animate-in zoom-in-50 duration-300")} />
+                {bookmarked ? "Bookmarked" : "Bookmark"}
+              </Button>
             </div>
           ) : null}
           <div className="flex gap-2">
