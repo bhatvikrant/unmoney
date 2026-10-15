@@ -29,15 +29,21 @@ export function SyncDot() {
   return <span className={cn("absolute -top-0.5 -right-1 size-2 rounded-full", !status.connected ? "bg-muted-foreground" : status.lastError && !status.pending ? "bg-destructive" : "bg-primary")} aria-hidden />;
 }
 
-/** The full row in Settings. */
+/** The full row in Settings: the status under the label, the explanation behind the (i). */
 export function SyncStatusRow() {
   const { status } = useStore();
   const d = describe(status);
+  const problem = status.lastError && status.connected && !status.pending;
   return (
     <Row
       label="Sync"
-      hint={status.lastError && status.connected && !status.pending ? status.lastError : "Everything you add, edit or delete is saved on this device first and sent to the server when you are online."}
-      right={<span className={cn("flex items-center gap-1.5 text-xs", d.tone)}><d.icon className={cn("size-3.5", status.syncing && "animate-spin")} />{d.text}</span>}
+      info="Everything you add, edit or delete is saved on this device first and sent to the server when you are online."
+      hint={
+        <span className={cn("mt-0.5 flex items-start gap-1.5", d.tone)}>
+          <d.icon className={cn("mt-px size-3.5 shrink-0", status.syncing && "animate-spin")} />
+          <span>{problem ? `${d.text}: ${status.lastError}` : d.text}</span>
+        </span>
+      }
     />
   );
 }

@@ -31,11 +31,14 @@ export default function SettingsPage() {
       <PageHeader title="More" />
       <Page className="pb-10">
         <Section title="Account">
-          <Row
-            label={<span className="flex items-center gap-3"><Avatar seed={user?.email || user?.name || ""} src={user?.image} size={44} /><span className="min-w-0 truncate font-medium">{user?.name || user?.email || "Signed in"}</span></span>}
-            hint={user?.name ? <span className="pl-14">{user.email}</span> : undefined}
-            right={<Button variant="outline" size="sm" onClick={onSignOut}>Sign out</Button>}
-          />
+          <div className="flex items-center gap-3 px-4 py-3 border-b">
+            <Avatar seed={user?.email || user?.name || ""} src={user?.image} size={44} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{user?.name || user?.email || "Signed in"}</div>
+              {user?.name && user.email ? <div className="truncate text-xs text-muted-foreground">{user.email}</div> : null}
+            </div>
+            <Button variant="outline" size="sm" onClick={onSignOut}>Sign out</Button>
+          </div>
           <SyncStatusRow />
           <InstallRow />
         </Section>
