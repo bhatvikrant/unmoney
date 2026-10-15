@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { getSettings, owned, requireUser } from "./lib/auth";
 import { frequency, template } from "./schema";
-import { nextOccurrence } from "./lib/repeat";
+import { nextOccurrence } from "../shared/repeat";
 import { todayISO } from "../shared/dates";
 import { monthKeyForDate, monthRange } from "../shared/period";
 import type { Doc, Id } from "./_generated/dataModel";

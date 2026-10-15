@@ -1,4 +1,4 @@
-import { addDays, addMonths, addYears, clampDay, make, parts, type ISODate } from "../../shared/dates";
+import { addDays, addMonths, addYears, clampDay, make, parts, type ISODate } from "./dates";
 
 export type Frequency = "daily" | "weekly" | "biweekly" | "monthly" | "yearly";
 

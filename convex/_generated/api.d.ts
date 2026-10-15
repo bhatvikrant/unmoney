@@ -20,7 +20,6 @@ import type * as currencies from "../currencies.js";
 import type * as files from "../files.js";
 import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
-import type * as lib_repeat from "../lib/repeat.js";
 import type * as notes from "../notes.js";
 import type * as repeats from "../repeats.js";
 import type * as seed from "../seed.js";
@@ -47,7 +46,6 @@ declare const fullApi: ApiFromModules<{
   files: typeof files;
   http: typeof http;
   "lib/auth": typeof lib_auth;
-  "lib/repeat": typeof lib_repeat;
   notes: typeof notes;
   repeats: typeof repeats;
   seed: typeof seed;

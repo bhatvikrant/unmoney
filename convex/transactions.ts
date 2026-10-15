@@ -4,7 +4,7 @@ import { allTransactions, loadLedger, owned, requireUser, transactionsInRange } 
 import { frequency, txType } from "./schema";
 import type { Doc, Id } from "./_generated/dataModel";
 import { addMonths, todayISO } from "../shared/dates";
-import { nextOccurrence } from "./lib/repeat";
+import { nextOccurrence } from "../shared/repeat";
 import { kindsOf } from "../shared/ledger";
 import { toMinor } from "../shared/money";
 
