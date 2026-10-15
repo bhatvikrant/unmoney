@@ -41,8 +41,37 @@ npx convex run seed:demo '{"email":"you@example.com"}'
 
 ## Deploy
 
-Backend: `npx convex deploy` (then run the auth setup with `--prod` and your production `--web-server-url`).
-Frontend: any static host. On Vercel, set the build command to `npx convex deploy --cmd 'npm run build'` so `VITE_CONVEX_URL` points at production.
+Live at https://unmoney.vercel.app. Backend: Convex production deployment `brilliant-cheetah-609` (same project as the dev deployment); frontend: Vercel project `unmoney`. This is what was run to get there:
+
+```bash
+npx convex deploy                                   # creates the prod deployment and pushes convex/
+npx @convex-dev/auth --prod --web-server-url https://unmoney.vercel.app   # SITE_URL, JWT_PRIVATE_KEY, JWKS on prod
+npm i -g vercel && vercel login && vercel link       # Vercel project "unmoney"
+npx convex deployment token create vercel --prod    # prints a prod deploy key
+vercel env add CONVEX_DEPLOY_KEY production         # paste that key
+vercel deploy --prod
+```
+
+`vercel.json` sets the build command to `npx convex deploy --cmd 'npm run build'`, so every Vercel build pushes `convex/` to production and bakes the production `VITE_CONVEX_URL` into the bundle (it needs `CONVEX_DEPLOY_KEY` in the Vercel env). It also rewrites every path to `index.html` so React Router deep links work.
+
+If the production URL ever changes (custom domain), update it on the backend: `npx convex env set --prod SITE_URL https://<new host>`.
+
+### Google sign-in in production
+
+Not configured yet; "Continue with Google" fails until it is. In Google Cloud, create an OAuth client (Web application) with this redirect URI:
+
+```
+https://brilliant-cheetah-609.convex.site/api/auth/callback/google
+```
+
+Then set the credentials on the production deployment:
+
+```bash
+npx convex env set --prod AUTH_GOOGLE_ID <client id>
+npx convex env set --prod AUTH_GOOGLE_SECRET <client secret>
+```
+
+(For the dev deployment use the same steps without `--prod` and the `fortunate-bass-165.convex.site` redirect URI.)
 
 ## Layout
 
