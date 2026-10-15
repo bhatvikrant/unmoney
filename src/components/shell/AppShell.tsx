@@ -22,8 +22,8 @@ export default function AppShell() {
   const { pathname } = useLocation();
   const today = todayISO().slice(5).replace("-", "/");
   return (
-    <div className="flex h-full min-h-dvh bg-background">
-      <aside className="hidden md:flex w-56 shrink-0 flex-col border-r bg-sidebar px-3 py-5 gap-1 sticky top-0 h-dvh">
+    <div className="flex min-h-dvh bg-background">
+      <aside className="hidden md:flex w-56 shrink-0 flex-col border-r bg-sidebar px-3 py-5 gap-1 sticky top-0 h-dvh self-start">
         <div className="px-3 pb-4 text-lg font-semibold tracking-tight">unmoney</div>
         {tabs.map((t) => (
           <NavLink

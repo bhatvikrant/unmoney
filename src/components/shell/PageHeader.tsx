@@ -9,7 +9,7 @@ export function PageHeader({ title, back, left, right, className, sub }: {
 }) {
   const nav = useNavigate();
   return (
-    <header className={cn("sticky top-0 z-30 bg-background/95 backdrop-blur border-b", className)}>
+    <header className={cn("sticky top-0 z-30 bg-background border-b", className)}>
       <div className="mx-auto max-w-3xl flex h-12 items-center px-2 gap-1">
         <div className="flex items-center min-w-0 w-24">
           {back ? (
