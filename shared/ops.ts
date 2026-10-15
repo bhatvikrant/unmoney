@@ -101,6 +101,8 @@ export type SettingsPatch = Partial<Pick<Doc<"settings">,
 export type ImportRow = {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
   description?: string; subAmount?: string; subCurrency?: string;
+  /** HH:MM, when the source has times (Money Manager's Excel export does). */
+  time?: string;
 };
 
 export interface Ops {
@@ -134,7 +136,15 @@ export interface Ops {
   "transactions.remove": { args: { id: Id<"transactions">; scope?: "one" | "future" | "all" }; result: void };
   "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
   "transactions.bulkRemove": { args: { ids: Id<"transactions">[] }; result: void };
-  "transactions.importRows": { args: { rows: ImportRow[]; createMissing?: boolean }; result: { inserted: number; errors: { row: number; reason: string }[] } };
+  "transactions.importRows": {
+    /**
+     * createMissing: categories · createAccounts: accounts, in the Others group · skipInvalid: import the good rows, report the rest ·
+     * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry ·
+     * rowOffset: numbering of the first row, for chunked imports
+     */
+    args: { rows: ImportRow[]; createMissing?: boolean; createAccounts?: boolean; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
+    result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
+  };
   "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean }; result: Id<"transactions"> };
 
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
@@ -212,7 +222,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.remove": ["transactions", "repeats"],
   "transactions.bulkUpdate": ["accounts", "categories", "transactions"],
   "transactions.bulkRemove": ["transactions"],
-  "transactions.importRows": ["settings", "accounts", "categories", "currencies", "transactions"],
+  "transactions.importRows": ["settings", "accountGroups", "accounts", "categories", "currencies", "transactions"],
   "transactions.copy": ["transactions"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
@@ -648,15 +658,16 @@ const handlers: Handlers = {
     }
   },
 
-  "transactions.importRows": (w, { rows, createMissing }) => {
+  "transactions.importRows": (w, { rows, createMissing, createAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
     const settings = w.requireSettings();
-    const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.toLowerCase(), a]));
+    const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
     const catKey = (type: string, name: string, parent?: string) => `${type}:${parent ?? ""}:${name.toLowerCase()}`;
     const catByKey = new Map(w.snap.categories.filter((c) => !c.deletedAt).map((c) => [catKey(c.type, c.name, c.parentId), c]));
     const errors: { row: number; reason: string }[] = [];
-    type Prepared = TxFields & { _catName?: string; _subName?: string };
+    type Prepared = Omit<TxFields, "accountId"> & { _row: number; _acc: string; _to?: string; _catName?: string; _subName?: string };
     const prepared: Prepared[] = [];
     const toCreateCats: { type: "income" | "expense"; name: string; parentName?: string }[] = [];
+    const toCreateAccs = new Map<string, string>();
     const parseDate = (s: string): string | null => {
       const t = s.trim();
       let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
@@ -667,47 +678,59 @@ const handlers: Handlers = {
       if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
       return null;
     };
+    /** Name of an existing or to-be-created account, or null if unknown and creating is off. */
+    const accountName = (raw: string | undefined): string | null => {
+      const name = (raw ?? "").trim();
+      if (!name) return null;
+      if (accByName.has(name.toLowerCase())) return name;
+      if (!createAccounts) return null;
+      if (!toCreateAccs.has(name.toLowerCase())) toCreateAccs.set(name.toLowerCase(), name);
+      return name;
+    };
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
+      const rowNo = rowOffset + i + 1;
       const date = parseDate(r.date ?? "");
-      if (!date) { errors.push({ row: i + 1, reason: `Bad date "${r.date}"` }); continue; }
+      if (!date) { errors.push({ row: rowNo, reason: `Bad date "${r.date}"` }); continue; }
       const tRaw = (r.type ?? "").trim().toLowerCase();
       const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;
-      if (!type) { errors.push({ row: i + 1, reason: `Unknown type "${r.type}" (Income, Expenses or Transfer-Out)` }); continue; }
-      const account = accByName.get((r.account ?? "").trim().toLowerCase());
-      if (!account) { errors.push({ row: i + 1, reason: `Unknown account "${r.account}"` }); continue; }
-      const amountMajor = Number((r.amount ?? "").replace(/[^0-9.-]/g, ""));
-      if (!Number.isFinite(amountMajor)) { errors.push({ row: i + 1, reason: `Bad amount "${r.amount}"` }); continue; }
+      if (!type) { errors.push({ row: rowNo, reason: `Unknown type "${r.type}" (Income, Expenses or Transfer-Out)` }); continue; }
+      const acc = accountName(r.account);
+      if (!acc) { errors.push({ row: rowNo, reason: `Unknown account "${r.account}"` }); continue; }
+      const amountMajor = Math.abs(Number((r.amount ?? "").replace(/[^0-9.-]/g, "")));
+      if (!(r.amount ?? "").trim() || !Number.isFinite(amountMajor)) { errors.push({ row: rowNo, reason: `Bad amount "${r.amount}"` }); continue; }
+      const time = r.time?.match(/^(\d{1,2}):(\d{2})/);
       const base: Prepared = {
-        type, date, accountId: account._id, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
+        _row: rowNo, type, date, _acc: acc, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
         description: r.description?.trim() || undefined, tags: [], photoIds: [],
+        time: time ? `${time[1].padStart(2, "0")}:${time[2]}` : undefined,
       };
       if (r.subAmount && r.subCurrency) {
         const cur = w.snap.currencies.find((c) => c.code.toLowerCase() === r.subCurrency!.trim().toLowerCase());
-        if (cur) {
+        if (cur && cur.code !== settings.mainCurrency) {
           base.subCurrency = cur.code;
-          base.subAmount = toMinor(Number(r.subAmount.replace(/[^0-9.-]/g, "")), cur.decimals);
+          base.subAmount = toMinor(Math.abs(Number(r.subAmount.replace(/[^0-9.-]/g, ""))), cur.decimals);
           base.exchangeRate = cur.rate;
         }
       }
       if (type === "transfer") {
-        const to = accByName.get((r.category ?? "").trim().toLowerCase());
-        if (!to) { errors.push({ row: i + 1, reason: `Unknown destination account "${r.category}"` }); continue; }
-        if (to._id === account._id) { errors.push({ row: i + 1, reason: "From and To are the same" }); continue; }
-        base.toAccountId = to._id;
+        const to = accountName(r.category);
+        if (!to) { errors.push({ row: rowNo, reason: `Unknown destination account "${r.category}"` }); continue; }
+        if (to.toLowerCase() === acc.toLowerCase()) { errors.push({ row: rowNo, reason: "From and To are the same" }); continue; }
+        base._to = to;
       } else {
         const name = (r.category ?? "").trim();
-        if (!name) { errors.push({ row: i + 1, reason: "Category is required" }); continue; }
+        if (!name) { errors.push({ row: rowNo, reason: "Category is required" }); continue; }
         const cat = catByKey.get(catKey(type, name));
         if (!cat) {
-          if (!createMissing) { errors.push({ row: i + 1, reason: `Unknown ${type} category "${name}"` }); continue; }
+          if (!createMissing) { errors.push({ row: rowNo, reason: `Unknown ${type} category "${name}"` }); continue; }
           toCreateCats.push({ type, name });
         }
         const subName = r.subcategory?.trim();
         if (subName) {
           const sub = cat ? catByKey.get(catKey(type, subName, cat._id)) : undefined;
           if (!sub) {
-            if (!createMissing) { errors.push({ row: i + 1, reason: `Unknown subcategory "${subName}" under "${name}"` }); continue; }
+            if (!createMissing) { errors.push({ row: rowNo, reason: `Unknown subcategory "${subName}" under "${name}"` }); continue; }
             toCreateCats.push({ type, name: subName, parentName: name });
           }
         }
@@ -716,9 +739,42 @@ const handlers: Handlers = {
       }
       prepared.push(base);
     }
-    if (errors.length) return { inserted: 0, errors };
+    if (errors.length && !skipInvalid) return { inserted: 0, errors, createdAccounts: [], duplicates: [] };
+    // Entries already there, counted so that two identical coffees on one day both match.
+    const dupKey = (t: { type: string; date: string; accountId: string; toAccountId?: string; amount: number; note: string }) =>
+      [t.type, t.date, t.accountId, t.toAccountId ?? "", t.amount, t.note.trim().toLowerCase()].join("|");
+    const existing = new Map<string, number>();
+    if (skipDuplicates) for (const t of w.snap.transactions) existing.set(dupKey(t), (existing.get(dupKey(t)) ?? 0) + 1);
+    const duplicates: number[] = [];
+    const fresh = prepared.filter((p) => {
+      if (!skipDuplicates) return true;
+      const acc = accByName.get(p._acc.toLowerCase());
+      const to = p._to ? accByName.get(p._to.toLowerCase()) : undefined;
+      if (!acc || (p._to && !to)) return true; // a new account has no entries yet
+      const key = dupKey({ ...p, accountId: acc._id, toAccountId: to?._id });
+      const n = existing.get(key) ?? 0;
+      if (!n) return true;
+      existing.set(key, n - 1);
+      duplicates.push(p._row);
+      return false;
+    });
+    // Only create accounts some imported row still uses.
+    const used = new Set(fresh.flatMap((p) => [p._acc.toLowerCase(), ...(p._to ? [p._to.toLowerCase()] : [])]));
+    const createdAccounts: string[] = [];
+    if ([...toCreateAccs.keys()].some((k) => used.has(k))) {
+      let group = w.snap.accountGroups.find((g) => !g.deletedAt && g.kind === "other");
+      if (!group) group = w.get("accountGroups", w.insert("accountGroups", { name: "Others", kind: "other", order: nextOrder(w.snap.accountGroups) }))!;
+      for (const [key, name] of toCreateAccs) {
+        if (!used.has(key) || accByName.has(key)) continue;
+        const id = w.insert("accounts", { groupId: group._id, name, initialBalance: 0, includeInTotals: true, hidden: false, order: nextOrder(w.snap.accounts), transferAsExpense: false });
+        accByName.set(key, w.get("accounts", id)!);
+        createdAccounts.push(name);
+      }
+    }
+    // Only create categories some imported row still uses.
+    const usedCats = new Set(fresh.flatMap((p) => (p._catName ? [`${p.type}:${p._catName.toLowerCase()}`, `${p.type}:${p._catName.toLowerCase()}:${(p._subName ?? "").toLowerCase()}`] : [])));
     for (const c of toCreateCats) {
-      if (c.parentName) continue;
+      if (c.parentName || !usedCats.has(`${c.type}:${c.name.toLowerCase()}`)) continue;
       const key = catKey(c.type, c.name);
       if (catByKey.has(key)) continue;
       const order = nextOrder(w.snap.categories.filter((x) => x.type === c.type));
@@ -726,7 +782,7 @@ const handlers: Handlers = {
       catByKey.set(key, w.get("categories", id)!);
     }
     for (const c of toCreateCats) {
-      if (!c.parentName) continue;
+      if (!c.parentName || !usedCats.has(`${c.type}:${c.parentName.toLowerCase()}:${c.name.toLowerCase()}`)) continue;
       const parent = catByKey.get(catKey(c.type, c.parentName))!;
       const key = catKey(c.type, c.name, parent._id);
       if (catByKey.has(key)) continue;
@@ -735,17 +791,20 @@ const handlers: Handlers = {
       catByKey.set(key, w.get("categories", id)!);
     }
     let inserted = 0;
-    for (const p of prepared) {
-      const { _catName, _subName, ...fields } = p;
+    for (const p of fresh) {
+      const { _row, _acc, _to, _catName, _subName, ...rest } = p;
+      void _row;
+      const fields: TxFields = { ...rest, accountId: accByName.get(_acc.toLowerCase())!._id };
+      if (_to) fields.toAccountId = accByName.get(_to.toLowerCase())!._id;
       if (fields.type !== "transfer") {
         const cat = catByKey.get(catKey(fields.type, _catName!))!;
         fields.categoryId = cat._id;
         fields.subcategoryId = _subName ? catByKey.get(catKey(fields.type, _subName, cat._id))?._id : undefined;
       }
-      w.insert("transactions", fields);
+      w.insert("transactions", clean(fields));
       inserted++;
     }
-    return { inserted, errors: [] };
+    return { inserted, errors, createdAccounts, duplicates };
   },
 
   "transactions.copy": (w, { id, useToday }) => {

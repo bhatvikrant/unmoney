@@ -170,6 +170,26 @@ export default defineSchema({
     color: v.string(),
   }).index("by_user_date", ["userId", "date"]),
 
+  /**
+   * The secret link the iPhone "Send to unmoney" shortcut posts files to. Only a SHA-256 of the
+   * token is kept; one link per user, and making a new one turns the old one off.
+   */
+  importLinks: defineTable({
+    userId: v.id("users"),
+    tokenHash: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_hash", ["tokenHash"]),
+
+  /** Files that arrived through an import link, waiting for the user to review them in the app. */
+  pendingImports: defineTable({
+    userId: v.id("users"),
+    storageId: v.id("_storage"),
+    name: v.string(),
+    size: v.number(),
+  }).index("by_user", ["userId"]),
+
   /** Ops the client has synced, for idempotent retries. */
   syncOps: defineTable({
     userId: v.id("users"),

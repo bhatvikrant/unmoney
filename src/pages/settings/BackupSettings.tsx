@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { useNavigate } from "react-router";
+import { ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useOp, useView } from "@/lib/store";
 import { backupExport, txExportRows } from "../../../shared/views";
@@ -7,22 +9,16 @@ import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { downloadText, mapImportRow, parseTable, toCSV } from "@/lib/csv";
+import { downloadText, toCSV } from "@/lib/csv";
 import { toMajor } from "../../../shared/money";
 
 export default function BackupSettings() {
   const view = useView();
+  const nav = useNavigate();
   const { settings } = useApp();
   const restore = useOp("backup.restore");
-  const importRows = useOp("transactions.importRows");
   const wipe = useOp("backup.wipeAll");
   const restoreRef = useRef<HTMLInputElement>(null);
-  const importRef = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<null | { rows: ReturnType<typeof mapImportRow>[]; headers: string[] }>(null);
-  const [createMissing, setCreateMissing] = useState(true);
-  const [errors, setErrors] = useState<{ row: number; reason: string }[]>([]);
   const [busy, setBusy] = useState(false);
 
   async function exportJSON() {
@@ -43,23 +39,6 @@ export default function BackupSettings() {
     setBusy(false);
     if (restoreRef.current) restoreRef.current.value = "";
   }
-  async function onImportFile(file: File | undefined) {
-    if (!file) return;
-    const { headers, rows } = parseTable(await file.text());
-    setPreview({ headers, rows: rows.map(mapImportRow) });
-    setErrors([]);
-    if (importRef.current) importRef.current.value = "";
-  }
-  async function runImport() {
-    if (!preview) return;
-    setBusy(true);
-    try {
-      const res = await importRows({ rows: preview.rows, createMissing });
-      if (res.errors.length) { setErrors(res.errors); toast.error(`${res.errors.length} rows need fixing; nothing was imported`); }
-      else { toast.success(`Imported ${res.inserted} entries`); setPreview(null); }
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Import failed"); }
-    setBusy(false);
-  }
   return (
     <>
       <PageHeader back="/settings" title="Backup & data" />
@@ -74,31 +53,12 @@ export default function BackupSettings() {
           <Row label="Export as TSV" hint="Re-importable here and in Money Manager" right={<Button size="sm" variant="outline" onClick={() => exportCSV("\t")}>TSV</Button>} />
         </Section>
         <Section title="Import">
-          <Row label="Import from CSV / TSV" hint="Columns: Date, Account, Category, Subcategory, Note, Amount, Income/Expense, Description, Amount Sub, Currency" right={<Button size="sm" variant="outline" onClick={() => importRef.current?.click()}>Choose file</Button>} />
-          <input ref={importRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" className="hidden" onChange={(e) => onImportFile(e.target.files?.[0])} />
+          <Row label="Import from Money Manager, Excel, CSV or TSV" hint="Review what will be added before anything is imported" onClick={() => nav("/import")} right={<ChevronRight className="size-4 text-muted-foreground" />} />
         </Section>
         <Section title="Danger zone">
           <Row label="Delete all entries" hint="Removes transactions, notes, schedules, bookmarks and budgets. Accounts and categories stay." right={<Button size="sm" variant="destructive" onClick={async () => { if (window.confirm("Delete every transaction? This cannot be undone.")) { await wipe({ confirm: "DELETE" }); toast.success("Entries deleted"); } }}>Delete</Button>} />
         </Section>
       </Page>
-      <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>Import {preview?.rows.length} rows</DialogTitle></DialogHeader>
-          {preview ? (
-            <div className="space-y-3">
-              <div className="overflow-x-auto border rounded-md max-h-64">
-                <table className="text-xs w-full">
-                  <thead className="bg-muted sticky top-0"><tr>{["date", "account", "category", "subcategory", "note", "amount", "type"].map((h) => <th key={h} className="text-left px-2 py-1 font-medium capitalize">{h}</th>)}</tr></thead>
-                  <tbody>{preview.rows.slice(0, 50).map((r, i) => <tr key={i} className="border-t"><td className="px-2 py-1">{r.date}</td><td className="px-2 py-1">{r.account}</td><td className="px-2 py-1">{r.category}</td><td className="px-2 py-1">{r.subcategory}</td><td className="px-2 py-1 max-w-32 truncate">{r.note}</td><td className="px-2 py-1 tabular">{r.amount}</td><td className="px-2 py-1">{r.type}</td></tr>)}</tbody>
-                </table>
-              </div>
-              <label className="flex items-center gap-2 text-sm"><Checkbox checked={createMissing} onCheckedChange={(v) => setCreateMissing(!!v)} />Create categories that don't exist yet (accounts must already exist)</label>
-              {errors.length ? <div className="max-h-32 overflow-y-auto text-xs text-destructive space-y-0.5">{errors.slice(0, 30).map((e) => <div key={e.row}>Row {e.row}: {e.reason}</div>)}</div> : null}
-            </div>
-          ) : null}
-          <DialogFooter><Button variant="outline" onClick={() => setPreview(null)}>Cancel</Button><Button disabled={busy} onClick={runImport}>Import</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

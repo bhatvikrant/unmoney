@@ -32,5 +32,8 @@
   "include": [
     "src",
     "convex"
+  ],
+  "exclude": [
+    "src/sw.ts"
   ]
 }

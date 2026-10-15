@@ -7,6 +7,7 @@ import { useApp, useCatchUpRepeats } from "@/lib/app";
 import { Avatar } from "./Avatar";
 import { SyncDot, SyncLine } from "./SyncStatus";
 import { useIosInstallHint } from "@/lib/pwa";
+import { MoneyManagerPrompt, usePendingImportToasts } from "@/components/MoneyManagerPrompt";
 
 const tabs = [
   { to: "/", icon: BookOpen, label: "Trans." },
@@ -25,6 +26,7 @@ export default function AppShell() {
   useCatchUpRepeats();
   const nav = useNavigate();
   useIosInstallHint(useCallback(() => nav("/settings"), [nav]));
+  usePendingImportToasts();
   const { pathname } = useLocation();
   const { user } = useApp();
   const today = todayISO().slice(5).replace("-", "/");
@@ -53,6 +55,7 @@ export default function AppShell() {
       </aside>
       <main className="flex-1 min-w-0 pb-[calc(var(--tabbar-h)+1.5rem)] md:pb-0">
         <Outlet />
+        <MoneyManagerPrompt />
       </main>
       <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur safe-bottom">
         <div className="grid h-14 grid-cols-4">

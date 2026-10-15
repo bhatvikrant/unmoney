@@ -99,7 +99,21 @@ UnMoney is a PWA: installed, it opens full screen from the home screen with its 
 - **Android (Chrome, Edge, Samsung Internet):** the browser offers to install it; Settings › Install app shows the same prompt. Long-press the icon for the Add transaction and Stats shortcuts.
 - **iPhone / iPad:** in Safari (or Chrome / Edge on iOS 16.4+), Share › Add to Home Screen. The app shows this hint once, and Settings › Install app explains it. The installed app has its own storage on iOS, so sign in once inside it.
 
-Icons in `public/` are generated from `public/icon.svg` with `npm run icons` (`pwa-assets.config.ts`); the manifest and service worker are configured in `vite.config.ts`, and `src/lib/pwa.ts` registers the worker and tracks install state.
+Icons in `public/` are generated from `public/icon.svg` with `npm run icons` (`pwa-assets.config.ts`); the manifest is configured in `vite.config.ts`, the service worker is `src/sw.ts`, and `src/lib/pwa.ts` registers the worker and tracks install state.
+
+## Import from Money Manager
+
+More › Import from Money Manager reads Money Manager's Excel export (Settings › Backup › Export to Excel), as well as CSV and TSV. Every file goes through the same review: a dry run shows what will be added, which accounts and categories get created, which rows are skipped and which entries are already there.
+
+- **Android**: the installed app is a share target, so the exported file can be shared straight to UnMoney. `src/sw.ts` receives it.
+- **iPhone**: iOS gives web apps no share-sheet entry, so a "Send to UnMoney" Shortcut posts the file to the user's import link (`POST /import/<token>` on the Convex site, `convex/imports.ts`). The file waits in the app until the user reviews it.
+- **First launch**: a new account with no entries is asked once whether it is coming from Money Manager.
+
+The import page links to a signed shortcut at `public/send-to-unmoney.shortcut` when that file exists, and otherwise shows how to make the shortcut by hand. Signing needs a Mac signed into iCloud:
+
+```bash
+python3 scripts/build-shortcut.py
+```
 
 ## Layout
 

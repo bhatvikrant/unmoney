@@ -31,6 +31,7 @@ import PasscodeSettings from "@/pages/settings/PasscodeSettings";
 import PeriodSettings from "@/pages/settings/PeriodSettings";
 import StyleSettings from "@/pages/settings/StyleSettings";
 import BackupSettings from "@/pages/settings/BackupSettings";
+import ImportPage from "@/pages/settings/ImportPage";
 import AccountGroupSettings from "@/pages/settings/AccountGroupSettings";
 import DeletedAccounts from "@/pages/settings/DeletedAccounts";
 import TransferExpenseSettings from "@/pages/settings/TransferExpenseSettings";
@@ -86,6 +87,7 @@ function Gate() {
           <Route path="settings/period" element={<PeriodSettings />} />
           <Route path="settings/style" element={<StyleSettings />} />
           <Route path="settings/backup" element={<BackupSettings />} />
+          <Route path="import" element={<ImportPage />} />
           <Route path="settings/account-groups" element={<AccountGroupSettings />} />
           <Route path="settings/deleted-accounts" element={<DeletedAccounts />} />
           <Route path="settings/transfer-expense" element={<TransferExpenseSettings />} />

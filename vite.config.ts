@@ -12,6 +12,11 @@ export default defineConfig({
       // src/lib/pwa.ts registers the worker and asks before reloading into a new version
       registerType: "prompt",
       injectRegister: false,
+      // our own worker (src/sw.ts), so it can receive files shared from other apps
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
+      injectManifest: { globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"] },
       includeAssets: ["icon.svg", "favicon.ico", "apple-touch-icon-180x180.png"],
       manifest: {
         id: "/",
@@ -31,22 +36,31 @@ export default defineConfig({
           { src: "pwa-512x512.png", sizes: "512x512", type: "image/png" },
           { src: "maskable-icon-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
+        // Android: UnMoney shows up in the share menu for spreadsheets, so Money Manager's
+        // "Export to Excel" can hand its file straight over. src/sw.ts receives the POST.
+        share_target: {
+          action: "/import/share",
+          method: "POST",
+          enctype: "multipart/form-data",
+          params: {
+            title: "title",
+            text: "text",
+            files: [{
+              name: "file",
+              accept: [
+                ".xlsx", ".xls", ".csv", ".tsv",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-excel",
+                "text/csv",
+                "text/tab-separated-values",
+                "application/octet-stream",
+              ],
+            }],
+          },
+        },
         shortcuts: [
           { name: "Add transaction", short_name: "Add", url: "/t/new", icons: [{ src: "pwa-192x192.png", sizes: "192x192", type: "image/png" }] },
           { name: "Stats", url: "/stats", icons: [{ src: "pwa-192x192.png", sizes: "192x192", type: "image/png" }] },
-        ],
-      },
-      workbox: {
-        navigateFallback: "/index.html",
-        globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
-        navigateFallbackDenylist: [/^\/api/],
-        runtimeCaching: [
-          {
-            // receipt photos: keep what was seen so they still show offline
-            urlPattern: ({ url }) => /\.convex\.cloud$/.test(url.hostname) && url.pathname.startsWith("/api/storage/"),
-            handler: "CacheFirst",
-            options: { cacheName: "photos", expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 90 } },
-          },
         ],
       },
     }),

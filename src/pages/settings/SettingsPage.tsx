@@ -75,6 +75,7 @@ export default function SettingsPage() {
           {link("Passcode", "/settings/passcode", s.passcodeHash ? "On" : "Off", "Asks for a code each time you open UnMoney on this device. It protects the screen only; your data is still tied to your sign-in.")}
         </Section>
         <Section title="Data">
+          {link("Import from Money Manager", "/import", undefined, "Bring over your accounts, categories and history from Money Manager's Excel export.")}
           {link("Backup, restore, import & export", "/settings/backup")}
         </Section>
         <p className="px-4 pt-6 text-xs text-muted-foreground">UnMoney · works offline and syncs across your devices.</p>
