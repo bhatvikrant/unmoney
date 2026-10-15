@@ -2,7 +2,7 @@ import { useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { ChevronRight } from "lucide-react";
 import { useOp, useStore } from "@/lib/store";
-import { SyncStatusRow } from "@/components/shell/SyncStatus";
+import { SyncBadge } from "@/components/shell/SyncStatus";
 import { InstallRow } from "./InstallRow";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -31,15 +31,15 @@ export default function SettingsPage() {
       <PageHeader title="More" />
       <Page className="pb-10">
         <Section title="Account">
-          <div className="flex items-center gap-3 px-4 py-3 border-b">
-            <Avatar seed={user?.email || user?.name || ""} src={user?.image} size={44} />
+          <div className="flex items-center gap-3 px-4 py-3 border-b last:border-b-0">
+            <Avatar seed={user?.email || user?.name || ""} src={user?.image} size={48} />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{user?.name || user?.email || "Signed in"}</div>
               {user?.name && user.email ? <div className="truncate text-xs text-muted-foreground">{user.email}</div> : null}
+              <SyncBadge className="mt-1" />
             </div>
             <Button variant="outline" size="sm" onClick={onSignOut}>Sign out</Button>
           </div>
-          <SyncStatusRow />
           <InstallRow />
         </Section>
         <Section title="Money">
