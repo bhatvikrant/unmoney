@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { todayISO } from "../../../shared/dates";
 import { useApp, useCatchUpRepeats } from "@/lib/app";
 import { Avatar } from "./Avatar";
+import { SyncDot, SyncLine } from "./SyncStatus";
 
 const tabs = [
   { to: "/", icon: BookOpen, label: "Trans." },
@@ -40,7 +41,8 @@ export default function AppShell() {
             {t.to === "/" ? "Transactions" : t.label}
           </NavLink>
         ))}
-        <NavLink to="/settings" className="mt-auto flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-sidebar-accent/60">
+        <SyncLine className="mt-auto" />
+        <NavLink to="/settings" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-sidebar-accent/60">
           <Avatar seed={user?.email || user?.name || ""} src={user?.image} size={32} />
           <span className="min-w-0 truncate text-muted-foreground">{user?.name || user?.email || "Account"}</span>
         </NavLink>
@@ -54,7 +56,7 @@ export default function AppShell() {
             const active = isActive(pathname, t.to);
             return (
               <NavLink key={t.to} to={t.to} className={cn("flex flex-col items-center gap-0.5 py-2 text-[11px]", active ? "text-primary" : "text-muted-foreground")}>
-                <t.icon className="size-5" strokeWidth={active ? 2.4 : 1.8} />
+                <span className="relative"><t.icon className="size-5" strokeWidth={active ? 2.4 : 1.8} />{t.to === "/settings" ? <SyncDot /> : null}</span>
                 <span>{t.to === "/" ? today : t.label}</span>
               </NavLink>
             );

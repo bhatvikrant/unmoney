@@ -1,5 +1,4 @@
-import { useMutation } from "convex/react";
-import { api } from "../../../convex/_generated/api";
+import { useOp } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -8,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 export default function PeriodSettings() {
   const { settings: s } = useApp();
-  const update = useMutation(api.settings.update);
+  const update = useOp("settings.update");
   return (
     <>
       <PageHeader back="/settings" title="Period" />

@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { useConvex, useQuery } from "convex/react";
 import { Search, Star, SlidersHorizontal, StickyNote, Download, X } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
+import { useView } from "@/lib/store";
+import { budgetStatus, notesRange, txCarryBefore, txExportRows, txListRange } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { useMonthParam } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
@@ -34,8 +34,9 @@ export default function TransactionsPage() {
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
   const [filterOpen, setFilterOpen] = useState(false);
 
-  const raw = useQuery(api.transactions.listRange, range);
-  const carry = useQuery(api.transactions.carryBefore, settings.carryOver ? { date: range.from } : "skip") ?? 0;
+  const snap = useView();
+  const raw = useMemo(() => txListRange(snap, range.from, range.to), [snap, range.from, range.to]);
+  const carry = useMemo(() => (settings.carryOver ? txCarryBefore(snap, range.from) : 0), [snap, settings.carryOver, range.from]);
 
   const filterAcc = useMemo(() => new Set((sp.get("acc") ?? "").split(",").filter(Boolean)), [sp]);
   const filterCat = useMemo(() => new Set((sp.get("cat") ?? "").split(",").filter(Boolean)), [sp]);
@@ -105,7 +106,8 @@ export default function TransactionsPage() {
 function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: string } }) {
   const nav = useNavigate();
   const { settings, ledger } = useApp();
-  const notes = useQuery(api.notes.listRange, range) ?? [];
+  const snap = useView();
+  const notes = useMemo(() => notesRange(snap, range.from, range.to), [snap, range.from, range.to]);
   const [day, setDay] = useState<string | null>(null);
   const byDay = useMemo(() => {
     const m = new Map<string, { income: number; expense: number; list: Tx[] }>();
@@ -206,7 +208,8 @@ function MonthlyView({ month, onPick }: { month: string; onPick: (m: string) => 
   const { settings, ledger } = useApp();
   const { y } = parseMonthKey(month);
   const yr = yearRange(y, settings.monthStartDay);
-  const txs = useQuery(api.transactions.listRange, yr) ?? [];
+  const snap = useView();
+  const txs = useMemo(() => txListRange(snap, yr.from, yr.to), [snap, yr.from, yr.to]);
   const rows = Array.from({ length: 12 }, (_, i) => {
     const key = monthKey(y, i + 1);
     const r = monthRange(key, settings.monthStartDay);
@@ -232,9 +235,9 @@ function MonthlyView({ month, onPick }: { month: string; onPick: (m: string) => 
 
 function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: { from: string; to: string } }) {
   const nav = useNavigate();
-  const convex = useConvex();
+  const snap = useView();
   const { ledger, groupById, accountById, categoryById, settings } = useApp();
-  const status = useQuery(api.budgets.status, { period: "monthly", key: month });
+  const status = useMemo(() => budgetStatus(snap, "monthly", month), [snap, month]);
   const byGroup = useMemo(() => {
     const exp = new Map<string, number>();
     const tr = new Map<string, number>();
@@ -253,7 +256,7 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
 
   async function exportMonth() {
     try {
-      const rows = await convex.query(api.transactions.exportAll, range);
+      const rows = txExportRows(snap, range.from, range.to);
       const csv = toCSV(rows.map((r) => ({
         Date: r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note,
         Amount: toMajor(Number(r.amount), settings.decimals), "Income/Expense": r.type, Description: r.description,

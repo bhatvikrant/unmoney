@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { useMutation, useQuery } from "convex/react";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
+import { useOp, useView } from "@/lib/store";
+import { budgetsList } from "../../../shared/views";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -25,10 +25,10 @@ export default function BudgetSettings() {
   const [sp] = useSearchParams();
   const { settings, categories, categoryById } = useApp();
   const [period, setPeriod] = useState<Period>((sp.get("period") as Period) || "monthly");
-  const budgets = useQuery(api.budgets.list) ?? [];
-  const upsert = useMutation(api.budgets.upsert);
-  const setOverride = useMutation(api.budgets.setOverride);
-  const remove = useMutation(api.budgets.remove);
+  const budgets = budgetsList(useView());
+  const upsert = useOp("budgets.upsert");
+  const setOverride = useOp("budgets.setOverride");
+  const remove = useOp("budgets.remove");
   const list = budgets.filter((b) => b.period === period).sort((a, b) => (a.categoryId ? 1 : 0) - (b.categoryId ? 1 : 0));
   const [dialog, setDialog] = useState<null | { id?: Id<"budgets">; categoryId: string; amount: string; override: string }>(null);
   const today = todayISO();

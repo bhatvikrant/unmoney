@@ -1,7 +1,6 @@
+import { useOp } from "@/lib/store";
 import { useState } from "react";
-import { useMutation } from "convex/react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -12,8 +11,8 @@ import { hashPin, newSalt, markUnlocked } from "@/lib/passcode";
 
 export default function PasscodeSettings() {
   const { settings: s } = useApp();
-  const setPasscode = useMutation(api.settings.setPasscode);
-  const update = useMutation(api.settings.update);
+  const setPasscode = useOp("settings.setPasscode");
+  const update = useOp("settings.update");
   const [stage, setStage] = useState<null | "enter" | "confirm">(null);
   const [first, setFirst] = useState("");
   const [err, setErr] = useState(false);

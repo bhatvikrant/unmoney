@@ -1,15 +1,17 @@
-import { useMutation, useQuery } from "convex/react";
+import { useMemo } from "react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
+import { useOp, useView } from "@/lib/store";
+import { accountsListDeleted } from "../../../shared/views";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section, EmptyState } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 
 export default function DeletedAccounts() {
-  const data = useQuery(api.accounts.listDeleted);
-  const restore = useMutation(api.accounts.restore);
-  const purge = useMutation(api.accounts.permanentlyDelete);
-  const restoreGroup = useMutation(api.accountGroups.restore);
+  const view = useView();
+  const data = useMemo(() => accountsListDeleted(view), [view]);
+  const restore = useOp("accounts.restore");
+  const purge = useOp("accounts.permanentlyDelete");
+  const restoreGroup = useOp("accountGroups.restore");
   return (
     <>
       <PageHeader back="/settings" title="Deleted accounts" />

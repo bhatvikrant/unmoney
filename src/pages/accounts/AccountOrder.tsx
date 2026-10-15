@@ -1,6 +1,5 @@
-import { useMutation } from "convex/react";
+import { useOp } from "@/lib/store";
 import { ArrowDown, ArrowUp, Eye, EyeOff } from "lucide-react";
-import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -11,8 +10,8 @@ import { useNavigate } from "react-router";
 export default function AccountOrder() {
   const nav = useNavigate();
   const { accounts, groups } = useApp();
-  const reorder = useMutation(api.accounts.reorder);
-  const setHidden = useMutation(api.accounts.setHidden);
+  const reorder = useOp("accounts.reorder");
+  const setHidden = useOp("accounts.setHidden");
   const live = groups.filter((g) => !g.deletedAt).sort((a, b) => a.order - b.order);
   const ordered = [...accounts].sort((a, b) => a.order - b.order);
   const commit = (list: typeof ordered) => reorder({ items: list.map((a) => ({ id: a._id, groupId: a.groupId })) });

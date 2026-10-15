@@ -1,6 +1,5 @@
+import { useOp } from "@/lib/store";
 import { useMemo, useState } from "react";
-import { useMutation } from "convex/react";
-import { api } from "../../../convex/_generated/api";
 import { CURRENCIES } from "../../../shared/currencies";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 export default function Onboarding() {
-  const complete = useMutation(api.settings.completeOnboarding);
+  const complete = useOp("settings.completeOnboarding");
   const [q, setQ] = useState("");
   const [code, setCode] = useState("USD");
   const [busy, setBusy] = useState(false);

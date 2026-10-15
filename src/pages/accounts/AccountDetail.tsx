@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { useMutation, useQuery } from "convex/react";
 import { Pencil } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
+import { useOp, useStore, useView } from "@/lib/store";
+import { accountGet } from "../../../shared/views";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -29,10 +29,13 @@ export default function AccountDetail() {
   const { month, range, shift } = useMonthParam();
   const [gran, setGran] = useState<"daily" | "monthly" | "yearly">("daily");
   const r = gran === "yearly" ? yearRange(parseMonthKey(month).y, settings.monthStartDay) : range;
-  const data = useQuery(api.accounts.get, { id: id as Id<"accounts">, granularity: gran, from: r.from, to: r.to });
-  const payCard = useMutation(api.accounts.payCard);
+  const view = useView();
+  const { resolveId } = useStore();
+  const realId = resolveId(id ?? "");
+  const data = useMemo(() => accountGet(view, realId, gran, r.from, r.to), [view, realId, gran, r.from, r.to]);
+  const payCard = useOp("accounts.payCard");
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
-  if (!data) return <><PageHeader back="/accounts" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Loading…</div></>;
+  if (!data) return <><PageHeader back="/accounts" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Account not found</div></>;
   const a = data.account;
   const nameOf = (key: string) => categoryById.get(key)?.name ?? (key === "none" ? "Uncategorised" : accountName(key));
   return (

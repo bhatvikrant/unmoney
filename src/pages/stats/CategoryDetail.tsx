@@ -1,7 +1,7 @@
+import { useMemo } from "react";
 import { useParams, useSearchParams } from "react-router";
-import { useQuery } from "convex/react";
-import { api } from "../../../convex/_generated/api";
-import type { Id } from "../../../convex/_generated/dataModel";
+import { useView } from "@/lib/store";
+import { statsByCategory, statsTrend, txSearch } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { TrendBars } from "./charts";
@@ -16,10 +16,13 @@ export default function CategoryDetail() {
   const { categoryById, accountName } = useApp();
   const p = useStatPeriod();
   const ranges = p.trailing();
-  const trend = useQuery(api.stats.trend, { type, categoryId: id, ranges: ranges.map(({ key, from, to }) => ({ key, from, to })) });
-  const breakdown = useQuery(api.stats.byCategory, { ...p.range, type });
+  const rangeKey = ranges.map((r) => r.key).join(",");
+  const view = useView();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const trend = useMemo(() => statsTrend(view, type, id, ranges), [view, type, id, rangeKey]);
+  const breakdown = useMemo(() => statsByCategory(view, p.range.from, p.range.to, type), [view, p.range.from, p.range.to, type]);
   const isTransfer = id.startsWith("transfer:");
-  const txs = useQuery(api.transactions.search, !isTransfer && id !== "none" && id !== "fees" ? { from: p.range.from, to: p.range.to, type, categoryIds: [id as Id<"categories">] } : { from: p.range.from, to: p.range.to, type: isTransfer ? "transfer" : type });
+  const txs = useMemo(() => txSearch(view, !isTransfer && id !== "none" && id !== "fees" ? { from: p.range.from, to: p.range.to, type, categoryIds: [id] } : { from: p.range.from, to: p.range.to, type: isTransfer ? "transfer" : type }), [view, isTransfer, id, p.range.from, p.range.to, type]);
   const item = breakdown?.items.find((i) => i.id === id);
   const name = isTransfer ? `Transfer to ${accountName(id.slice(9))}` : categoryById.get(id)?.name ?? item?.name ?? "Category";
   const list = (txs ?? []).filter((t) => !isTransfer || `transfer:${t.toAccountId ?? ""}` === id);

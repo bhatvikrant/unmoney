@@ -1,8 +1,7 @@
+import { useOp } from "@/lib/store";
 import { useState } from "react";
-import { useMutation } from "convex/react";
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -21,10 +20,10 @@ const KINDS: { value: string; label: string }[] = [
 export default function AccountGroupSettings() {
   const { groups, accounts } = useApp();
   const live = groups.filter((g) => !g.deletedAt).sort((a, b) => a.order - b.order);
-  const create = useMutation(api.accountGroups.create);
-  const update = useMutation(api.accountGroups.update);
-  const remove = useMutation(api.accountGroups.remove);
-  const reorder = useMutation(api.accountGroups.reorder);
+  const create = useOp("accountGroups.create");
+  const update = useOp("accountGroups.update");
+  const remove = useOp("accountGroups.remove");
+  const reorder = useOp("accountGroups.reorder");
   const [dialog, setDialog] = useState<null | { id?: Id<"accountGroups">; name: string; kind: string }>(null);
   const move = (i: number, dir: -1 | 1) => { const ids = live.map((g) => g._id); const j = i + dir; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; reorder({ ids }); };
   return (

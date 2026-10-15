@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { useQuery } from "convex/react";
-import { api } from "../../../convex/_generated/api";
+import { useView } from "@/lib/store";
+import { budgetStatus, statsTrend } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { StatsHeaderBar } from "./PeriodBar";
@@ -18,10 +18,13 @@ export default function BudgetPage() {
   const { categoryById } = useApp();
   const p = useStatPeriod();
   const period = p.period === "custom" ? "monthly" : p.period;
-  const status = useQuery(api.budgets.status, { period, key: p.key });
+  const view = useView();
+  const status = useMemo(() => budgetStatus(view, period, p.key), [view, period, p.key]);
   const [detail, setDetail] = useState<{ item: BudgetItem; label: string } | null>(null);
   const ranges = p.trailing();
-  const trend = useQuery(api.stats.trend, detail ? { type: "expense", categoryId: detail.item.budget.categoryId, ranges: ranges.map(({ key, from, to }) => ({ key, from, to })) } : "skip");
+  const rangeKey = ranges.map((r) => r.key).join(",");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const trend = useMemo(() => (detail ? statsTrend(view, "expense", detail.item.budget.categoryId, ranges) : undefined), [view, detail, rangeKey]);
   const label = period === "weekly" ? "Weekly" : period === "yearly" ? "Annual" : "Monthly";
   return (
     <>

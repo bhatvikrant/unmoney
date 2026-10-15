@@ -1,24 +1,21 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { buildCtx, type Ctx as LedgerCtx } from "../../shared/ledger";
+import { type Ctx as LedgerCtx } from "../../shared/ledger";
 import { formatMoney } from "../../shared/money";
+import { dueRepeats } from "../../shared/ops";
+import { todayISO } from "../../shared/dates";
+import { accountsList, categoriesList, currenciesList, groupsList, ledgerOf, type AccountRow, type AccountGroupRow } from "../../shared/views";
+import { useStore, useView } from "./store";
 import { applyTheme } from "./theme";
 
 export type Settings = Doc<"settings">;
-export type AccountRow = ReturnType<typeof useAccountsQuery>["accounts"][number];
-
-function useAccountsQuery() {
-  const data = useQuery(api.accounts.list);
-  return { ...(data ?? { groups: [], accounts: [], assets: 0, liabilities: 0, total: 0 }), loading: data === undefined };
-}
+export type { AccountRow };
 
 type AppData = {
   settings: Settings;
   user: { name?: string; email?: string; image?: string } | null;
   accounts: AccountRow[];
-  accountGroups: ReturnType<typeof useAccountsQuery>["groups"];
+  accountGroups: AccountGroupRow[];
   accountsSummary: { assets: number; liabilities: number; total: number };
   loading: boolean;
   groups: Doc<"accountGroups">[];
@@ -37,10 +34,11 @@ type AppData = {
 const Ctx = createContext<AppData | null>(null);
 
 export function AppDataProvider({ settings, user, children }: { settings: Settings; user: AppData["user"]; children: ReactNode }) {
-  const acc = useAccountsQuery();
-  const groups = useQuery(api.accountGroups.list, { includeDeleted: true }) ?? [];
-  const categories = useQuery(api.categories.list, { includeDeleted: true }) ?? [];
-  const currencies = useQuery(api.currencies.list) ?? [];
+  const view = useView();
+  const acc = useMemo(() => accountsList(view), [view]);
+  const groups = useMemo(() => groupsList(view, true), [view]);
+  const categories = useMemo(() => categoriesList(view, true), [view]);
+  const currencies = useMemo(() => currenciesList(view), [view]);
 
   useEffect(() => {
     applyTheme(settings.theme, settings.accent, settings.colorSet);
@@ -55,7 +53,7 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
     const accountById = new Map(acc.accounts.map((a) => [a._id as string, a]));
     const categoryById = new Map(categories.map((c) => [c._id as string, c]));
     const groupById = new Map(groups.map((g) => [g._id as string, g]));
-    const ledger = buildCtx(acc.accounts, groups, settings);
+    const ledger = ledgerOf(view);
     const fmtBase = { symbol: settings.symbol, symbolPosition: settings.symbolPosition, decimals: settings.decimals };
     return {
       settings,
@@ -63,7 +61,7 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
       accounts: acc.accounts,
       accountGroups: acc.groups,
       accountsSummary: { assets: acc.assets, liabilities: acc.liabilities, total: acc.total },
-      loading: acc.loading,
+      loading: false,
       groups,
       categories,
       currencies,
@@ -84,7 +82,7 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
         return s ? `${c.name} / ${s.name}` : c.name;
       },
     };
-  }, [acc, groups, categories, currencies, settings, user]);
+  }, [acc, groups, categories, currencies, settings, user, view]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -95,9 +93,13 @@ export function useApp(): AppData {
   return v;
 }
 
+/** Add today's scheduled entries on load, locally, so they show even before the server's cron runs. */
 export function useCatchUpRepeats() {
-  const catchUp = useMutation(api.repeats.catchUp);
+  const { dispatch, view } = useStore();
+  const today = todayISO();
+  const due = dueRepeats(view, today).length > 0;
   useEffect(() => {
-    catchUp({}).catch(() => {});
-  }, [catchUp]);
+    if (due) dispatch("repeats.catchUp", { today }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [due, today]);
 }

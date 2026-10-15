@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
+import { useOp, useView } from "@/lib/store";
+import { repeatsList } from "../../../shared/views";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -19,9 +19,10 @@ import { cn } from "@/lib/utils";
 
 export default function RepeatSettings() {
   const { settings, accountName, categoryLabel } = useApp();
-  const list = useQuery(api.repeats.list);
-  const update = useMutation(api.repeats.update);
-  const remove = useMutation(api.repeats.remove);
+  const view = useView();
+  const list = useMemo(() => repeatsList(view), [view]);
+  const update = useOp("repeats.update");
+  const remove = useOp("repeats.remove");
   const [edit, setEdit] = useState<null | { r: Doc<"repeats">; frequency: Doc<"repeats">["frequency"]; endDate: string; nextDate: string; amount: string; note: string; active: boolean }>(null);
   return (
     <>

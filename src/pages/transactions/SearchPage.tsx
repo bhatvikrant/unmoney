@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
 import { SlidersHorizontal, CheckSquare, X } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
+import { useOp, useView } from "@/lib/store";
+import { txSearch, txTags } from "../../../shared/views";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -26,18 +26,19 @@ export default function SearchPage() {
   const [account, setAccount] = useState<string>("any");
   const [category, setCategory] = useState<string>("any");
   const [tag, setTag] = useState<string>("any");
-  const tags = useQuery(api.transactions.tags) ?? [];
+  const view = useView();
+  const tags = useMemo(() => txTags(view), [view]);
   const active = !!(q.trim() || from || to || type !== "any" || account !== "any" || category !== "any" || tag !== "any");
-  const results = useQuery(api.transactions.search, active ? {
+  const results = useMemo(() => active ? txSearch(view, {
     q: q.trim() || undefined, from: from || undefined, to: to || undefined, type: type === "any" ? undefined : type,
-    accountIds: account === "any" ? undefined : [account as Id<"accounts">], categoryIds: category === "any" ? undefined : [category as Id<"categories">], tag: tag === "any" ? undefined : tag,
-  } : "skip");
+    accountIds: account === "any" ? undefined : [account], categoryIds: category === "any" ? undefined : [category], tag: tag === "any" ? undefined : tag,
+  }) : undefined, [view, active, q, from, to, type, account, category, tag]);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [edit, setEdit] = useState<null | "date" | "note" | "delete">(null);
   const [editVal, setEditVal] = useState("");
-  const bulkUpdate = useMutation(api.transactions.bulkUpdate);
-  const bulkRemove = useMutation(api.transactions.bulkRemove);
+  const bulkUpdate = useOp("transactions.bulkUpdate");
+  const bulkRemove = useOp("transactions.bulkRemove");
   const totals = useMemo(() => sumKinds(results ?? [], ledger), [results, ledger]);
 
   const ids = () => [...selected] as Id<"transactions">[];

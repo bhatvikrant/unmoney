@@ -29,6 +29,14 @@ export default defineConfig({
         navigateFallback: "/index.html",
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
         navigateFallbackDenylist: [/^\/api/],
+        runtimeCaching: [
+          {
+            // receipt photos: keep what was seen so they still show offline
+            urlPattern: ({ url }) => /\.convex\.cloud$/.test(url.hostname) && url.pathname.startsWith("/api/storage/"),
+            handler: "CacheFirst",
+            options: { cacheName: "photos", expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 90 } },
+          },
+        ],
       },
     }),
   ],

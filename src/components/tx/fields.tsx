@@ -1,14 +1,20 @@
-import { useRef, useState, type KeyboardEvent } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useQuery } from "convex/react";
 import { Camera, X } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useStore } from "@/lib/store";
+import { isTmpId } from "../../../shared/ops";
 
+/** Photos are queued locally and uploaded when online; the entry keeps a temporary id until then. */
 export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[]; onChange: (ids: Id<"_storage">[]) => void }) {
-  const urls = useQuery(api.files.urls, photoIds.length ? { ids: photoIds } : "skip");
-  const generate = useMutation(api.files.generateUploadUrl);
+  const { enqueueUpload, photoUrl, rememberPhotoUrls, resolveId, status } = useStore();
+  const realIds = useMemo(() => photoIds.map((id) => resolveId(id)).filter((id) => !isTmpId(id)), [photoIds, resolveId]);
+  const fetched = useQuery(api.files.urls, realIds.length && status.connected ? { ids: realIds } : "skip");
+  useEffect(() => { if (fetched) rememberPhotoUrls(fetched); }, [fetched, rememberPhotoUrls]);
+  const urlOf = (id: string) => photoUrl(id) ?? fetched?.[resolveId(id)] ?? undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   async function upload(files: FileList | null) {
@@ -21,14 +27,11 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
       const ids: Id<"_storage">[] = [];
       for (const f of list) {
         if (f.size > 5 * 1024 * 1024) { toast.error(`${f.name} is over 5 MB`); continue; }
-        const url = await generate({});
-        const res = await fetch(url, { method: "POST", headers: { "Content-Type": f.type }, body: f });
-        const { storageId } = await res.json();
-        ids.push(storageId);
+        ids.push(await enqueueUpload(f));
       }
       onChange([...photoIds, ...ids]);
     } catch {
-      toast.error("Upload failed");
+      toast.error("Could not attach the photo");
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -38,7 +41,7 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
     <div className="flex gap-2 flex-wrap items-center">
       {photoIds.map((id) => (
         <div key={id} className="relative size-20 rounded-md overflow-hidden bg-muted">
-          {urls?.[id] ? <img src={urls[id]!} alt="" className="size-full object-cover" /> : null}
+          {urlOf(id) ? <img src={urlOf(id)} alt="" className="size-full object-cover" /> : <div className="size-full flex items-center justify-center text-[10px] text-muted-foreground">{status.connected ? "…" : "offline"}</div>}
           <button type="button" aria-label="Remove photo" onClick={() => onChange(photoIds.filter((x) => x !== id))} className="absolute top-1 right-1 rounded-full bg-black/60 text-white p-0.5"><X className="size-3" /></button>
         </div>
       ))}

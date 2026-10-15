@@ -1,8 +1,8 @@
 import { useNavigate } from "react-router";
-import { useMutation } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { ChevronRight } from "lucide-react";
-import { api } from "../../../convex/_generated/api";
+import { useOp, useStore } from "@/lib/store";
+import { SyncStatusRow } from "@/components/shell/SyncStatus";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -15,8 +15,15 @@ import { Avatar } from "@/components/shell/Avatar";
 export default function SettingsPage() {
   const nav = useNavigate();
   const { settings: s, user } = useApp();
-  const update = useMutation(api.settings.update);
+  const update = useOp("settings.update");
+  const { status, clearLocal } = useStore();
   const { signOut } = useAuthActions();
+  async function onSignOut() {
+    if (status.pending > 0 && !window.confirm(`${status.pending} change${status.pending === 1 ? " has" : "s have"} not reached the server yet and will be lost if you sign out now. Sign out anyway?`)) return;
+    clearUnlock();
+    await clearLocal();
+    await signOut();
+  }
   const link = (label: string, to: string, value?: string, info?: string) => <Row label={label} value={value} info={info} onClick={() => nav(to)} right={<ChevronRight className="size-4 text-muted-foreground" />} />;
   return (
     <>
@@ -26,8 +33,9 @@ export default function SettingsPage() {
           <Row
             label={<span className="flex items-center gap-3"><Avatar seed={user?.email || user?.name || ""} src={user?.image} size={44} /><span className="min-w-0 truncate font-medium">{user?.name || user?.email || "Signed in"}</span></span>}
             hint={user?.name ? <span className="pl-14">{user.email}</span> : undefined}
-            right={<Button variant="outline" size="sm" onClick={() => { clearUnlock(); signOut(); }}>Sign out</Button>}
+            right={<Button variant="outline" size="sm" onClick={onSignOut}>Sign out</Button>}
           />
+          <SyncStatusRow />
         </Section>
         <Section title="Money">
           {link("Main currency", "/settings/currency", s.mainCurrency)}
@@ -64,7 +72,7 @@ export default function SettingsPage() {
         <Section title="Data">
           {link("Backup, restore, import & export", "/settings/backup")}
         </Section>
-        <p className="px-4 pt-6 text-xs text-muted-foreground">unmoney · synced across your devices · install it from your browser's share or menu button to use it like an app.</p>
+        <p className="px-4 pt-6 text-xs text-muted-foreground">unmoney · works offline and syncs across your devices · install it from your browser's share or menu button to use it like an app.</p>
       </Page>
     </>
   );

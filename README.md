@@ -1,6 +1,6 @@
 # unmoney
 
-A web rebuild of Money Manager (Realbyte) with every feature unlocked and no paywall. Installable as a PWA, synced across devices through Convex.
+A web rebuild of Money Manager (Realbyte) with every feature unlocked and no paywall. Installable as a PWA, works fully offline, and syncs across devices through Convex.
 
 ## Stack
 
@@ -75,6 +75,22 @@ npx convex env set --prod AUTH_GOOGLE_SECRET <client secret>
 ```
 
 (For the dev deployment use the same steps without `--prod` and the `fortunate-bass-165.convex.site` redirect URI.)
+
+## Offline
+
+The app never waits for the network. Every screen renders from a local copy of your data in IndexedDB, and every add, edit or delete is applied to that copy immediately and queued. The queue is sent to Convex whenever the connection is up; the sidebar (desktop) and the dot on the **More** tab (phone) show "Offline", "Syncing" or "Synced", and Settings › Sync has the details.
+
+How it fits together:
+
+- `shared/ops.ts` is the single source of truth for writes: a catalogue of ops (`transactions.create`, `accounts.update`, …) and a pure reducer that applies one to a snapshot of a user's documents. The browser runs it on the local copy; `convex/sync.ts` runs the same reducer on the real documents and writes the difference. New documents get deterministic temporary ids (`tmp_<opId>_<n>`) on both sides, and the server reports the real id each one received.
+- `shared/views.ts` holds the read models (ledger, stats, budgets, search, exports) as pure functions over that snapshot, so nothing needs a server query.
+- `src/lib/store.tsx` keeps the replica, the queue and the id map in IndexedDB (`src/lib/db.ts`), streams the server's tables with `sync.table` subscriptions, replays queued ops on top, and drains the queue in order with the idempotent `sync.apply` mutation (`syncOps` table). A rejected op (for example a category deleted on another device meanwhile) is undone locally and reported in a toast.
+- Receipt photos are queued too: the file is kept in IndexedDB and uploaded when online. Photos already seen are cached by the service worker.
+- The service worker (`vite-plugin-pwa`) precaches the app shell, so the app opens with no connection at all. The first load on a new device, signing in, and creating an account still need a connection.
+
+Conflicts are resolved last-writer-wins per op: two devices editing the same entry offline end up with whichever synced last.
+
+To try it: build (`npm run build`), serve `dist/` (`npm run preview`), open it once signed in, then switch the browser to offline in DevTools (Network › Offline) or turn off Wi-Fi, reload, and keep using the app.
 
 ## Layout
 

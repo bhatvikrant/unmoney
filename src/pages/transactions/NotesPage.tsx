@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "../../../convex/_generated/api";
+import { useOp, useView } from "@/lib/store";
+import { notesRange } from "../../../shared/views";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useMonthParam } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
@@ -19,9 +19,10 @@ import { todayISO } from "../../../shared/dates";
 export default function NotesPage() {
   const { month, range, shift } = useMonthParam();
   const [sp, setSp] = useSearchParams();
-  const notes = useQuery(api.notes.listRange, range);
-  const upsert = useMutation(api.notes.upsert);
-  const remove = useMutation(api.notes.remove);
+  const view = useView();
+  const notes = useMemo(() => notesRange(view, range.from, range.to), [view, range.from, range.to]);
+  const upsert = useOp("notes.upsert");
+  const remove = useOp("notes.remove");
   const [editing, setEditing] = useState<{ id?: Id<"notes">; date: string; text: string; color: string } | null>(null);
 
   useEffect(() => {

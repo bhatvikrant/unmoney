@@ -168,6 +168,16 @@ export default defineSchema({
     color: v.string(),
   }).index("by_user_date", ["userId", "date"]),
 
+  /** Ops the client has synced, for idempotent retries. */
+  syncOps: defineTable({
+    userId: v.id("users"),
+    opId: v.string(),
+    kind: v.string(),
+    status: v.union(v.literal("applied"), v.literal("rejected")),
+    error: v.optional(v.string()),
+    idMap: v.optional(v.record(v.string(), v.string())),
+  }).index("by_user_op", ["userId", "opId"]),
+
   currencies: defineTable({
     userId: v.id("users"),
     code: v.string(),

@@ -1,8 +1,7 @@
+import { useOp } from "@/lib/store";
 import { useMemo, useState } from "react";
-import { useMutation } from "convex/react";
 import { ArrowDown, ArrowUp, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { CURRENCIES } from "../../../shared/currencies";
@@ -17,11 +16,11 @@ import { BottomSheet } from "@/components/shell/BottomSheet";
 
 export default function SubCurrencySettings() {
   const { settings: s, currencies } = useApp();
-  const add = useMutation(api.currencies.add);
-  const update = useMutation(api.currencies.update);
-  const remove = useMutation(api.currencies.remove);
-  const reorder = useMutation(api.currencies.reorder);
-  const setRates = useMutation(api.currencies.setRates);
+  const add = useOp("currencies.add");
+  const update = useOp("currencies.update");
+  const remove = useOp("currencies.remove");
+  const reorder = useOp("currencies.reorder");
+  const setRates = useOp("currencies.setRates");
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState("");
   const [custom, setCustom] = useState<null | { code: string; name: string; symbol: string; rate: string; decimals: string }>(null);

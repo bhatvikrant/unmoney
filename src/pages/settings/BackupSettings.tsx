@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { useConvex, useMutation } from "convex/react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
+import { useOp, useView } from "@/lib/store";
+import { backupExport, txExportRows } from "../../../shared/views";
+import type { BackupData } from "../../../shared/ops";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -12,11 +13,11 @@ import { downloadText, mapImportRow, parseTable, toCSV } from "@/lib/csv";
 import { toMajor } from "../../../shared/money";
 
 export default function BackupSettings() {
-  const convex = useConvex();
+  const view = useView();
   const { settings } = useApp();
-  const restore = useMutation(api.backup.restore);
-  const importRows = useMutation(api.transactions.importRows);
-  const wipe = useMutation(api.backup.wipeAll);
+  const restore = useOp("backup.restore");
+  const importRows = useOp("transactions.importRows");
+  const wipe = useOp("backup.wipeAll");
   const restoreRef = useRef<HTMLInputElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<null | { rows: ReturnType<typeof mapImportRow>[]; headers: string[] }>(null);
@@ -25,11 +26,11 @@ export default function BackupSettings() {
   const [busy, setBusy] = useState(false);
 
   async function exportJSON() {
-    const data = await convex.query(api.backup.exportAll, {});
+    const data = backupExport(view);
     downloadText(`unmoney-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 1), "application/json");
   }
   async function exportCSV(delim: "," | "\t") {
-    const rows = await convex.query(api.transactions.exportAll, {});
+    const rows = txExportRows(view);
     const csv = toCSV(rows.map((r) => ({ Date: r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note, Amount: toMajor(Number(r.amount), settings.decimals), "Income/Expense": r.type, Description: r.description, "Amount Sub": r.subAmount === "" ? "" : r.subAmount, Currency: r.subCurrency, Fee: r.fee === "" ? "" : toMajor(Number(r.fee), settings.decimals), Tags: r.tags })), delim);
     downloadText(`unmoney-transactions.${delim === "," ? "csv" : "tsv"}`, csv, delim === "," ? "text/csv" : "text/tab-separated-values");
   }
@@ -37,7 +38,7 @@ export default function BackupSettings() {
     if (!file) return;
     if (!window.confirm("Restore replaces ALL current data with the backup. Continue?")) return;
     setBusy(true);
-    try { await restore({ data: JSON.parse(await file.text()) }); toast.success("Restored"); }
+    try { await restore({ data: JSON.parse(await file.text()) as BackupData }); toast.success("Restored"); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Restore failed"); }
     setBusy(false);
     if (restoreRef.current) restoreRef.current.value = "";

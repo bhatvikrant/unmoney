@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { useMutation, useQuery } from "convex/react";
 import { ArrowDown, ArrowUp, Pencil, Trash2 } from "lucide-react";
-import { api } from "../../../convex/_generated/api";
+import { useOp, useView } from "@/lib/store";
+import { bookmarksList } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,10 @@ import { cn } from "@/lib/utils";
 export default function BookmarksPage() {
   const nav = useNavigate();
   const { accountName, categoryLabel } = useApp();
-  const list = useQuery(api.bookmarks.list);
-  const remove = useMutation(api.bookmarks.remove);
-  const reorder = useMutation(api.bookmarks.reorder);
+  const view = useView();
+  const list = useMemo(() => bookmarksList(view), [view]);
+  const remove = useOp("bookmarks.remove");
+  const reorder = useOp("bookmarks.reorder");
   const [edit, setEdit] = useState(false);
   const move = (i: number, dir: -1 | 1) => {
     if (!list) return;

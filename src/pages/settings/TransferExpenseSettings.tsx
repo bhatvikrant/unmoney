@@ -1,13 +1,12 @@
-import { useMutation } from "convex/react";
-import { api } from "../../../convex/_generated/api";
+import { useOp } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Switch } from "@/components/ui/switch";
 
 export default function TransferExpenseSettings() {
   const { accountGroups } = useApp();
-  const update = useMutation(api.accounts.update);
-  const setHidden = useMutation(api.accounts.setHidden);
+  const update = useOp("accounts.update");
+  const setHidden = useOp("accounts.setHidden");
   return (
     <>
       <PageHeader back="/settings" title="Account settings" />

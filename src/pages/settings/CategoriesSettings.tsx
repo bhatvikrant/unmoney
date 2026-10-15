@@ -1,8 +1,7 @@
+import { useOp } from "@/lib/store";
 import { useState } from "react";
-import { useMutation } from "convex/react";
 import { ArrowDown, ArrowUp, Plus, Pencil, Trash2, CornerDownRight } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -16,10 +15,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 export default function CategoriesSettings() {
   const { categories } = useApp();
   const [type, setType] = useState<"expense" | "income">("expense");
-  const create = useMutation(api.categories.create);
-  const update = useMutation(api.categories.update);
-  const remove = useMutation(api.categories.remove);
-  const reorder = useMutation(api.categories.reorder);
+  const create = useOp("categories.create");
+  const update = useOp("categories.update");
+  const remove = useOp("categories.remove");
+  const reorder = useOp("categories.reorder");
   const live = categories.filter((c) => c.type === type && !c.deletedAt);
   const mains = live.filter((c) => !c.parentId);
   const subsOf = (id: string) => live.filter((c) => c.parentId === id);

@@ -1,8 +1,7 @@
+import { useOp } from "@/lib/store";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { useMutation } from "convex/react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -35,9 +34,9 @@ export default function AccountEditor() {
   }), [existing, liveGroups, settings.decimals]);
   const [f, setF] = useState(initial);
   const [confirm, setConfirm] = useState(false);
-  const create = useMutation(api.accounts.create);
-  const update = useMutation(api.accounts.update);
-  const remove = useMutation(api.accounts.remove);
+  const create = useOp("accounts.create");
+  const update = useOp("accounts.update");
+  const remove = useOp("accounts.remove");
   const kind = groups.find((g) => g._id === f.groupId)?.kind;
   const transferable = kind && !["cash", "bank", "card", "debitCard"].includes(kind);
   const others = accounts.filter((a) => a._id !== id && a.kind !== "card" && a.kind !== "debitCard");

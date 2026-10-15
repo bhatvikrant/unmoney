@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { useQuery } from "convex/react";
-import { api } from "../../../convex/_generated/api";
+import { useView } from "@/lib/store";
+import { statsByCategory, statsTrend } from "../../../shared/views";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { StatsHeaderBar } from "./PeriodBar";
 import { useStatPeriod } from "./period";
@@ -14,11 +14,14 @@ export default function StatsPage() {
   const p = useStatPeriod();
   const [type, setType] = useState<"income" | "expense">("expense");
   const [mode, setMode] = useState<"list" | "trend">("list");
-  const expense = useQuery(api.stats.byCategory, { ...p.range, type: "expense" });
-  const income = useQuery(api.stats.byCategory, { ...p.range, type: "income" });
+  const view = useView();
+  const expense = useMemo(() => statsByCategory(view, p.range.from, p.range.to, "expense"), [view, p.range.from, p.range.to]);
+  const income = useMemo(() => statsByCategory(view, p.range.from, p.range.to, "income"), [view, p.range.from, p.range.to]);
   const data = type === "expense" ? expense : income;
   const ranges = p.trailing();
-  const trend = useQuery(api.stats.trend, mode === "trend" ? { type, ranges: ranges.map(({ key, from, to }) => ({ key, from, to })) } : "skip");
+  const rangeKey = ranges.map((r) => r.key).join(",");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const trend = useMemo(() => (mode === "trend" ? statsTrend(view, type, undefined, ranges) : undefined), [view, type, mode, rangeKey]);
   return (
     <>
       <PageHeader title={null} className="border-b-0" sub={<StatsHeaderBar />} />

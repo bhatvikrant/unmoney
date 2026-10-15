@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router";
-import { Authenticated, AuthLoading, Unauthenticated, useQuery } from "convex/react";
-import { api } from "../convex/_generated/api";
+import { useConvexAuth } from "@convex-dev/auth/react";
 import { AppDataProvider } from "@/lib/app";
+import { useStore } from "@/lib/store";
+import { settingsOf } from "../shared/views";
 import { isLocked } from "@/lib/passcode";
 import SignIn from "@/pages/auth/SignIn";
 import Onboarding from "@/pages/auth/Onboarding";
@@ -34,21 +35,31 @@ import AccountGroupSettings from "@/pages/settings/AccountGroupSettings";
 import DeletedAccounts from "@/pages/settings/DeletedAccounts";
 import TransferExpenseSettings from "@/pages/settings/TransferExpenseSettings";
 
-function Splash() {
-  return <div className="min-h-dvh flex items-center justify-center text-sm text-muted-foreground">Loading…</div>;
+function Splash({ text = "Loading…" }: { text?: string }) {
+  return <div className="min-h-dvh flex items-center justify-center text-sm text-muted-foreground">{text}</div>;
+}
+
+/** First load on this device needs the server once; after that the local copy is used. */
+function FirstFetch() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 4000);
+    return () => clearTimeout(t);
+  }, []);
+  return <Splash text={slow ? "Connecting… unmoney needs a connection the first time it loads on a device." : "Loading your data…"} />;
 }
 
 function Gate() {
-  const data = useQuery(api.settings.get);
+  const { view, user } = useStore();
+  const settings = settingsOf(view);
   const [unlocked, setUnlocked] = useState(false);
-  if (data === undefined) return <Splash />;
-  if (!data.settings?.onboarded) return <Onboarding />;
-  const s = data.settings;
+  if (!settings?.onboarded) return <Onboarding />;
+  const s = settings;
   if (s.passcodeHash && s.passcodeSalt && !unlocked && isLocked(s.lockAfter)) {
     return <Lock hash={s.passcodeHash} salt={s.passcodeSalt} onUnlock={() => setUnlocked(true)} />;
   }
   return (
-    <AppDataProvider settings={s} user={data.user}>
+    <AppDataProvider settings={s} user={user}>
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<TransactionsPage />} />
@@ -86,11 +97,16 @@ function Gate() {
 }
 
 export default function App() {
-  return (
-    <>
-      <AuthLoading><Splash /></AuthLoading>
-      <Unauthenticated><SignIn /></Unauthenticated>
-      <Authenticated><Gate /></Authenticated>
-    </>
-  );
+  const { ready, hasLocal, status } = useStore();
+  const { isLoading, isAuthenticated } = useConvexAuth();
+  if (!ready) return <Splash />;
+  // A copy of the ledger on this device: use it, whatever the network is doing.
+  if (hasLocal) {
+    if (!isAuthenticated && !isLoading) return <SignIn />;
+    return <Gate />;
+  }
+  if (isLoading) return <Splash />;
+  if (!isAuthenticated) return <SignIn />;
+  if (!status.live) return <FirstFetch />;
+  return <Gate />;
 }

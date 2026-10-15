@@ -1,7 +1,6 @@
+import { useOp } from "@/lib/store";
 import { useMemo, useState } from "react";
-import { useMutation } from "convex/react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
 import { useApp } from "@/lib/app";
 import { CURRENCIES } from "../../../shared/currencies";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -14,8 +13,8 @@ import { cn } from "@/lib/utils";
 
 export default function CurrencySettings() {
   const { settings: s, fmt } = useApp();
-  const update = useMutation(api.settings.update);
-  const change = useMutation(api.settings.changeMainCurrency);
+  const update = useOp("settings.update");
+  const change = useOp("settings.changeMainCurrency");
   const [q, setQ] = useState("");
   const [picking, setPicking] = useState<string | null>(null);
   const list = useMemo(() => { const l = q.toLowerCase(); return CURRENCIES.filter((c) => c.code !== s.mainCurrency && (!l || c.code.toLowerCase().includes(l) || c.name.toLowerCase().includes(l))); }, [q, s.mainCurrency]);

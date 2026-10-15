@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { useMutation, useQuery } from "convex/react";
 import { ArrowLeftRight, Calculator, Globe, Repeat, Star, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../../convex/_generated/api";
-import type { FunctionReturnType } from "convex/server";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { useOp, useStore, useView } from "@/lib/store";
+import { bookmarksList, noteSuggestions, txGet, txTags, type TxDetail } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { todayISO } from "../../../shared/dates";
 import { evaluateExpression, toMajor, toMinor } from "../../../shared/money";
@@ -48,8 +47,11 @@ type Form = {
 export default function TransactionEditor() {
   const { id } = useParams();
   const [sp] = useSearchParams();
-  const existing = useQuery(api.transactions.get, id ? { id: id as Id<"transactions"> } : "skip");
-  const bookmarks = useQuery(api.bookmarks.list, sp.get("bookmark") ? {} : "skip");
+  const view = useView();
+  const { resolveId } = useStore();
+  const realId = id ? resolveId(id) : undefined;
+  const existing = useMemo(() => (realId ? txGet(view, realId) : undefined), [view, realId]);
+  const bookmarks = useMemo(() => (sp.get("bookmark") ? bookmarksList(view) : undefined), [view, sp]);
   const { settings, accounts, currencies } = useApp();
 
   const initial = useMemo<Form | null>(() => {
@@ -109,11 +111,11 @@ export default function TransactionEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, existing, bookmarks, sp]);
 
-  if (!initial) return <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>;
-  return <Editor key={id ?? "new"} initial={initial} id={id as Id<"transactions"> | undefined} existing={existing ?? undefined} />;
+  if (!initial) return <div className="p-8 text-center text-sm text-muted-foreground">{id ? "Entry not found" : "Loading…"}</div>;
+  return <Editor key={realId ?? "new"} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} />;
 }
 
-type Existing = NonNullable<FunctionReturnType<typeof api.transactions.get>>;
+type Existing = TxDetail;
 
 function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transactions">; existing?: Existing }) {
   const nav = useNavigate();
@@ -125,16 +127,15 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<null | "delete" | "copy" | "scope">(null);
 
-  const create = useMutation(api.transactions.create);
-  const update = useMutation(api.transactions.update);
-  const remove = useMutation(api.transactions.remove);
-  const copy = useMutation(api.transactions.copy);
-  const addBookmark = useMutation(api.bookmarks.create);
-  const tagList = useQuery(api.transactions.tags) ?? [];
-  const suggestions = useQuery(
-    api.transactions.noteSuggestions,
-    settings.autocompleteEnabled && noteFocus && f.type !== "transfer" ? { q: f.note, type: f.type } : "skip",
-  );
+  const view = useView();
+  const create = useOp("transactions.create");
+  const update = useOp("transactions.update");
+  const remove = useOp("transactions.remove");
+  const copy = useOp("transactions.copy");
+  const addBookmark = useOp("bookmarks.create");
+  const tagList = useMemo(() => txTags(view), [view]);
+  const wantSuggestions = settings.autocompleteEnabled && noteFocus && f.type !== "transfer";
+  const suggestions = useMemo(() => (wantSuggestions ? noteSuggestions(view, f.note, f.type) : undefined), [view, wantSuggestions, f.note, f.type]);
 
   const sub = f.subCurrency ? currencies.find((c) => c.code === f.subCurrency) : undefined;
   const mainMajor = useMemo(() => {
