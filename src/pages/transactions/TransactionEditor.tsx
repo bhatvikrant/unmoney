@@ -236,12 +236,11 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
 
         <div className="divide-y border-y bg-card">
           <Field label="Date">
-            <div className="flex items-center gap-2 flex-1">
-              <Input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} className="h-8 w-auto" />
-              {settings.timeInputEnabled ? <Input type="time" value={f.time} onChange={(e) => set("time", e.target.value)} className="h-8 w-auto" /> : null}
-              <span className="flex-1" />
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <Input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} className="h-8 w-auto min-w-0 flex-[3] px-2" />
+              {settings.timeInputEnabled ? <Input type="time" value={f.time} onChange={(e) => set("time", e.target.value)} className="h-8 w-auto min-w-0 flex-[2] px-2" /> : null}
               {!isEdit ? (
-                <button type="button" onClick={() => setSheet("repeat")} className={cn("flex flex-col items-center text-[10px] text-muted-foreground px-1", f.repeat.kind !== "none" && "text-primary")}>
+                <button type="button" onClick={() => setSheet("repeat")} className={cn("flex flex-col items-center shrink-0 text-[10px] text-muted-foreground px-1", f.repeat.kind !== "none" && "text-primary")}>
                   <Repeat className="size-4" />
                   <span className="max-w-24 truncate">{f.repeat.kind === "none" ? "Repeat" : repeatLabel(f.repeat)}</span>
                 </button>
@@ -269,13 +268,11 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
             <div className="flex-1 flex items-center gap-2">
               {sub ? (
                 <>
-                  <span className="text-xs text-muted-foreground w-10 shrink-0">{sub.code}</span>
-                  <Input inputMode="decimal" value={f.subAmount} onChange={(e) => set("subAmount", e.target.value)} placeholder="0" className="h-8 tabular" />
+                  <PrefixedInput prefix={sub.code} inputMode="decimal" value={f.subAmount} onChange={(e) => set("subAmount", e.target.value)} placeholder="0" />
                 </>
               ) : (
                 <>
-                  <span className="text-xs text-muted-foreground w-10 shrink-0 truncate">{settings.symbol}</span>
-                  <Input inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" className="h-8 tabular" onBlur={() => { const v = evaluateExpression(f.amount); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", String(v)); }} />
+                  <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", String(v)); }} />
                 </>
               )}
               <Button variant="ghost" size="icon" className="size-8" aria-label="Calculator" onClick={() => setSheet("keypad")}><Calculator className="size-4" /></Button>
@@ -285,8 +282,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           {sub ? (
             <Field label="Converted">
               <div className="flex-1 flex items-center gap-2 text-sm">
-                <span className="text-xs text-muted-foreground w-10 shrink-0 truncate">{settings.symbol}</span>
-                <Input inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value); const s = evaluateExpression(f.subAmount); if (m && s) set("rate", s / m); }} className="h-8 tabular" />
+                <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value); const s = evaluateExpression(f.subAmount); if (m && s) set("rate", s / m); }} />
                 <span className="text-xs text-muted-foreground whitespace-nowrap">1 {settings.mainCurrency} = {f.rate ? (Math.round(f.rate * 10000) / 10000) : "?"} {sub.code}</span>
               </div>
             </Field>
@@ -333,7 +329,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
 
         <div className="mt-3 border-y bg-card divide-y">
           <div className="px-4 py-2">
-            <Textarea value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="Description" className="min-h-16 border-0 px-0 shadow-none focus-visible:ring-0 resize-none" />
+            <Textarea value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="Description" className="min-h-16 resize-none" />
           </div>
           <div className="px-4 py-2"><TagInput tags={f.tags} onChange={(t) => set("tags", t)} suggestions={tagList.map((t) => t.tag)} /></div>
           <div className="px-4 py-3"><PhotoField photoIds={f.photoIds} onChange={(ids) => set("photoIds", ids)} /></div>
@@ -416,6 +412,15 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+function PrefixedInput({ prefix, className, ...props }: React.ComponentProps<typeof Input> & { prefix: string }) {
+  return (
+    <div className="relative flex-1 min-w-0">
+      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{prefix}</span>
+      <Input {...props} className={cn("h-8 tabular", prefix.length > 1 ? "pl-11" : "pl-7", className)} />
+    </div>
   );
 }
 
