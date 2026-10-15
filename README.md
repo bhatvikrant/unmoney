@@ -50,7 +50,10 @@ npm i -g vercel && vercel login && vercel link       # Vercel project "unmoney"
 npx convex deployment token create vercel --prod    # prints a prod deploy key
 vercel env add CONVEX_DEPLOY_KEY production         # paste that key
 vercel deploy --prod
+vercel git connect                                  # link github.com/bhatvikrant/unmoney
 ```
+
+The Vercel project is connected to the GitHub repo, so every push to `main` builds and deploys to production; other branches get preview deployments.
 
 `vercel.json` sets the build command to `npx convex deploy --cmd 'npm run build'`, so every Vercel build pushes `convex/` to production and bakes the production `VITE_CONVEX_URL` into the bundle (it needs `CONVEX_DEPLOY_KEY` in the Vercel env). It also rewrites every path to `index.html` so React Router deep links work.
 
