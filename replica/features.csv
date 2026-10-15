@@ -1,0 +1,95 @@
+feature,area,priority,original,clone,notes
+Sign in with email or Google,onboarding,must,yes,yes,Convex Auth
+Pick main currency on first run,onboarding,must,yes,yes,symbol position and decimals
+Default account groups and accounts seeded,onboarding,must,yes,yes,Cash / Accounts / Card
+Default income and expense categories seeded,onboarding,must,yes,yes,Food Social Life Pets Transport Culture Household Apparel Beauty Health Education Gift Other; Allowance Salary Petty cash Bonus Other
+Add income,transactions,must,yes,yes,
+Add expense,transactions,must,yes,yes,
+Add transfer between accounts,transactions,must,yes,yes,
+Transfer fee recorded as expense,transactions,must,yes,yes,
+Swap From and To on a transfer,transactions,should,yes,yes,
+Edit and delete a transaction,transactions,must,yes,yes,
+Copy a transaction (today or original date),transactions,should,yes,yes,
+Continue button to add several entries in a row,transactions,should,yes,yes,
+Calculator keypad for amount,transactions,must,yes,yes,
+Negative amount for rebates,transactions,should,yes,yes,
+Note field with autocomplete,transactions,must,yes,yes,
+Description field,transactions,must,yes,yes,
+Attach photos to a transaction,transactions,must,yes,yes,Convex file storage
+Tags on transactions,transactions,should,yes,yes,added 2026
+Optional time on transactions,transactions,should,yes,yes,
+Daily ledger grouped by day,views,must,yes,yes,
+Calendar month view with per-day totals,views,must,yes,yes,
+Weekly view,views,must,yes,yes,
+Monthly view,views,must,yes,yes,
+Summary (Total) view with budget and account-type totals,views,must,yes,yes,
+Month navigation and swipe,views,must,yes,yes,
+Custom monthly start date,settings,must,yes,yes,
+Custom weekly start day,settings,must,yes,yes,
+Carry-over of monthly balance,settings,should,yes,yes,
+Start screen Daily or Calendar,settings,could,yes,yes,
+Search by keyword with autocomplete,search,must,yes,yes,
+Search by period account category tag,search,must,yes,yes,
+Bulk select and edit dates notes or delete,search,should,yes,yes,
+Filter ledger by accounts and categories,filter,must,yes,yes,
+Bookmarks for frequent entries,bookmarks,must,yes,yes,
+Reorder and delete bookmarks,bookmarks,should,yes,yes,
+Repeat schedule (daily weekly biweekly monthly yearly),repeat,must,yes,yes,
+Installment plan over N months,repeat,must,yes,yes,
+Repeat appears on date or first of month,repeat,should,yes,yes,
+Edit and delete repeat settings,repeat,must,yes,yes,
+Daily notes with colour,notes,should,yes,yes,
+Stats pie chart by category,stats,must,yes,yes,
+Stats period weekly monthly yearly custom,stats,must,yes,yes,
+Stats list and trend modes,stats,should,yes,yes,
+Category detail with monthly trend,stats,must,yes,yes,
+Budget per category with today marker,budget,must,yes,yes,
+Total budget,budget,must,yes,yes,
+Per-month budget override,budget,should,yes,yes,
+Default budget applies from next month,budget,should,yes,yes,
+Weekly and annual budgets,budget,should,yes,yes,
+Budget detail chart,budget,should,yes,yes,
+Accounts tab with assets liabilities total,accounts,must,yes,yes,
+Account groups,accounts,must,yes,yes,
+Add edit delete accounts,accounts,must,yes,yes,
+Unlimited accounts,accounts,must,paid,yes,free here
+Hide accounts,accounts,should,yes,yes,
+Exclude account from totals,accounts,should,yes,yes,
+Reorder accounts and groups,accounts,should,yes,yes,
+Collapse account groups,accounts,could,yes,yes,
+Deleted accounts restore,accounts,should,yes,yes,
+Account detail with balance trend,accounts,must,yes,yes,
+Account detail daily monthly annual views,accounts,should,yes,yes,
+Loans and overdrafts as liabilities,accounts,must,yes,yes,
+Transfer as expense per account,accounts,should,yes,yes,
+Credit card with billing account settlement and payment day,cards,must,yes,yes,
+Balance payable and outstanding balance,cards,must,yes,yes,
+Pay card button creates transfer,cards,must,yes,yes,
+Debit card linked to bank account,cards,must,yes,yes,
+Card expense display at time or lump sum,cards,could,yes,yes,
+Subcategories,categories,must,yes,yes,
+Category management add edit reorder delete,categories,must,yes,yes,
+Promote subcategory to main,categories,could,yes,yes,
+Sub currencies with manual rate,currency,must,yes,yes,
+Custom currency (gold BTC),currency,should,yes,yes,
+Edit rate and converted amount on entry,currency,should,yes,yes,
+Refresh rates in one go,currency,could,yes,yes,
+Change main currency keeping data,currency,should,yes,yes,
+Passcode lock,security,must,yes,yes,
+Light dark system theme,style,must,yes,yes,
+Accent colour themes,style,could,yes,yes,
+Income expense colour set swap,style,could,yes,yes,
+Export to Excel CSV,data,must,yes,yes,
+Import bulk TSV CSV,data,must,yes,yes,
+Backup and restore full data,data,must,yes,yes,JSON
+Export photos,data,could,yes,yes,
+Multi-device sync,data,must,paid,yes,free via Convex
+Desktop editing view (PC Manager),data,must,paid,yes,responsive desktop layout
+Installable PWA,platform,must,no,yes,replaces native apps
+Home screen widgets,platform,could,yes,skip,no web equivalent
+SMS capture,platform,could,yes,skip,Android only
+Cloud drive backup,platform,could,yes,skip,file download instead
+Ads,monetisation,could,yes,skip,none
+Paid tier,monetisation,could,yes,skip,none
+Referral program,monetisation,could,yes,skip,none
+Data Sync subscription,monetisation,could,yes,skip,sync is free
