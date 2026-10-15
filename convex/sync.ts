@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { loadTable, runOps, type OpOutcome } from "./lib/snapshot";
 import { TABLES, type Op, type OpKind } from "../shared/ops";
 
@@ -61,5 +62,20 @@ export const apply = mutation({
       }
     }
     return results;
+  },
+});
+
+/** A client only resends ops it has not seen acknowledged, so a month of history is plenty. */
+const SYNC_OP_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const PRUNE_BATCH = 500;
+
+/** Daily cron: delete syncOps rows older than the TTL, a batch at a time, rescheduling until done. */
+export const pruneSyncOps = internalMutation({
+  args: { cutoff: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const cutoff = args.cutoff ?? Date.now() - SYNC_OP_TTL_MS;
+    const old = await ctx.db.query("syncOps").withIndex("by_creation_time", (q) => q.lt("_creationTime", cutoff)).take(PRUNE_BATCH);
+    for (const row of old) await ctx.db.delete(row._id);
+    if (old.length === PRUNE_BATCH) await ctx.scheduler.runAfter(0, internal.sync.pruneSyncOps, { cutoff });
   },
 });
