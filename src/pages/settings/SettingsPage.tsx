@@ -72,12 +72,12 @@ export default function SettingsPage() {
             <Select value={s.repeatDisplay} onValueChange={(v) => update({ patch: { repeatDisplay: v as "onDate" | "firstOfMonth" } })}><SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="onDate">On the date</SelectItem><SelectItem value="firstOfMonth">First of month</SelectItem></SelectContent></Select>
           } />
           {link("Style", "/settings/style")}
-          {link("Passcode", "/settings/passcode", s.passcodeHash ? "On" : "Off", "Asks for a code each time you open unmoney on this device. It protects the screen only; your data is still tied to your sign-in.")}
+          {link("Passcode", "/settings/passcode", s.passcodeHash ? "On" : "Off", "Asks for a code each time you open UnMoney on this device. It protects the screen only; your data is still tied to your sign-in.")}
         </Section>
         <Section title="Data">
           {link("Backup, restore, import & export", "/settings/backup")}
         </Section>
-        <p className="px-4 pt-6 text-xs text-muted-foreground">unmoney · works offline and syncs across your devices.</p>
+        <p className="px-4 pt-6 text-xs text-muted-foreground">UnMoney · works offline and syncs across your devices.</p>
       </Page>
     </>
   );

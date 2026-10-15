@@ -262,7 +262,7 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
         Amount: toMajor(Number(r.amount), settings.decimals), "Income/Expense": r.type, Description: r.description,
         "Amount Sub": r.subAmount, Currency: r.subCurrency, Fee: r.fee === "" ? "" : toMajor(Number(r.fee), settings.decimals), Tags: r.tags,
       })));
-      downloadText(`unmoney-${month}.csv`, csv, "text/csv");
+      downloadText(`UnMoney-${month}.csv`, csv, "text/csv");
     } catch { toast.error("Export failed"); }
   }
 

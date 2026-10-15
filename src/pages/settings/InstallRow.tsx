@@ -16,7 +16,7 @@ const steps = {
   ],
 };
 
-/** "Install app" in Settings; hidden once unmoney is running as an installed app. */
+/** "Install app" in Settings; hidden once UnMoney is running as an installed app. */
 export function InstallRow() {
   const state = useInstallState();
   const [open, setOpen] = useState(false);
@@ -34,7 +34,7 @@ export function InstallRow() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Install unmoney</DialogTitle>
+            <DialogTitle>Install UnMoney</DialogTitle>
             <DialogDescription>It then opens from your home screen like any other app, and works without a connection.</DialogDescription>
           </DialogHeader>
           <ol className="space-y-3">

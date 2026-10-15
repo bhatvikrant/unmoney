@@ -46,7 +46,7 @@ function FirstFetch() {
     const t = setTimeout(() => setSlow(true), 4000);
     return () => clearTimeout(t);
   }, []);
-  return <Splash text={slow ? "Connecting… unmoney needs a connection the first time it loads on a device." : "Loading your data…"} />;
+  return <Splash text={slow ? "Connecting… UnMoney needs a connection the first time it loads on a device." : "Loading your data…"} />;
 }
 
 function Gate() {

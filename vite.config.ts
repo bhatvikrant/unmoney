@@ -15,8 +15,8 @@ export default defineConfig({
       includeAssets: ["icon.svg", "favicon.ico", "apple-touch-icon-180x180.png"],
       manifest: {
         id: "/",
-        name: "unmoney",
-        short_name: "unmoney",
+        name: "UnMoney",
+        short_name: "UnMoney",
         description: "Track income, expenses and transfers across every account.",
         theme_color: "#ffffff",
         background_color: "#ffffff",

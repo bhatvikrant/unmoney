@@ -29,7 +29,7 @@ export default function SignIn() {
     <div className="min-h-dvh flex items-center justify-center p-6 bg-background">
       <div className="w-full max-w-sm">
         <div className="mb-8">
-          <div className="text-2xl font-semibold tracking-tight">unmoney</div>
+          <div className="text-2xl font-semibold tracking-tight">UnMoney</div>
           <p className="text-sm text-muted-foreground mt-1">Every account, every transaction, nothing behind a paywall.</p>
         </div>
         <form onSubmit={submit} className="space-y-4">

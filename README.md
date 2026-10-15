@@ -1,4 +1,4 @@
-# unmoney
+# UnMoney
 
 A web rebuild of Money Manager (Realbyte) with every feature unlocked and no paywall. Installable as a PWA, works fully offline, and syncs across devices through Convex.
 
@@ -94,7 +94,7 @@ To try it: build (`npm run build`), serve `dist/` (`npm run preview`), open it o
 
 ## Install on a phone
 
-unmoney is a PWA: installed, it opens full screen from the home screen with its own icon and works offline.
+UnMoney is a PWA: installed, it opens full screen from the home screen with its own icon and works offline.
 
 - **Android (Chrome, Edge, Samsung Internet):** the browser offers to install it; Settings › Install app shows the same prompt. Long-press the icon for the Add transaction and Stats shortcuts.
 - **iPhone / iPad:** in Safari (or Chrome / Edge on iOS 16.4+), Share › Add to Home Screen. The app shows this hint once, and Settings › Install app explains it. The installed app has its own storage on iOS, so sign in once inside it.

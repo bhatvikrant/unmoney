@@ -31,7 +31,7 @@ export default function AppShell() {
   return (
     <div className="flex min-h-dvh bg-background">
       <aside className="hidden md:flex w-56 shrink-0 flex-col border-r bg-sidebar px-3 py-5 gap-1 sticky top-0 h-dvh self-start">
-        <div className="px-3 pb-4 text-lg font-semibold tracking-tight">unmoney</div>
+        <div className="px-3 pb-4 text-lg font-semibold tracking-tight">UnMoney</div>
         {tabs.map((t) => (
           <NavLink
             key={t.to}

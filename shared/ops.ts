@@ -1,5 +1,5 @@
 /**
- * Every write in unmoney is an "op": a small, serialisable command that is applied to a
+ * Every write in UnMoney is an "op": a small, serialisable command that is applied to a
  * Snapshot (all of one user's documents) by the pure reducer below. The browser applies ops
  * to its local replica the moment the user acts (so everything works offline), queues them,
  * and sends them to Convex when it can; the server runs the very same reducer on the user's
@@ -882,7 +882,7 @@ const handlers: Handlers = {
   },
 
   "backup.restore": (w, { data }) => {
-    if (!data || data.version !== 1) throw new Error("Not an unmoney backup file");
+    if (!data || data.version !== 1) throw new Error("Not an UnMoney backup file");
     for (const t of ["transactions", "notes", "categories", "repeats", "bookmarks", "budgets", "accounts", "accountGroups", "currencies"] as const) w.clear(t);
     const groupIds = new Map<string, Id<"accountGroups">>();
     for (const g of data.accountGroups ?? []) groupIds.set(g._id as string, w.insert("accountGroups", strip(g) as never));

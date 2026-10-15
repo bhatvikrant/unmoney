@@ -27,12 +27,12 @@ export default function BackupSettings() {
 
   async function exportJSON() {
     const data = backupExport(view);
-    downloadText(`unmoney-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 1), "application/json");
+    downloadText(`UnMoney-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 1), "application/json");
   }
   async function exportCSV(delim: "," | "\t") {
     const rows = txExportRows(view);
     const csv = toCSV(rows.map((r) => ({ Date: r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note, Amount: toMajor(Number(r.amount), settings.decimals), "Income/Expense": r.type, Description: r.description, "Amount Sub": r.subAmount === "" ? "" : r.subAmount, Currency: r.subCurrency, Fee: r.fee === "" ? "" : toMajor(Number(r.fee), settings.decimals), Tags: r.tags })), delim);
-    downloadText(`unmoney-transactions.${delim === "," ? "csv" : "tsv"}`, csv, delim === "," ? "text/csv" : "text/tab-separated-values");
+    downloadText(`UnMoney-transactions.${delim === "," ? "csv" : "tsv"}`, csv, delim === "," ? "text/csv" : "text/tab-separated-values");
   }
   async function onRestoreFile(file: File | undefined) {
     if (!file) return;

@@ -44,7 +44,7 @@ export function startPwa() {
   const reload = registerSW({
     onNeedRefresh() {
       // queued changes live in IndexedDB, so reloading never loses them
-      toast("A new version of unmoney is ready", { duration: Infinity, action: { label: "Reload", onClick: () => void reload() } });
+      toast("A new version of UnMoney is ready", { duration: Infinity, action: { label: "Reload", onClick: () => void reload() } });
     },
     onRegisteredSW(_url, reg) {
       if (!reg) return;
@@ -101,7 +101,7 @@ export function useIosInstallHint(onHow: () => void) {
       } catch {
         // private mode: the hint may show again next time
       }
-      toast("Install unmoney on your Home Screen", {
+      toast("Install UnMoney on your Home Screen", {
         description: "Tap Share, then Add to Home Screen, and it opens full screen and works offline.",
         duration: 12000,
         action: { label: "How", onClick: onHow },
