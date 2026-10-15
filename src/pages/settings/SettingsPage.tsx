@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { clearUnlock } from "@/lib/passcode";
+import { Avatar } from "@/components/shell/Avatar";
 
 export default function SettingsPage() {
   const nav = useNavigate();
@@ -22,7 +23,11 @@ export default function SettingsPage() {
       <PageHeader title="More" />
       <Page className="pb-10">
         <Section title="Account">
-          <Row label={user?.name || user?.email || "Signed in"} hint={user?.name ? user.email : undefined} right={<Button variant="outline" size="sm" onClick={() => { clearUnlock(); signOut(); }}>Sign out</Button>} />
+          <Row
+            label={<span className="flex items-center gap-3"><Avatar seed={user?.email || user?.name || ""} src={user?.image} size={44} /><span className="min-w-0 truncate font-medium">{user?.name || user?.email || "Signed in"}</span></span>}
+            hint={user?.name ? <span className="pl-14">{user.email}</span> : undefined}
+            right={<Button variant="outline" size="sm" onClick={() => { clearUnlock(); signOut(); }}>Sign out</Button>}
+          />
         </Section>
         <Section title="Money">
           {link("Main currency", "/settings/currency", s.mainCurrency)}

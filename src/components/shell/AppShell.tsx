@@ -2,7 +2,8 @@ import { NavLink, Outlet, useLocation } from "react-router";
 import { BookOpen, ChartPie, Landmark, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { todayISO } from "../../../shared/dates";
-import { useCatchUpRepeats } from "@/lib/app";
+import { useApp, useCatchUpRepeats } from "@/lib/app";
+import { Avatar } from "./Avatar";
 
 const tabs = [
   { to: "/", icon: BookOpen, label: "Trans." },
@@ -20,6 +21,7 @@ function isActive(pathname: string, to: string) {
 export default function AppShell() {
   useCatchUpRepeats();
   const { pathname } = useLocation();
+  const { user } = useApp();
   const today = todayISO().slice(5).replace("-", "/");
   return (
     <div className="flex min-h-dvh bg-background">
@@ -38,6 +40,10 @@ export default function AppShell() {
             {t.to === "/" ? "Transactions" : t.label}
           </NavLink>
         ))}
+        <NavLink to="/settings" className="mt-auto flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-sidebar-accent/60">
+          <Avatar seed={user?.email || user?.name || ""} src={user?.image} size={32} />
+          <span className="min-w-0 truncate text-muted-foreground">{user?.name || user?.email || "Account"}</span>
+        </NavLink>
       </aside>
       <main className="flex-1 min-w-0 pb-20 md:pb-0">
         <Outlet />
