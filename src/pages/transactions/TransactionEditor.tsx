@@ -215,20 +215,30 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
     }
   }
 
+  async function bookmark() {
+    try {
+      const a = buildArgs();
+      await addBookmark({ template: { type: a.type, accountId: a.accountId, toAccountId: a.toAccountId, categoryId: a.categoryId, subcategoryId: a.subcategoryId, amount: a.amount, note: a.note, description: a.description, tags: a.tags, feeAmount: a.feeAmount } });
+      toast.success("Bookmarked");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not bookmark");
+    }
+  }
+
   const typeColor = { income: "text-income border-income", expense: "text-expense border-expense", transfer: "text-foreground border-foreground" } as const;
   const title = f.type === "income" ? "Income" : f.type === "expense" ? "Expense" : "Transfer";
 
   return (
     <>
       <PageHeader back title={title} />
-      <Page className="pb-28">
+      <Page className={isEdit ? "pb-36" : "pb-24"}>
         <div className="grid grid-cols-3 gap-2 p-4">
           {(["income", "expense", "transfer"] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setF((p) => ({ ...p, type: t, categoryId: undefined, subcategoryId: undefined }))}
-              className={cn("rounded-md border py-2 text-sm capitalize transition-colors", f.type === t ? typeColor[t] + " font-medium bg-accent/40" : "text-muted-foreground")}
+              className={cn("h-10 rounded-md border text-sm capitalize transition-colors", f.type === t ? typeColor[t] + " font-medium bg-accent/40" : "text-muted-foreground")}
             >
               {t}
             </button>
@@ -336,25 +346,21 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           <div className="px-4 py-3"><PhotoField photoIds={f.photoIds} onChange={(ids) => set("photoIds", ids)} /></div>
         </div>
 
-        {isEdit ? (
-          <div className="grid grid-cols-3 gap-2 p-4">
-            <Button variant="outline" onClick={() => setConfirm("delete")}><Trash2 className="size-4" />Delete</Button>
-            <Button variant="outline" onClick={() => setConfirm("copy")}><Copy className="size-4" />Copy</Button>
-            <Button variant="outline" onClick={async () => {
-              try {
-                const a = buildArgs();
-                await addBookmark({ template: { type: a.type, accountId: a.accountId, toAccountId: a.toAccountId, categoryId: a.categoryId, subcategoryId: a.subcategoryId, amount: a.amount, note: a.note, description: a.description, tags: a.tags, feeAmount: a.feeAmount } });
-                toast.success("Bookmarked");
-              } catch (e) { toast.error(e instanceof Error ? e.message : "Could not bookmark"); }
-            }}><Star className="size-4" />Bookmark</Button>
-          </div>
-        ) : null}
       </Page>
 
       <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
-        <div className="mx-auto max-w-3xl flex gap-2 p-3">
-          <Button className="flex-1" disabled={busy} onClick={() => save("save")}>Save</Button>
-          {!isEdit ? <Button variant="outline" className="flex-1" disabled={busy} onClick={() => save("continue")}>Continue</Button> : null}
+        <div className="mx-auto max-w-3xl space-y-2 p-3">
+          {isEdit ? (
+            <div className="grid grid-cols-3 gap-2">
+              <Button variant="outline" className="h-10 text-destructive hover:text-destructive" onClick={() => setConfirm("delete")}><Trash2 className="size-4" />Delete</Button>
+              <Button variant="outline" className="h-10" onClick={() => setConfirm("copy")}><Copy className="size-4" />Copy</Button>
+              <Button variant="outline" className="h-10" onClick={bookmark}><Star className="size-4" />Bookmark</Button>
+            </div>
+          ) : null}
+          <div className="flex gap-2">
+            <Button className="h-11 flex-1 text-base" disabled={busy} onClick={() => save("save")}>Save</Button>
+            {!isEdit ? <Button variant="outline" className="h-11 flex-1 text-base" disabled={busy} onClick={() => save("continue")}>Continue</Button> : null}
+          </div>
         </div>
       </div>
 
