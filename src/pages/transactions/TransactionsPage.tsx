@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useView } from "@/lib/store";
 import { budgetStatus, notesRange, txCarryBefore, txExportRows, txListRange } from "../../../shared/views";
 import { useApp } from "@/lib/app";
+import { primeKeyboard } from "@/lib/keyboard";
 import { useMonthParam } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
 import { addDays, parts, todayISO, weekday, MONTH_SHORT } from "../../../shared/dates";
@@ -101,7 +102,7 @@ export default function TransactionsPage() {
         {raw && view === "summary" ? <SummaryView txs={txs} month={month} range={range} /> : null}
       </Page>
       {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[calc(var(--tabbar-h)+6rem)] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
-      {bulk.active && view === "daily" ? null : <Fab onClick={() => nav(`/t/new?date=${addDate()}`)} />}
+      {bulk.active && view === "daily" ? null : <Fab onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${addDate()}`); }} />}
       {view === "daily" ? <BulkBar bulk={bulk} txs={txs} /> : null}
       <FilterSheet open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>
@@ -170,7 +171,7 @@ function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: st
           <>
             <TransactionList txs={byDay.get(day)?.list ?? []} emptyText="Nothing on this day" />
             <div className="flex gap-2 px-2 pt-3">
-              <Button className="flex-1" onClick={() => nav(`/t/new?date=${day}`)}>Add entry</Button>
+              <Button className="flex-1" onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${day}`); }}>Add entry</Button>
               <Button variant="outline" className="flex-1" onClick={() => nav(`/notes?date=${day}`)}>Add note</Button>
             </div>
           </>

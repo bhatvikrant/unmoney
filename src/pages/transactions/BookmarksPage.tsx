@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, Pencil, Trash2 } from "lucide-react";
 import { useOp, useView } from "@/lib/store";
 import { bookmarksList } from "../../../shared/views";
 import { useApp } from "@/lib/app";
+import { primeKeyboard } from "@/lib/keyboard";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Money } from "@/components/shell/Money";
@@ -43,7 +44,7 @@ export default function BookmarksPage() {
                     <Button variant="ghost" size="icon" className="size-7" aria-label="Move down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
                   </div>
                 ) : null}
-                <button type="button" className="flex-1 min-w-0 flex items-center gap-3 text-left" onClick={() => !edit && nav(`/t/new?bookmark=${b._id}`)}>
+                <button type="button" className="flex-1 min-w-0 flex items-center gap-3 text-left" onClick={(e) => { if (edit) return; primeKeyboard(e.currentTarget); nav(`/t/new?bookmark=${b._id}`); }}>
                   <div className="w-20 shrink-0 text-xs text-muted-foreground line-clamp-2">{t.type === "transfer" ? "Transfer" : categoryLabel(t)}</div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate">{t.note || (t.type === "transfer" ? `${accountName(t.accountId)} → ${accountName(t.toAccountId)}` : categoryLabel(t))}</div>
