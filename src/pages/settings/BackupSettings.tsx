@@ -9,7 +9,7 @@ import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { downloadText, mapImportRow, parseTable, toCSV } from "@/lib/csv";
+import { downloadText, mapImportRow, dropTransferIns, parseTable, parseXlsx, toCSV } from "@/lib/csv";
 import { toMajor } from "../../../shared/money";
 
 export default function BackupSettings() {
@@ -45,8 +45,19 @@ export default function BackupSettings() {
   }
   async function onImportFile(file: File | undefined) {
     if (!file) return;
-    const { headers, rows } = parseTable(await file.text());
-    setPreview({ headers, rows: rows.map(mapImportRow) });
+    let parsed: { headers: string[]; rows: Record<string, string>[] };
+    try {
+      parsed = /\.xlsx$/i.test(file.name) ? await parseXlsx(file) : parseTable(await file.text());
+    } catch {
+      toast.error("Couldn't read that file");
+      if (importRef.current) importRef.current.value = "";
+      return;
+    }
+    const { headers, rows } = parsed;
+    if (!rows.length) { toast.error("No rows found. Expected a Date and Amount column"); if (importRef.current) importRef.current.value = ""; return; }
+    const { rows: mapped, dropped } = dropTransferIns(rows.map(mapImportRow));
+    if (dropped) toast.info(`Skipped ${dropped} Transfer-In rows (each transfer is imported once, from its Transfer-Out row)`);
+    setPreview({ headers, rows: mapped });
     setErrors([]);
     if (importRef.current) importRef.current.value = "";
   }
@@ -74,8 +85,8 @@ export default function BackupSettings() {
           <Row label="Export as TSV" hint="Re-importable here and in Money Manager" right={<Button size="sm" variant="outline" onClick={() => exportCSV("\t")}>TSV</Button>} />
         </Section>
         <Section title="Import">
-          <Row label="Import from CSV / TSV" hint="Columns: Date, Account, Category, Subcategory, Note, Amount, Income/Expense, Description, Amount Sub, Currency" right={<Button size="sm" variant="outline" onClick={() => importRef.current?.click()}>Choose file</Button>} />
-          <input ref={importRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" className="hidden" onChange={(e) => onImportFile(e.target.files?.[0])} />
+          <Row label="Import from Excel / CSV / TSV" hint="Money Manager .xlsx exports work as-is. Columns: Date, Account, Category, Subcategory, Note, Amount, Income/Expense, Description, Amount Sub, Currency" right={<Button size="sm" variant="outline" onClick={() => importRef.current?.click()}>Choose file</Button>} />
+          <input ref={importRef} type="file" accept=".xlsx,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values" className="hidden" onChange={(e) => onImportFile(e.target.files?.[0])} />
         </Section>
         <Section title="Danger zone">
           <Row label="Delete all entries" hint="Removes transactions, notes, schedules, bookmarks and budgets. Accounts and categories stay." right={<Button size="sm" variant="destructive" onClick={async () => { if (window.confirm("Delete every transaction? This cannot be undone.")) { await wipe({ confirm: "DELETE" }); toast.success("Entries deleted"); } }}>Delete</Button>} />
