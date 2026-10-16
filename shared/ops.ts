@@ -213,7 +213,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.remove": ["transactions", "repeats"],
   "transactions.bulkUpdate": ["accounts", "categories", "transactions"],
   "transactions.bulkRemove": ["transactions"],
-  "transactions.importRows": ["settings", "accounts", "categories", "currencies", "transactions"],
+  "transactions.importRows": ["settings", "accountGroups", "accounts", "categories", "currencies", "transactions"],
   "transactions.copy": ["transactions"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
