@@ -29,9 +29,11 @@ function cellToString(v: unknown): string {
   if (v === null || v === undefined) return "";
   // read-excel-file returns dates as UTC-midnight-based Date objects
   if (v instanceof Date) {
-    const d = `${v.getUTCFullYear()}-${pad2(v.getUTCMonth() + 1)}-${pad2(v.getUTCDate())}`;
-    const hasTime = v.getUTCHours() || v.getUTCMinutes() || v.getUTCSeconds();
-    return hasTime ? `${d} ${pad2(v.getUTCHours())}:${pad2(v.getUTCMinutes())}:${pad2(v.getUTCSeconds())}` : d;
+    // Excel stores times as day fractions, so 13:41:00 can read back as 13:40:59.999; round to the nearest second
+    const t = new Date(Math.round(v.getTime() / 1000) * 1000);
+    const d = `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
+    const hasTime = t.getUTCHours() || t.getUTCMinutes() || t.getUTCSeconds();
+    return hasTime ? `${d} ${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}:${pad2(t.getUTCSeconds())}` : d;
   }
   return String(v).trim();
 }
@@ -79,6 +81,8 @@ export function mapImportRow(row: Record<string, string>): {
     }
     return "";
   };
+  // Money Manager names its main-currency amount column after the currency ("INR"); its "Amount" is then the original amount.
+  const curKey = Object.keys(row).find((k) => /^[A-Z]{3}$/.test(k.trim()) && row[k] !== "");
   const date = get("Date", "Period", "date");
   const t = date.match(/[ T](\d{1,2}):(\d{2})/);
   return {
@@ -88,10 +92,10 @@ export function mapImportRow(row: Record<string, string>): {
     category: get("Category", "category"),
     subcategory: get("Subcategory", "Sub Category", "subcategory") || undefined,
     note: get("Note", "Contents", "note") || undefined,
-    amount: get("Amount", "amount"),
+    amount: curKey ? row[curKey] : get("Amount", "amount"),
     type: get("Income/Expense", "Type", "type"),
     description: get("Description", "Memo", "description") || undefined,
-    subAmount: get("Amount Sub", "Amount_1", "AmountSub", "subAmount") || undefined,
+    subAmount: (curKey ? get("Amount Sub", "Amount") : get("Amount Sub", "Amount_1", "AmountSub", "subAmount")) || undefined,
     subCurrency: get("Currency", "subCurrency") || undefined,
   };
 }

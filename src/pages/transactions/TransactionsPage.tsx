@@ -263,7 +263,7 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
     try {
       const rows = txExportRows(snap, range.from, range.to);
       const csv = toCSV(rows.map((r) => ({
-        Date: r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note,
+        Date: r.time ? `${r.date} ${r.time}` : r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note,
         Amount: toMajor(Number(r.amount), settings.decimals), "Income/Expense": r.type, Description: r.description,
         "Amount Sub": r.subAmount, Currency: r.subCurrency, Fee: r.fee === "" ? "" : toMajor(Number(r.fee), settings.decimals), Tags: r.tags,
       })));

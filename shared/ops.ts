@@ -713,7 +713,7 @@ const handlers: Handlers = {
         type, date, time: /^\d{2}:\d{2}$/.test(r.time ?? "") ? r.time : undefined, accountId: account._id, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
         description: r.description?.trim() || undefined, tags: [], photoIds: [],
       };
-      if (r.subAmount && r.subCurrency) {
+      if (r.subAmount && r.subCurrency && r.subCurrency.trim().toLowerCase() !== settings.mainCurrency.toLowerCase()) {
         const cur = w.snap.currencies.find((c) => c.code.toLowerCase() === r.subCurrency!.trim().toLowerCase());
         if (cur) {
           base.subCurrency = cur.code;
