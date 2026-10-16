@@ -23,9 +23,8 @@ export function ledgerOf(snap: Snapshot): LedgerCtx {
 
 export function byDateDesc(a: Tx, b: Tx): number {
   if (a.date !== b.date) return b.date.localeCompare(a.date);
-  const ta = a.time ?? "";
-  const tb = b.time ?? "";
-  if (ta !== tb) return tb.localeCompare(ta);
+  // Within a day, the entry added last comes first. The optional time field is left out on purpose:
+  // entries without one sorted below every timed entry, so a fresh entry could land mid-list.
   return b._creationTime - a._creationTime;
 }
 
