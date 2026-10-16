@@ -9,7 +9,9 @@ import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { downloadText, mapImportRow, dropTransferIns, parseTable, parseXlsx, toCSV } from "@/lib/csv";
+import { ACCOUNT_KINDS, accountNamesIn, guessGroupKind, downloadText, mapImportRow, dropTransferIns, parseTable, parseXlsx, toCSV } from "@/lib/csv";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { NewImportAccount } from "../../../shared/ops";
 import { toMajor } from "../../../shared/money";
 
 export default function BackupSettings() {
@@ -22,6 +24,8 @@ export default function BackupSettings() {
   const importRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<null | { rows: ReturnType<typeof mapImportRow>[]; headers: string[] }>(null);
   const [createMissing, setCreateMissing] = useState(true);
+  const [createAccounts, setCreateAccounts] = useState(true);
+  const [accountKinds, setAccountKinds] = useState<Record<string, NewImportAccount["groupKind"]>>({});
   const [errors, setErrors] = useState<{ row: number; reason: string }[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -57,6 +61,8 @@ export default function BackupSettings() {
     if (!rows.length) { toast.error("No rows found. Expected a Date and Amount column"); if (importRef.current) importRef.current.value = ""; return; }
     const { rows: mapped, dropped } = dropTransferIns(rows.map(mapImportRow));
     if (dropped) toast.info(`Skipped ${dropped} Transfer-In rows (each transfer is imported once, from its Transfer-Out row)`);
+    const existing = new Set(view.accounts.filter((a) => !a.deletedAt).map((a) => a.name.trim().toLowerCase()));
+    setAccountKinds(Object.fromEntries(accountNamesIn(mapped).filter((n) => !existing.has(n.toLowerCase())).map((n) => [n, guessGroupKind(n)])));
     setPreview({ headers, rows: mapped });
     setErrors([]);
     if (importRef.current) importRef.current.value = "";
@@ -65,7 +71,7 @@ export default function BackupSettings() {
     if (!preview) return;
     setBusy(true);
     try {
-      const res = await importRows({ rows: preview.rows, createMissing });
+      const res = await importRows({ rows: preview.rows, createMissing, newAccounts: createAccounts ? Object.entries(accountKinds).map(([name, groupKind]) => ({ name, groupKind })) : undefined });
       if (res.errors.length) { setErrors(res.errors); toast.error(`${res.errors.length} rows need fixing; nothing was imported`); }
       else { toast.success(`Imported ${res.inserted} entries`); setPreview(null); }
     } catch (e) { toast.error(e instanceof Error ? e.message : "Import failed"); }
@@ -103,7 +109,26 @@ export default function BackupSettings() {
                   <tbody>{preview.rows.slice(0, 50).map((r, i) => <tr key={i} className="border-t"><td className="px-2 py-1">{r.date}</td><td className="px-2 py-1">{r.account}</td><td className="px-2 py-1">{r.category}</td><td className="px-2 py-1">{r.subcategory}</td><td className="px-2 py-1 max-w-32 truncate">{r.note}</td><td className="px-2 py-1 tabular">{r.amount}</td><td className="px-2 py-1">{r.type}</td></tr>)}</tbody>
                 </table>
               </div>
-              <label className="flex items-center gap-2 text-sm"><Checkbox checked={createMissing} onCheckedChange={(v) => setCreateMissing(!!v)} />Create categories that don't exist yet (accounts must already exist)</label>
+              <label className="flex items-center gap-2 text-sm"><Checkbox checked={createMissing} onCheckedChange={(v) => setCreateMissing(!!v)} />Create categories that don't exist yet </label>
+              {Object.keys(accountKinds).length ? (
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm"><Checkbox checked={createAccounts} onCheckedChange={(v) => setCreateAccounts(!!v)} />Create {Object.keys(accountKinds).length} accounts that don't exist yet</label>
+                  {createAccounts ? (
+                    <div className="max-h-48 overflow-y-auto border rounded-md divide-y">
+                      {Object.entries(accountKinds).map(([name, kind]) => (
+                        <div key={name} className="flex items-center justify-between gap-2 px-2 py-1">
+                          <span className="text-sm truncate">{name}</span>
+                          <Select value={kind} onValueChange={(v) => setAccountKinds((k) => ({ ...k, [name]: v as NewImportAccount["groupKind"] }))}>
+                            <SelectTrigger className="h-8 w-40"><SelectValue /></SelectTrigger>
+                            <SelectContent>{ACCOUNT_KINDS.map((k) => <SelectItem key={k.kind} value={k.kind}>{k.label}</SelectItem>)}</SelectContent>
+                          </Select>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {createAccounts && Object.values(accountKinds).includes("card") ? <p className="text-xs text-muted-foreground">Credit cards are billed to your first bank account with settlement day 1 and payment day 15. Adjust them later in Accounts.</p> : null}
+                </div>
+              ) : null}
               {errors.length ? <div className="max-h-32 overflow-y-auto text-xs text-destructive space-y-0.5">{errors.slice(0, 30).map((e) => <div key={e.row}>Row {e.row}: {e.reason}</div>)}</div> : null}
             </div>
           ) : null}

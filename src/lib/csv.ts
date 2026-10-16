@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import type { NewImportAccount } from "../../shared/ops";
 
 export function downloadText(filename: string, text: string, mime = "text/plain") {
   const blob = new Blob([text], { type: `${mime};charset=utf-8` });
@@ -29,7 +30,8 @@ function cellToString(v: unknown): string {
   // read-excel-file returns dates as UTC-midnight-based Date objects
   if (v instanceof Date) {
     const d = `${v.getUTCFullYear()}-${pad2(v.getUTCMonth() + 1)}-${pad2(v.getUTCDate())}`;
-    return d;
+    const hasTime = v.getUTCHours() || v.getUTCMinutes() || v.getUTCSeconds();
+    return hasTime ? `${d} ${pad2(v.getUTCHours())}:${pad2(v.getUTCMinutes())}:${pad2(v.getUTCSeconds())}` : d;
   }
   return String(v).trim();
 }
@@ -68,7 +70,7 @@ export async function parseXlsx(file: File): Promise<{ headers: string[]; rows: 
 /** Map arbitrary headers (Money Manager export, our export, or hand-made) to import fields. */
 export function mapImportRow(row: Record<string, string>): {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
-  description?: string; subAmount?: string; subCurrency?: string;
+  description?: string; subAmount?: string; subCurrency?: string; time?: string;
 } {
   const get = (...names: string[]) => {
     for (const n of names) {
@@ -77,8 +79,11 @@ export function mapImportRow(row: Record<string, string>): {
     }
     return "";
   };
+  const date = get("Date", "Period", "date");
+  const t = date.match(/[ T](\d{1,2}):(\d{2})/);
   return {
-    date: get("Date", "Period", "date"),
+    date,
+    time: t ? `${t[1].padStart(2, "0")}:${t[2]}` : undefined,
     account: get("Account", "Accounts", "account"),
     category: get("Category", "category"),
     subcategory: get("Subcategory", "Sub Category", "subcategory") || undefined,
@@ -98,4 +103,34 @@ export function mapImportRow(row: Record<string, string>): {
 export function dropTransferIns<T extends { type: string }>(rows: T[]): { rows: T[]; dropped: number } {
   const kept = rows.filter((r) => !/^transfer[- ]?in/i.test(r.type.trim()));
   return { rows: kept, dropped: rows.length - kept.length };
+}
+
+export const ACCOUNT_KINDS: { kind: NewImportAccount["groupKind"]; label: string }[] = [
+  { kind: "bank", label: "Bank account" },
+  { kind: "card", label: "Credit card" },
+  { kind: "debitCard", label: "Debit card" },
+  { kind: "cash", label: "Cash" },
+  { kind: "prepaid", label: "Wallet / prepaid" },
+  { kind: "savings", label: "Savings" },
+  { kind: "investment", label: "Investments" },
+  { kind: "other", label: "Other" },
+];
+
+/** Best guess at an account's group from its name, so the user mostly just confirms. */
+export function guessGroupKind(name: string): NewImportAccount["groupKind"] {
+  const n = name.toLowerCase();
+  if (/debit/.test(n)) return "debitCard";
+  if (/\bcc\b|credit|\bcard\b/.test(n)) return "card";
+  if (/\bcash\b/.test(n)) return "cash";
+  if (/upi|wallet|\bpay\b|paytm|pluxee|sodexo|balance|prepaid/.test(n)) return "prepaid";
+  if (/saving/.test(n)) return "savings";
+  return "bank";
+}
+
+/** Account names the rows refer to (including transfer destinations) in first-seen order. */
+export function accountNamesIn(rows: { account: string; category: string; type: string }[]): string[] {
+  const seen = new Map<string, string>();
+  const add = (n: string) => { const t = n.trim(); if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t); };
+  for (const r of rows) { add(r.account); if (/^trans/i.test(r.type.trim())) add(r.category); }
+  return [...seen.values()];
 }

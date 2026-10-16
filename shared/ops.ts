@@ -100,8 +100,9 @@ export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter">>;
 export type ImportRow = {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
-  description?: string; subAmount?: string; subCurrency?: string;
+  description?: string; subAmount?: string; subCurrency?: string; time?: string;
 };
+export type NewImportAccount = { name: string; groupKind: Doc<"accountGroups">["kind"] };
 
 export interface Ops {
   "settings.completeOnboarding": { args: { currency: string; symbolPosition?: "before" | "after" }; result: void };
@@ -134,7 +135,7 @@ export interface Ops {
   "transactions.remove": { args: { id: Id<"transactions">; scope?: "one" | "future" | "all" }; result: void };
   "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
   "transactions.bulkRemove": { args: { ids: Id<"transactions">[] }; result: void };
-  "transactions.importRows": { args: { rows: ImportRow[]; createMissing?: boolean }; result: { inserted: number; errors: { row: number; reason: string }[] } };
+  "transactions.importRows": { args: { rows: ImportRow[]; createMissing?: boolean; newAccounts?: NewImportAccount[] }; result: { inserted: number; errors: { row: number; reason: string }[] } };
   "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean }; result: Id<"transactions"> };
 
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
@@ -653,9 +654,34 @@ const handlers: Handlers = {
     }
   },
 
-  "transactions.importRows": (w, { rows, createMissing }) => {
+  "transactions.importRows": (w, { rows, createMissing, newAccounts }) => {
     const settings = w.requireSettings();
-    const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.toLowerCase(), a]));
+    const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
+    // Accounts the import should create first. Cards need a bank to bill / link to, so non-card kinds go first.
+    const wanted = (newAccounts ?? []).filter((a) => a.name.trim() && !accByName.has(a.name.trim().toLowerCase()));
+    wanted.sort((a, b) => Number(a.groupKind === "card" || a.groupKind === "debitCard") - Number(b.groupKind === "card" || b.groupKind === "debitCard"));
+    const groupFor = (kind: Doc<"accountGroups">["kind"]): Id<"accountGroups"> => {
+      const g = w.snap.accountGroups.find((x) => x.kind === kind && !x.deletedAt);
+      if (g) return g._id;
+      const def = DEFAULT_GROUPS.find((x) => x.kind === kind);
+      return w.insert("accountGroups", { name: def?.name ?? kind, kind, order: nextOrder(w.snap.accountGroups) });
+    };
+    const createdBanks: Doc<"accounts">[] = [];
+    for (const a of wanted) {
+      const kind = a.groupKind;
+      const bank = createdBanks[0] ?? [...accByName.values()].find((x) => w.get("accountGroups", x.groupId)?.kind === "bank")
+        ?? [...accByName.values()].find((x) => !["card", "debitCard"].includes(w.get("accountGroups", x.groupId)?.kind ?? ""));
+      if ((kind === "card" || kind === "debitCard") && !bank) throw new Error(`"${a.name}" is a card but there is no bank account for it to bill. Add a bank account first.`);
+      const id = w.insert("accounts", {
+        groupId: groupFor(kind), name: a.name.trim(), initialBalance: 0, includeInTotals: true, hidden: false,
+        order: nextOrder(w.snap.accounts), transferAsExpense: false,
+        ...(kind === "card" ? { billingAccountId: bank!._id, settlementDay: 1, paymentDay: 15 } : {}),
+        ...(kind === "debitCard" ? { linkedAccountId: bank!._id } : {}),
+      });
+      const created = w.get("accounts", id)!;
+      accByName.set(a.name.trim().toLowerCase(), created);
+      if (kind === "bank") createdBanks.push(created);
+    }
     const catKey = (type: string, name: string, parent?: string) => `${type}:${parent ?? ""}:${name.toLowerCase()}`;
     const catByKey = new Map(w.snap.categories.filter((c) => !c.deletedAt).map((c) => [catKey(c.type, c.name, c.parentId), c]));
     const errors: { row: number; reason: string }[] = [];
@@ -684,7 +710,7 @@ const handlers: Handlers = {
       const amountMajor = Number((r.amount ?? "").replace(/[^0-9.-]/g, ""));
       if (!Number.isFinite(amountMajor)) { errors.push({ row: i + 1, reason: `Bad amount "${r.amount}"` }); continue; }
       const base: Prepared = {
-        type, date, accountId: account._id, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
+        type, date, time: /^\d{2}:\d{2}$/.test(r.time ?? "") ? r.time : undefined, accountId: account._id, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
         description: r.description?.trim() || undefined, tags: [], photoIds: [],
       };
       if (r.subAmount && r.subCurrency) {
