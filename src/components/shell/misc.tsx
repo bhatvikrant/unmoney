@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Info, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ export function EmptyState({ title, hint, action, className }: { title: string; 
   );
 }
 
-export function Fab({ onClick, label = "Add", className, icon }: { onClick: () => void; label?: string; className?: string; icon?: ReactNode }) {
+export function Fab({ onClick, label = "Add", className, icon }: { onClick: (e: MouseEvent<HTMLButtonElement>) => void; label?: string; className?: string; icon?: ReactNode }) {
   return (
     <Button
       aria-label={label}

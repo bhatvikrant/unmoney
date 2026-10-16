@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { ArrowLeftRight, Calculator, Globe, Repeat, Star, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -166,9 +166,10 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
     if (!f.accountId && accounts.length) set("accountId", defaultAccount(accounts, settings.defaultAccountId));
   }, [accounts, f.accountId, settings.defaultAccountId]);
 
-  // New entries start with the cursor in the amount, and go back there after "Continue".
+  // New entries start with the cursor in the amount, and go back there after "Continue". The tap
+  // that opened this screen primed the iOS keyboard (primeKeyboard); take focus over before paint.
   const amountRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isEdit) amountRef.current?.focus();
   }, [isEdit]);
 
@@ -201,6 +202,8 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   }
 
   async function save(mode: "save" | "continue", scope?: "one" | "future") {
+    // Focus now, while still inside the tap: iOS will not open the keyboard after the await below.
+    if (mode === "continue") amountRef.current?.focus();
     setBusy(true);
     try {
       const args = buildArgs();
@@ -218,7 +221,6 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         toast.success("Saved");
         if (mode === "continue") {
           setF((p) => ({ ...p, amount: "", subAmount: "", note: "", description: "", tags: [], photoIds: [], fee: "", feeOn: false, repeat: { kind: "none" } }));
-          amountRef.current?.focus();
         } else {
           nav(-1);
         }
