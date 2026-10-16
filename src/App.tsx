@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router";
+import { useEffect, useLayoutEffect, useState } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router";
 import { useConvexAuth } from "@convex-dev/auth/react";
 import { AppDataProvider } from "@/lib/app";
 import { useStore } from "@/lib/store";
@@ -61,6 +61,7 @@ function Gate() {
   }
   return (
     <AppDataProvider settings={s} user={user}>
+      <ScrollToTop />
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<TransactionsPage />} />
@@ -111,4 +112,11 @@ export default function App() {
   if (!isAuthenticated) return <SignIn />;
   if (!status.live) return <FirstFetch />;
   return <Gate />;
+}
+
+/** Every page change, including back/forward, starts at the top. */
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useLayoutEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
 }

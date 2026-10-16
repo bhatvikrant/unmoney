@@ -245,7 +245,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         const batch: QueuedOp[] = [];
         for (const op of queue) {
           if (op.kind === "files.upload" || batch.length >= limit) break;
+          // An import writes hundreds of documents; send it alone so one server transaction stays small
+          if (op.kind === "transactions.importRows" && batch.length) break;
           batch.push(op);
+          if (op.kind === "transactions.importRows") break;
         }
         const sent: Op[] = [];
         let skipped = false;
