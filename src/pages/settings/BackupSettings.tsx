@@ -111,12 +111,12 @@ export default function BackupSettings() {
         </Section>
       </Page>
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="grid-cols-[minmax(0,1fr)] max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader><DialogTitle>Import {preview?.rows.length} rows</DialogTitle></DialogHeader>
           {preview ? (
-            <div className="space-y-3">
+            <div className="space-y-3 min-w-0">
               <div className="overflow-x-auto border rounded-md max-h-64">
-                <table className="text-xs w-full">
+                <table className="text-xs w-full whitespace-nowrap">
                   <thead className="bg-muted sticky top-0"><tr>{["date", "account", "category", "subcategory", "note", "amount", "type"].map((h) => <th key={h} className="text-left px-2 py-1 font-medium capitalize">{h}</th>)}</tr></thead>
                   <tbody>{preview.rows.slice(0, 50).map((r, i) => <tr key={i} className="border-t"><td className="px-2 py-1">{r.date}</td><td className="px-2 py-1">{r.account}</td><td className="px-2 py-1">{r.category}</td><td className="px-2 py-1">{r.subcategory}</td><td className="px-2 py-1 max-w-32 truncate">{r.note}</td><td className="px-2 py-1 tabular">{r.amount}</td><td className="px-2 py-1">{r.type}</td></tr>)}</tbody>
                 </table>
@@ -128,10 +128,10 @@ export default function BackupSettings() {
                   {createAccounts ? (
                     <div className="max-h-48 overflow-y-auto border rounded-md divide-y">
                       {Object.entries(accountKinds).map(([name, kind]) => (
-                        <div key={name} className="flex items-center justify-between gap-2 px-2 py-1">
-                          <span className="text-sm truncate">{name}</span>
+                        <div key={name} className="flex items-center justify-between gap-2 px-2 py-1 min-w-0">
+                          <span className="text-sm truncate min-w-0">{name}</span>
                           <Select value={kind} onValueChange={(v) => setAccountKinds((k) => ({ ...k, [name]: v as NewImportAccount["groupKind"] }))}>
-                            <SelectTrigger className="h-8 w-40"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-8 w-36 shrink-0"><SelectValue /></SelectTrigger>
                             <SelectContent>{ACCOUNT_KINDS.map((k) => <SelectItem key={k.kind} value={k.kind}>{k.label}</SelectItem>)}</SelectContent>
                           </Select>
                         </div>
