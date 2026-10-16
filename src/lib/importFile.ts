@@ -78,8 +78,12 @@ async function readSheet(file: Blob): Promise<{ headers: string[]; rows: Record<
   return { headers, rows };
 }
 
-export async function readImportFile(file: Blob & { name?: string }): Promise<ParsedImport> {
-  const isSheet = SHEET.test(file.name ?? "") || SHEET_TYPES.has(file.type) || (await looksLikeSheet(file));
+/**
+ * `name` is the filename when the blob has none of its own (a shared or downloaded file). A picked
+ * File is never mutated: `File.name` is a getter-only property and assigning it throws in Safari.
+ */
+export async function readImportFile(file: Blob, name = (file as File).name ?? ""): Promise<ParsedImport> {
+  const isSheet = SHEET.test(name) || SHEET_TYPES.has(file.type) || (await looksLikeSheet(file));
   const { headers, rows } = isSheet ? await readSheet(file) : parseTable(await file.text());
   if (!headers.length) throw new Error("That file has no columns. Export from Money Manager with Settings › Backup › Export to Excel.");
   const currency = headers.find((h) => /^[A-Z]{3}$/.test(h.trim()))?.trim();

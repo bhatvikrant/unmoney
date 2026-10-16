@@ -47,7 +47,7 @@ export default function ImportPage() {
   async function load(file: Blob, name: string, origin: Origin) {
     setReading(true);
     try {
-      const parsed = await readImportFile(Object.assign(file, { name }));
+      const parsed = await readImportFile(file, name);
       if (!parsed.rows.length) throw new Error("No entries found in that file.");
       setLoaded({ ...parsed, name, origin });
     } catch (e) {
