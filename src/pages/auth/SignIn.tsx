@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { ArrowLeftRight, CloudOff, Lock, RefreshCw } from "lucide-react";
+import { motion, useReducedMotion, type Transition } from "framer-motion";
 import { Logo } from "@/components/shell/Logo";
 import { applyTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -12,9 +13,18 @@ const points = [
   { icon: Lock, label: "Passcode lock" },
 ];
 
+/** One strong ease-out for every entrance, so the pieces settle together. */
+const ease: Transition = { duration: 0.6, ease: [0.23, 1, 0.32, 1] };
+
 export default function SignIn() {
   const { signIn } = useAuthActions();
   const [busy, setBusy] = useState(false);
+  const still = useReducedMotion();
+  const rise = (delay: number, y = 12) => ({
+    initial: still ? false : { opacity: 0, y },
+    animate: { opacity: 1, y: 0 },
+    transition: { ...ease, delay },
+  });
 
   // The saved theme loads with the ledger, which happens after sign-in, so follow the system here.
   useEffect(() => {
@@ -48,25 +58,28 @@ export default function SignIn() {
       />
 
       <div className="relative flex min-h-dvh flex-col items-center justify-center px-4 py-10">
-        <Logo size={34} className="relative z-10 mb-[10.5rem]" />
+        <motion.div {...rise(0, 8)} className="relative z-10 mb-[10.5rem]">
+          <Logo size={34} />
+        </motion.div>
 
         <div className="relative w-full max-w-sm">
-          <LedgerPeek />
+          <LedgerPeek delay={0.35} />
 
-          <div className="relative rounded-2xl bg-card p-6 shadow-pop">
+          <motion.div {...rise(0.1)} className="relative rounded-2xl bg-card p-6 shadow-pop">
             <h1 className="text-lg font-semibold tracking-tight">Welcome to UnMoney</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Sign in with Google to keep your ledger in step across your phone and desktop.
             </p>
 
-            <button
+            <motion.button
               type="button"
               disabled={busy}
               onClick={google}
+              whileTap={still ? undefined : { scale: 0.98 }}
               className={cn(
                 "mt-5 flex h-11 w-full items-center justify-center gap-2.5 rounded-xl bg-background text-sm font-medium text-foreground shadow-card",
                 "transition-[transform,background-color,box-shadow] duration-150 ease-out",
-                "hover:bg-muted active:scale-[0.98] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                "hover:bg-muted focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
                 "disabled:pointer-events-none disabled:opacity-60",
               )}
             >
@@ -81,37 +94,44 @@ export default function SignIn() {
                 </svg>
               )}
               {busy ? "Opening Google…" : "Continue with Google"}
-            </button>
+            </motion.button>
 
             <ul className="mt-6 grid grid-cols-3 gap-2 border-t border-border pt-5">
-              {points.map((p) => (
-                <li key={p.label} className="flex flex-col items-center gap-1.5 text-center">
+              {points.map((p, i) => (
+                <motion.li key={p.label} {...rise(0.3 + i * 0.07, 6)} className="flex flex-col items-center gap-1.5 text-center">
                   <span className="flex size-8 items-center justify-center rounded-lg bg-muted text-foreground/80">
                     <p.icon className="size-4" strokeWidth={1.8} aria-hidden="true" />
                   </span>
                   <span className="text-[11px] leading-tight text-muted-foreground">{p.label}</span>
-                </li>
+                </motion.li>
               ))}
             </ul>
-          </div>
+          </motion.div>
         </div>
 
-        <p className="mt-5 max-w-xs text-center text-xs text-muted-foreground/80">
+        <motion.p {...rise(0.5, 6)} className="mt-5 max-w-xs text-center text-xs text-muted-foreground/80">
           Track income, expenses and transfers across every account. Your ledger stays on this device and syncs when you are online.
-        </p>
+        </motion.p>
       </div>
     </div>
   );
 }
 
 /** The top of a month in the ledger, rising from behind the sign-in card: a glimpse of the app rather than a list of features. */
-function LedgerPeek() {
+function LedgerPeek({ delay }: { delay: number }) {
   const [month] = useState(() => new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" }));
+  const still = useReducedMotion();
   return (
-    <div
+    <motion.div
       aria-hidden="true"
-      className="pointer-events-none absolute bottom-[calc(100%-2.75rem)] left-1/2 h-[190px] w-full origin-bottom -translate-x-1/2 scale-90 overflow-hidden rounded-t-2xl select-none"
+      // rises out from behind the card once the card has landed
+      initial={still ? false : { opacity: 0, y: 56 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.8, ease: [0.23, 1, 0.32, 1], delay }}
+      className="pointer-events-none absolute bottom-[calc(100%-2.75rem)] left-1/2 h-[190px] w-full origin-bottom overflow-hidden rounded-t-2xl select-none"
       style={{
+        x: "-50%",
+        scale: 0.9,
         maskImage: "linear-gradient(to bottom, transparent 0, #000 38%)",
         WebkitMaskImage: "linear-gradient(to bottom, transparent 0, #000 38%)",
       }}
@@ -141,6 +161,6 @@ function LedgerPeek() {
           <span className="tabular font-medium text-transfer">$500.00</span>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
