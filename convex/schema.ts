@@ -64,6 +64,8 @@ export default defineSchema({
     passcodeHash: v.optional(v.string()),
     passcodeSalt: v.optional(v.string()),
     lockAfter: v.union(v.literal("always"), v.literal("5m"), v.literal("1h")),
+    /** Account a new entry starts on; falls back to the first visible account when unset or gone. */
+    defaultAccountId: v.optional(v.id("accounts")),
   }).index("by_user", ["userId"]),
 
   accountGroups: defineTable({

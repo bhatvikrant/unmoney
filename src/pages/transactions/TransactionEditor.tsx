@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { ArrowLeftRight, Calculator, Globe, Repeat, Star, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -22,6 +22,12 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { cn } from "@/lib/utils";
 
 type TxType = "income" | "expense" | "transfer";
+
+/** The account a new entry starts on: the chosen default while it is still visible, else the first visible one. */
+function defaultAccount(accounts: { _id: Id<"accounts">; hidden?: boolean }[], preferred?: Id<"accounts">) {
+  const visible = accounts.filter((a) => !a.hidden);
+  return (visible.find((a) => a._id === preferred) ?? visible[0])?._id;
+}
 
 type Form = {
   type: TxType;
@@ -59,7 +65,7 @@ export default function TransactionEditor() {
       type: (sp.get("type") as TxType) || "expense",
       date: sp.get("date") || todayISO(),
       time: settings.timeInputEnabled ? new Date().toTimeString().slice(0, 5) : "",
-      accountId: accounts.find((a) => !a.hidden)?._id,
+      accountId: defaultAccount(accounts, settings.defaultAccountId),
       amount: "", subCurrency: "", subAmount: "", note: "", description: "", tags: [], feeOn: false, fee: "", photoIds: [], repeat: { kind: "none" },
     };
     if (id) {
@@ -157,8 +163,14 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
 
   // Accounts can arrive after the form is created on a fresh load: fill the default then.
   useEffect(() => {
-    if (!f.accountId && accounts.length) set("accountId", accounts.find((a) => !a.hidden)?._id);
-  }, [accounts, f.accountId]);
+    if (!f.accountId && accounts.length) set("accountId", defaultAccount(accounts, settings.defaultAccountId));
+  }, [accounts, f.accountId, settings.defaultAccountId]);
+
+  // New entries start with the cursor in the amount, and go back there after "Continue".
+  const amountRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!isEdit) amountRef.current?.focus();
+  }, [isEdit]);
 
   function buildArgs() {
     const amountMajor = evaluateExpression(f.amount);
@@ -206,6 +218,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         toast.success("Saved");
         if (mode === "continue") {
           setF((p) => ({ ...p, amount: "", subAmount: "", note: "", description: "", tags: [], photoIds: [], fee: "", feeOn: false, repeat: { kind: "none" } }));
+          amountRef.current?.focus();
         } else {
           nav(-1);
         }
@@ -286,11 +299,11 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
             <div className="flex-1 flex items-center gap-2">
               {sub ? (
                 <>
-                  <PrefixedInput prefix={sub.code} inputMode="decimal" value={f.subAmount} onChange={(e) => set("subAmount", e.target.value)} placeholder="0" />
+                  <PrefixedInput ref={amountRef} prefix={sub.code} inputMode="decimal" value={f.subAmount} onChange={(e) => set("subAmount", e.target.value)} placeholder="0" />
                 </>
               ) : (
                 <>
-                  <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", String(v)); }} />
+                  <PrefixedInput ref={amountRef} prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", String(v)); }} />
                 </>
               )}
               <Button variant="ghost" size="icon" className="size-8" aria-label="Calculator" onClick={() => setSheet("keypad")}><Calculator className="size-4" /></Button>

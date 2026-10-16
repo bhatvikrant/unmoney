@@ -12,11 +12,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { clearUnlock } from "@/lib/passcode";
 import { Avatar } from "@/components/shell/Avatar";
+import type { Id } from "../../../convex/_generated/dataModel";
 
 export default function SettingsPage() {
   const nav = useNavigate();
-  const { settings: s, user } = useApp();
+  const { settings: s, user, accounts } = useApp();
   const update = useOp("settings.update");
+  const setDefaultAccount = useOp("settings.setDefaultAccount");
+  const visibleAccounts = accounts.filter((a) => !a.hidden);
+  const defaultAccount = visibleAccounts.some((a) => a._id === s.defaultAccountId) ? s.defaultAccountId! : "first";
   const { status, clearLocal } = useStore();
   const { signOut } = useAuthActions();
   async function onSignOut() {
@@ -52,6 +56,9 @@ export default function SettingsPage() {
         </Section>
         <Section title="Accounts">
           {link("Account settings", "/settings/transfer-expense", undefined, "Per account: whether it counts in your totals, whether it is shown, and whether money moved into it (savings, loans, investments) counts as spending.")}
+          <Row label="Default account" info="The account a new entry starts on. You can still pick another one on the entry itself. With no default, new entries start on the first visible account." right={
+            <Select value={defaultAccount} onValueChange={(v) => setDefaultAccount({ id: v === "first" ? undefined : (v as Id<"accounts">) })}><SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="first">First in list</SelectItem>{visibleAccounts.map((a) => <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>)}</SelectContent></Select>
+          } />
           {link("Account groups", "/settings/account-groups")}
           {link("Order & visibility", "/accounts/order")}
           {link("Deleted accounts", "/settings/deleted-accounts", undefined, "Accounts you have deleted, with their transactions kept. Restore one to bring it back, or delete it permanently.")}
