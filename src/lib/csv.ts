@@ -43,7 +43,7 @@ export async function parseXlsx(file: File): Promise<{ headers: string[]; rows: 
   for (const { data } of sheets) {
     const headerIdx = data.findIndex((r) => {
       const cells = r.map((c) => cellToString(c).toLowerCase());
-      return cells.includes("date") && cells.includes("amount");
+      return (cells.includes("date") || cells.includes("period")) && cells.includes("amount");
     });
     if (headerIdx < 0) continue;
     // Money Manager repeats "Amount" for the sub-currency amount; keep the first as-is, call the second "Amount Sub"
@@ -57,7 +57,8 @@ export async function parseXlsx(file: File): Promise<{ headers: string[]; rows: 
     if (!headers.length) headers = cols.filter(Boolean);
     for (const r of data.slice(headerIdx + 1)) {
       const obj: Record<string, string> = {};
-      cols.forEach((name, i) => { if (name) obj[name] = cellToString(r[i]); });
+      // Money Manager also repeats "Accounts" at the end; the first column wins
+      cols.forEach((name, i) => { if (name && !(name in obj)) obj[name] = cellToString(r[i]); });
       if (Object.values(obj).some((v) => v !== "")) rows.push(obj);
     }
   }
@@ -88,4 +89,13 @@ export function mapImportRow(row: Record<string, string>): {
     subAmount: get("Amount Sub", "Amount_1", "AmountSub", "subAmount") || undefined,
     subCurrency: get("Currency", "subCurrency") || undefined,
   };
+}
+
+/**
+ * Money Manager records every transfer twice (a Transfer-Out and a mirrored Transfer-In row).
+ * Keep only the Transfer-Out side so each transfer is imported once, in the right direction.
+ */
+export function dropTransferIns<T extends { type: string }>(rows: T[]): { rows: T[]; dropped: number } {
+  const kept = rows.filter((r) => !/^transfer[- ]?in/i.test(r.type.trim()));
+  return { rows: kept, dropped: rows.length - kept.length };
 }
