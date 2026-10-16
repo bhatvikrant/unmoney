@@ -111,6 +111,7 @@ export interface Ops {
   "settings.update": { args: { patch: SettingsPatch }; result: void };
   "settings.changeMainCurrency": { args: { code: string; keepData: boolean }; result: void };
   "settings.setPasscode": { args: { hash?: string; salt?: string }; result: void };
+  "settings.setDefaultAccount": { args: { id?: Id<"accounts"> }; result: void };
 
   "accountGroups.create": { args: { name: string; kind: Doc<"accountGroups">["kind"] }; result: Id<"accountGroups"> };
   "accountGroups.update": { args: { id: Id<"accountGroups">; name?: string; kind?: Doc<"accountGroups">["kind"] }; result: void };
@@ -201,6 +202,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "settings.update": ["settings"],
   "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets"],
   "settings.setPasscode": ["settings"],
+  "settings.setDefaultAccount": ["settings", "accounts"],
   "accountGroups.create": ["accountGroups"],
   "accountGroups.update": ["accountGroups"],
   "accountGroups.remove": ["accountGroups", "accounts"],
@@ -455,6 +457,11 @@ const handlers: Handlers = {
   "settings.setPasscode": (w, { hash, salt }) => {
     const s = w.requireSettings();
     w.patch("settings", s._id, { passcodeHash: hash, passcodeSalt: salt });
+  },
+  "settings.setDefaultAccount": (w, { id }) => {
+    const s = w.requireSettings();
+    if (id && w.must("accounts", id).deletedAt) throw new Error("That account is deleted");
+    w.patch("settings", s._id, { defaultAccountId: id });
   },
 
   "accountGroups.create": (w, { name, kind }) => {
@@ -1035,6 +1042,8 @@ const handlers: Handlers = {
     if (data.settings) {
       const existing = w.settings();
       const s = strip(data.settings);
+      // Account ids were reissued above; point the default at the restored copy, or drop it.
+      s.defaultAccountId = s.defaultAccountId ? accountIds.get(s.defaultAccountId as string) : undefined;
       if (existing) w.patch("settings", existing._id, s as never);
       else w.insert("settings", s as never);
     }
