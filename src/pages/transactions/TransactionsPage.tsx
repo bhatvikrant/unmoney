@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { Search, Star, SlidersHorizontal, StickyNote, Download, X } from "lucide-react";
+import { Search, Star, SlidersHorizontal, StickyNote, Download, X, CheckSquare } from "lucide-react";
 import { toast } from "sonner";
 import { useView } from "@/lib/store";
 import { budgetStatus, notesRange, txCarryBefore, txExportRows, txListRange } from "../../../shared/views";
@@ -16,6 +16,8 @@ import { MonthNav } from "@/components/shell/MonthNav";
 import { Money, SummaryBar } from "@/components/shell/Money";
 import { Fab, SegmentedTabs } from "@/components/shell/misc";
 import { TransactionList, type Tx } from "@/components/tx/TransactionList";
+import { BulkBar } from "@/components/tx/BulkActions";
+import { useBulkSelect } from "@/components/tx/useBulkSelect";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -33,6 +35,7 @@ export default function TransactionsPage() {
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
   const [filterOpen, setFilterOpen] = useState(false);
+  const bulk = useBulkSelect();
 
   const snap = useView();
   const raw = useMemo(() => txListRange(snap, range.from, range.to), [snap, range.from, range.to]);
@@ -68,6 +71,7 @@ export default function TransactionsPage() {
         left={<Button variant="ghost" size="icon" aria-label="Search" onClick={() => nav("/search")}><Search className="size-5" /></Button>}
         right={
           <>
+            {view === "daily" ? <Button variant="ghost" size="icon" aria-label="Select entries" className={cn(bulk.active && "text-primary")} onClick={() => (bulk.active ? bulk.exit() : bulk.start())}><CheckSquare className="size-5" /></Button> : null}
             <Button variant="ghost" size="icon" aria-label="Bookmarks" onClick={() => nav("/bookmarks")}><Star className="size-5" /></Button>
             <Button variant="ghost" size="icon" aria-label="Filter" className={cn(filtered && "text-primary")} onClick={() => setFilterOpen(true)}><SlidersHorizontal className="size-5" /></Button>
           </>
@@ -88,16 +92,17 @@ export default function TransactionsPage() {
           </div>
         }
       />
-      <Page>
+      <Page className={cn(bulk.active && view === "daily" && "pb-40")}>
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
-        {raw && view === "daily" ? <TransactionList txs={txs} emptyText="No transactions this month. Tap + to add one." /> : null}
+        {raw && view === "daily" ? <TransactionList txs={txs} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}
         {raw && view === "weekly" ? <WeeklyView txs={txs} range={range} /> : null}
         {view === "monthly" ? <MonthlyView month={month} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}
         {raw && view === "summary" ? <SummaryView txs={txs} month={month} range={range} /> : null}
       </Page>
       {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[calc(var(--tabbar-h)+6rem)] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
-      <Fab onClick={() => nav(`/t/new?date=${addDate()}`)} />
+      {bulk.active && view === "daily" ? null : <Fab onClick={() => nav(`/t/new?date=${addDate()}`)} />}
+      {view === "daily" ? <BulkBar bulk={bulk} txs={txs} /> : null}
       <FilterSheet open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>
   );
@@ -258,7 +263,7 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
     try {
       const rows = txExportRows(snap, range.from, range.to);
       const csv = toCSV(rows.map((r) => ({
-        Date: r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note,
+        Date: r.time ? `${r.date} ${r.time}` : r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note,
         Amount: toMajor(Number(r.amount), settings.decimals), "Income/Expense": r.type, Description: r.description,
         "Amount Sub": r.subAmount, Currency: r.subCurrency, Fee: r.fee === "" ? "" : toMajor(Number(r.fee), settings.decimals), Tags: r.tags,
       })));

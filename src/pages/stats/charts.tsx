@@ -7,23 +7,38 @@ export function colorAt(i: number) {
   return CATEGORY_COLORS[i % CATEGORY_COLORS.length];
 }
 
+/** Slices below this share get no label or leader line, so a line never points at nothing. */
+const LABEL_MIN = 0.05;
+
 export function CategoryPie({ items }: { items: { id: string; name: string; amount: number; pct: number }[] }) {
   const { fmt } = useApp();
   const top = items.slice(0, 9);
   const rest = items.slice(9).reduce((s, i) => s + i.amount, 0);
   const data = rest ? [...top, { id: "other", name: "Other", amount: rest, pct: 0 }] : top;
   if (!data.length) return <div className="h-52 flex items-center justify-center text-sm text-muted-foreground">Nothing recorded in this period</div>;
+  const total = data.reduce((s, d) => s + d.amount, 0);
   return (
-    <div className="h-64">
+    <div className="h-64 relative">
       <ResponsiveContainer width="100%" height="100%">
-        <PieChart margin={{ top: 16, bottom: 16, left: 16, right: 16 }}>
-          <Pie data={data} dataKey="amount" nameKey="name" innerRadius={46} outerRadius={78} paddingAngle={1} stroke="none" isAnimationActive={false}
-            label={({ name, percent }) => ((percent ?? 0) >= 0.05 ? `${name} ${Math.round((percent ?? 0) * 100)}%` : "")} labelLine={{ strokeOpacity: 0.3 }} fontSize={11}>
+        <PieChart margin={{ top: 16, bottom: 16, left: 24, right: 24 }}>
+          {/* 12 o'clock, clockwise: the same order as the list below */}
+          <Pie data={data} dataKey="amount" nameKey="name" startAngle={90} endAngle={-270} innerRadius={46} outerRadius={78} paddingAngle={data.length > 1 ? 1 : 0} minAngle={2} stroke="none" isAnimationActive={false}
+            label={({ name, percent }) => ((percent ?? 0) >= LABEL_MIN ? `${name} ${Math.round((percent ?? 0) * 100)}%` : "")}
+            labelLine={(props: { percent?: number; points?: { x: number; y: number }[] }) => {
+              const pts = props.points;
+              if ((props.percent ?? 0) < LABEL_MIN || !pts?.length) return <g />;
+              return <polyline points={pts.map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke="currentColor" strokeOpacity={0.3} />;
+            }}
+            fontSize={11}>
             {data.map((_, i) => <Cell key={i} fill={colorAt(i)} />)}
           </Pie>
           <Tooltip formatter={(v) => fmt(Number(v))} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
         </PieChart>
       </ResponsiveContainer>
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+        <span className="text-[10px] text-muted-foreground">Total</span>
+        <span className="text-[11px] font-medium tabular">{fmt(total)}</span>
+      </div>
     </div>
   );
 }

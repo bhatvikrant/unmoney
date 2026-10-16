@@ -104,6 +104,7 @@ export type ImportRow = {
   /** HH:MM, when the source has times (Money Manager's Excel export does). */
   time?: string;
 };
+export type NewImportAccount = { name: string; groupKind: Doc<"accountGroups">["kind"] };
 
 export interface Ops {
   "settings.completeOnboarding": { args: { currency: string; symbolPosition?: "before" | "after" }; result: void };
@@ -134,7 +135,7 @@ export interface Ops {
   "transactions.create": { args: TxFields & { repeat?: { frequency: Frequency; endDate?: string }; installment?: { count: number } }; result: Id<"transactions"> };
   "transactions.update": { args: TxFields & { id: Id<"transactions">; scope?: "one" | "future" }; result: void };
   "transactions.remove": { args: { id: Id<"transactions">; scope?: "one" | "future" | "all" }; result: void };
-  "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
+  "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
   "transactions.bulkRemove": { args: { ids: Id<"transactions">[] }; result: void };
   "transactions.importRows": {
     /**
@@ -142,7 +143,7 @@ export interface Ops {
      * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry ·
      * rowOffset: numbering of the first row, for chunked imports
      */
-    args: { rows: ImportRow[]; createMissing?: boolean; createAccounts?: boolean; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
+    args: { rows: ImportRow[]; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
     result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
   };
   "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean }; result: Id<"transactions"> };
@@ -630,21 +631,26 @@ const handlers: Handlers = {
     w.delete("transactions", id);
   },
 
-  "transactions.bulkUpdate": (w, { ids, date, note, categoryId, accountId }) => {
+  "transactions.bulkUpdate": (w, { ids, date, note, categoryId, subcategoryId, accountId }) => {
     if (categoryId) w.must("categories", categoryId);
     if (accountId) w.must("accounts", accountId);
+    if (subcategoryId) {
+      const sub = w.must("categories", subcategoryId);
+      if (sub.parentId !== categoryId) throw new Error("Subcategory does not belong to that category");
+    }
     if (date !== undefined && !isDate(date)) throw new Error("Bad date");
     for (const id of ids) {
       const tx = w.must("transactions", id);
       const patch: Partial<Doc<"transactions">> = {};
       if (date) patch.date = date;
       if (note !== undefined) patch.note = note;
-      if (accountId) patch.accountId = accountId;
+      // a transfer cannot end up going from an account to itself
+      if (accountId && !(tx.type === "transfer" && tx.toAccountId === accountId)) patch.accountId = accountId;
       if (categoryId && tx.type !== "transfer") {
         const cat = w.get("categories", categoryId);
         if (cat && cat.type === tx.type) {
           patch.categoryId = categoryId;
-          patch.subcategoryId = undefined;
+          patch.subcategoryId = subcategoryId;
         }
       }
       w.patch("transactions", id, patch);
@@ -658,9 +664,34 @@ const handlers: Handlers = {
     }
   },
 
-  "transactions.importRows": (w, { rows, createMissing, createAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
+  "transactions.importRows": (w, { rows, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
     const settings = w.requireSettings();
     const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
+    // Accounts the import should create first. Cards need a bank to bill / link to, so non-card kinds go first.
+    const wanted = (newAccounts ?? []).filter((a) => a.name.trim() && !accByName.has(a.name.trim().toLowerCase()));
+    wanted.sort((a, b) => Number(a.groupKind === "card" || a.groupKind === "debitCard") - Number(b.groupKind === "card" || b.groupKind === "debitCard"));
+    const groupFor = (kind: Doc<"accountGroups">["kind"]): Id<"accountGroups"> => {
+      const g = w.snap.accountGroups.find((x) => x.kind === kind && !x.deletedAt);
+      if (g) return g._id;
+      const def = DEFAULT_GROUPS.find((x) => x.kind === kind);
+      return w.insert("accountGroups", { name: def?.name ?? kind, kind, order: nextOrder(w.snap.accountGroups) });
+    };
+    const createdBanks: Doc<"accounts">[] = [];
+    for (const a of wanted) {
+      const kind = a.groupKind;
+      const bank = createdBanks[0] ?? [...accByName.values()].find((x) => w.get("accountGroups", x.groupId)?.kind === "bank")
+        ?? [...accByName.values()].find((x) => !["card", "debitCard"].includes(w.get("accountGroups", x.groupId)?.kind ?? ""));
+      if ((kind === "card" || kind === "debitCard") && !bank) throw new Error(`"${a.name}" is a card but there is no bank account for it to bill. Add a bank account first.`);
+      const id = w.insert("accounts", {
+        groupId: groupFor(kind), name: a.name.trim(), initialBalance: 0, includeInTotals: true, hidden: false,
+        order: nextOrder(w.snap.accounts), transferAsExpense: false,
+        ...(kind === "card" ? { billingAccountId: bank!._id, settlementDay: 1, paymentDay: 15 } : {}),
+        ...(kind === "debitCard" ? { linkedAccountId: bank!._id } : {}),
+      });
+      const created = w.get("accounts", id)!;
+      accByName.set(a.name.trim().toLowerCase(), created);
+      if (kind === "bank") createdBanks.push(created);
+    }
     const catKey = (type: string, name: string, parent?: string) => `${type}:${parent ?? ""}:${name.toLowerCase()}`;
     const catByKey = new Map(w.snap.categories.filter((c) => !c.deletedAt).map((c) => [catKey(c.type, c.name, c.parentId), c]));
     const errors: { row: number; reason: string }[] = [];
@@ -705,7 +736,7 @@ const handlers: Handlers = {
         description: r.description?.trim() || undefined, tags: [], photoIds: [],
         time: time ? `${time[1].padStart(2, "0")}:${time[2]}` : undefined,
       };
-      if (r.subAmount && r.subCurrency) {
+      if (r.subAmount && r.subCurrency && r.subCurrency.trim().toLowerCase() !== settings.mainCurrency.toLowerCase()) {
         const cur = w.snap.currencies.find((c) => c.code.toLowerCase() === r.subCurrency!.trim().toLowerCase());
         if (cur && cur.code !== settings.mainCurrency) {
           base.subCurrency = cur.code;
