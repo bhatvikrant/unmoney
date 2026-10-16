@@ -1,17 +1,11 @@
 import { useEffect, useState } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { applyTheme } from "@/lib/theme";
 import { toast } from "sonner";
 
-// Mint from the accent list in lib/theme.ts. Dark text on it reads far better than white.
-const PRIMARY = "bg-[oklch(0.62_0.15_160)] text-[oklch(0.15_0_0)] hover:bg-[oklch(0.62_0.15_160)] hover:brightness-95";
-
 export default function SignIn() {
   const { signIn } = useAuthActions();
-  const [flow, setFlow] = useState<"signIn" | "signUp">("signIn");
   const [busy, setBusy] = useState(false);
 
   // The saved theme loads with the ledger, which happens after sign-in, so follow the system here.
@@ -23,22 +17,15 @@ export default function SignIn() {
     return () => mq.removeEventListener("change", h);
   }, []);
 
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    fd.set("flow", flow);
+  async function google() {
     setBusy(true);
     try {
-      await signIn("password", fd);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(flow === "signIn" ? "Could not sign in. Check your email and password." : `Could not create the account. ${msg.includes("already") ? "That email is already registered." : "Use at least 8 characters."}`);
-    } finally {
+      await signIn("google");
+    } catch {
+      toast.error("Could not start Google sign-in. Try again in a moment.");
       setBusy(false);
     }
   }
-
-  const signingIn = flow === "signIn";
 
   return (
     <div className="min-h-dvh flex flex-col items-center justify-center gap-8 bg-background px-4 py-10">
@@ -52,12 +39,14 @@ export default function SignIn() {
       </div>
 
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-sm dark:shadow-black/40">
-        <h1 className="text-xl font-semibold tracking-tight">{signingIn ? "Welcome back" : "Create your account"}</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Welcome to UnMoney</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Sign in with Google to sync your ledger across devices.</p>
 
         <Button
           variant="outline"
           className="mt-5 h-10 w-full rounded-xl text-sm font-medium"
-          onClick={() => signIn("google").catch(() => toast.error("Google sign-in is not configured yet. Set AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET on the Convex deployment."))}
+          disabled={busy}
+          onClick={google}
         >
           <svg viewBox="0 0 48 48" className="size-[18px]" aria-hidden="true">
             <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
@@ -67,52 +56,7 @@ export default function SignIn() {
           </svg>
           Continue with Google
         </Button>
-
-        <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-          <div className="h-px flex-1 bg-border" />
-          or
-          <div className="h-px flex-1 bg-border" />
-        </div>
-
-        <form onSubmit={submit} className="space-y-4">
-          {!signingIn ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="name" className="font-medium">Name</Label>
-              <Input id="name" name="name" autoComplete="name" className="h-10 rounded-xl px-3 md:text-sm" />
-            </div>
-          ) : null}
-          <div className="space-y-1.5">
-            <Label htmlFor="email" className="font-medium">Email</Label>
-            <Input id="email" name="email" type="email" required autoComplete="email" className="h-10 rounded-xl px-3 md:text-sm" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password" className="font-medium">Password</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              required
-              minLength={8}
-              autoComplete={signingIn ? "current-password" : "new-password"}
-              className="h-10 rounded-xl px-3 md:text-sm"
-            />
-          </div>
-          <Button type="submit" className={`mt-2 h-10 w-full rounded-xl text-sm font-semibold ${PRIMARY}`} disabled={busy}>
-            {signingIn ? "Sign in" : "Create account"}
-          </Button>
-        </form>
       </div>
-
-      <p className="text-sm text-muted-foreground">
-        {signingIn ? "New here?" : "Already have an account?"}{" "}
-        <button
-          type="button"
-          className="font-medium text-foreground underline underline-offset-4 hover:opacity-80"
-          onClick={() => setFlow(signingIn ? "signUp" : "signIn")}
-        >
-          {signingIn ? "Create an account" : "Sign in"}
-        </button>
-      </p>
     </div>
   );
 }
