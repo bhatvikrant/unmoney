@@ -132,7 +132,7 @@ export interface Ops {
   "transactions.create": { args: TxFields & { repeat?: { frequency: Frequency; endDate?: string }; installment?: { count: number } }; result: Id<"transactions"> };
   "transactions.update": { args: TxFields & { id: Id<"transactions">; scope?: "one" | "future" }; result: void };
   "transactions.remove": { args: { id: Id<"transactions">; scope?: "one" | "future" | "all" }; result: void };
-  "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
+  "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
   "transactions.bulkRemove": { args: { ids: Id<"transactions">[] }; result: void };
   "transactions.importRows": { args: { rows: ImportRow[]; createMissing?: boolean }; result: { inserted: number; errors: { row: number; reason: string }[] } };
   "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean }; result: Id<"transactions"> };
@@ -620,21 +620,26 @@ const handlers: Handlers = {
     w.delete("transactions", id);
   },
 
-  "transactions.bulkUpdate": (w, { ids, date, note, categoryId, accountId }) => {
+  "transactions.bulkUpdate": (w, { ids, date, note, categoryId, subcategoryId, accountId }) => {
     if (categoryId) w.must("categories", categoryId);
     if (accountId) w.must("accounts", accountId);
+    if (subcategoryId) {
+      const sub = w.must("categories", subcategoryId);
+      if (sub.parentId !== categoryId) throw new Error("Subcategory does not belong to that category");
+    }
     if (date !== undefined && !isDate(date)) throw new Error("Bad date");
     for (const id of ids) {
       const tx = w.must("transactions", id);
       const patch: Partial<Doc<"transactions">> = {};
       if (date) patch.date = date;
       if (note !== undefined) patch.note = note;
-      if (accountId) patch.accountId = accountId;
+      // a transfer cannot end up going from an account to itself
+      if (accountId && !(tx.type === "transfer" && tx.toAccountId === accountId)) patch.accountId = accountId;
       if (categoryId && tx.type !== "transfer") {
         const cat = w.get("categories", categoryId);
         if (cat && cat.type === tx.type) {
           patch.categoryId = categoryId;
-          patch.subcategoryId = undefined;
+          patch.subcategoryId = subcategoryId;
         }
       }
       w.patch("transactions", id, patch);
