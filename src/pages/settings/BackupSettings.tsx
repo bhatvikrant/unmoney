@@ -9,7 +9,7 @@ import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { downloadText, mapImportRow, parseTable, parseXlsx, toCSV } from "@/lib/csv";
+import { downloadText, mapImportRow, dropTransferIns, parseTable, parseXlsx, toCSV } from "@/lib/csv";
 import { toMajor } from "../../../shared/money";
 
 export default function BackupSettings() {
@@ -55,7 +55,9 @@ export default function BackupSettings() {
     }
     const { headers, rows } = parsed;
     if (!rows.length) { toast.error("No rows found. Expected a Date and Amount column"); if (importRef.current) importRef.current.value = ""; return; }
-    setPreview({ headers, rows: rows.map(mapImportRow) });
+    const { rows: mapped, dropped } = dropTransferIns(rows.map(mapImportRow));
+    if (dropped) toast.info(`Skipped ${dropped} Transfer-In rows (each transfer is imported once, from its Transfer-Out row)`);
+    setPreview({ headers, rows: mapped });
     setErrors([]);
     if (importRef.current) importRef.current.value = "";
   }
