@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useOp, useView } from "@/lib/store";
 import { backupExport, txExportRows } from "../../../shared/views";
-import type { BackupData } from "../../../shared/ops";
+import { applyOp, type BackupData } from "../../../shared/ops";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -15,6 +15,8 @@ import type { NewImportAccount } from "../../../shared/ops";
 import { completeSheets, moneyManagerSheet } from "../../../shared/export";
 import { downloadWorkbook, downloadXlsx } from "@/lib/xlsx";
 import { toMajor } from "../../../shared/money";
+
+const IMPORT_CHUNK = 400;
 
 export default function BackupSettings() {
   const view = useView();
@@ -81,9 +83,20 @@ export default function BackupSettings() {
     if (!preview) return;
     setBusy(true);
     try {
-      const res = await importRows({ rows: preview.rows, createMissing, newAccounts: createAccounts ? Object.entries(accountKinds).map(([name, groupKind]) => ({ name, groupKind })) : undefined });
-      if (res.errors.length) { setErrors(res.errors); toast.error(`${res.errors.length} rows need fixing; nothing was imported`); }
-      else { toast.success(`Imported ${res.inserted} entries`); setPreview(null); }
+      const newAccounts = createAccounts ? Object.entries(accountKinds).map(([name, groupKind]) => ({ name, groupKind })) : undefined;
+      // Check the whole file first, so a bad row can never leave a half-finished import behind
+      const dry = applyOp(view, { id: "dry-run", kind: "transactions.importRows", args: { rows: preview.rows, createMissing, newAccounts }, at: Date.now() }, { userId: "dry-run" as never });
+      const problems = (dry.result as { errors: { row: number; reason: string }[] }).errors;
+      if (problems.length) { setErrors(problems); toast.error(`${problems.length} rows need fixing; nothing was imported`); setBusy(false); return; }
+      // Small chunks keep each server write well inside Convex's per-mutation limits. Accounts go in the first chunk.
+      let inserted = 0;
+      for (let i = 0; i < preview.rows.length; i += IMPORT_CHUNK) {
+        const res = await importRows({ rows: preview.rows.slice(i, i + IMPORT_CHUNK), createMissing, newAccounts: i === 0 ? newAccounts : undefined });
+        if (res.errors.length) { setErrors(res.errors); toast.error(`Import stopped after ${inserted} entries: ${res.errors[0].reason}`); setBusy(false); return; }
+        inserted += res.inserted;
+      }
+      toast.success(`Imported ${inserted} entries`);
+      setPreview(null);
     } catch (e) { toast.error(e instanceof Error ? e.message : "Import failed"); }
     setBusy(false);
   }
