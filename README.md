@@ -6,7 +6,7 @@ A web rebuild of Money Manager (Realbyte) with every feature unlocked and no pay
 
 - Vite + React 19 + TypeScript, React Router, Tailwind 4, shadcn/ui, Framer Motion, Recharts
 - Convex: database, reactive queries, file storage for receipt photos, daily cron for repeat schedules
-- Convex Auth: email + password, and Google (optional)
+- Convex Auth: Google sign-in only
 
 ## Run it
 
@@ -24,9 +24,9 @@ npm run dev           # http://localhost:5173
 npx @convex-dev/auth --web-server-url http://localhost:5173
 ```
 
-This sets `SITE_URL`, `JWT_PRIVATE_KEY` and `JWKS` on the deployment. Email + password works right away.
+This sets `SITE_URL`, `JWT_PRIVATE_KEY` and `JWKS` on the deployment.
 
-For Google sign-in, create an OAuth client (Web application) in Google Cloud with the redirect URI `https://<your-deployment>.convex.site/api/auth/callback/google`, then:
+Sign-in is Google only. Create an OAuth client (Web application) in Google Cloud with the redirect URI `https://<your-deployment>.convex.site/api/auth/callback/google`, then:
 
 ```bash
 npx convex env set AUTH_GOOGLE_ID <client id>
@@ -61,7 +61,7 @@ If the production URL ever changes (custom domain), update it on the backend: `n
 
 ### Google sign-in in production
 
-Not configured yet; "Continue with Google" fails until it is. In Google Cloud, create an OAuth client (Web application) with this redirect URI:
+"Continue with Google" fails until this is set up. In Google Cloud, create an OAuth client (Web application) with this redirect URI:
 
 ```
 https://brilliant-cheetah-609.convex.site/api/auth/callback/google
@@ -86,7 +86,7 @@ How it fits together:
 - `shared/views.ts` holds the read models (ledger, stats, budgets, search, exports) as pure functions over that snapshot, so nothing needs a server query.
 - `src/lib/store.tsx` keeps the replica, the queue and the id map in IndexedDB (`src/lib/db.ts`), streams the server's tables with `sync.table` subscriptions, replays queued ops on top, and drains the queue in order with the idempotent `sync.apply` mutation (`syncOps` table). A rejected op (for example a category deleted on another device meanwhile) is undone locally and reported in a toast.
 - Receipt photos are queued too: the file is kept in IndexedDB and uploaded when online. Photos already seen are cached by the service worker.
-- The service worker (`vite-plugin-pwa`) precaches the app shell, so the app opens with no connection at all. The first load on a new device, signing in, and creating an account still need a connection. When a new version is deployed, the app shows a "new version is ready" toast and reloads into it when you tap Reload (queued changes are in IndexedDB, so nothing is lost); installed apps check for a new version hourly and whenever they come back to the front.
+- The service worker (`vite-plugin-pwa`) precaches the app shell, so the app opens with no connection at all. The first load on a new device, and signing in still need a connection. When a new version is deployed, the app shows a "new version is ready" toast and reloads into it when you tap Reload (queued changes are in IndexedDB, so nothing is lost); installed apps check for a new version hourly and whenever they come back to the front.
 
 Conflicts are resolved last-writer-wins per op: two devices editing the same entry offline end up with whichever synced last.
 
