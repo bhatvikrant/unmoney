@@ -130,6 +130,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
   const [sheet, setSheet] = useState<null | "account" | "to" | "category" | "keypad" | "feeKeypad" | "repeat" | "currency">(null);
   const [noteFocus, setNoteFocus] = useState(false);
+  const [notePicked, setNotePicked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<null | "delete" | "copy" | "scope">(null);
 
@@ -142,7 +143,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   const removeBookmark = useOp("bookmarks.remove");
   const bookmarked = useMemo(() => (id ? view.bookmarks.find((b) => b.transactionId === id) : undefined), [view, id]);
   const tagList = useMemo(() => txTags(view), [view]);
-  const wantSuggestions = settings.autocompleteEnabled && noteFocus && f.type !== "transfer";
+  const wantSuggestions = settings.autocompleteEnabled && noteFocus && !notePicked && f.type !== "transfer";
   const suggestions = useMemo(() => (wantSuggestions ? noteSuggestions(view, f.note, f.type) : undefined), [view, wantSuggestions, f.note, f.type]);
 
   const sub = f.subCurrency ? currencies.find((c) => c.code === f.subCurrency) : undefined;
@@ -332,7 +333,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
 
           <Field label="Note">
             <div className="flex-1 relative">
-              <Input value={f.note} onChange={(e) => set("note", e.target.value)} onFocus={() => setNoteFocus(true)} onBlur={() => setTimeout(() => setNoteFocus(false), 150)} placeholder={f.type === "transfer" ? "Optional" : "Store, payee, item…"} className="h-8" />
+              <Input value={f.note} onChange={(e) => { setNotePicked(false); set("note", e.target.value); }} onFocus={() => { setNotePicked(false); setNoteFocus(true); }} onBlur={() => setTimeout(() => setNoteFocus(false), 150)} placeholder={f.type === "transfer" ? "Optional" : "Store, payee, item…"} className="h-8" />
               {noteFocus && suggestions?.length ? (
                 <div className="absolute z-20 left-0 right-0 top-9 rounded-md border bg-popover shadow-md max-h-56 overflow-y-auto">
                   {suggestions.map((s) => (
@@ -340,14 +341,14 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
                       key={s.note}
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setF((p) => ({
+                      onClick={() => { setNotePicked(true); setF((p) => ({
                         ...p,
                         note: s.note,
                         categoryId: p.categoryId ?? s.categoryId,
                         subcategoryId: p.categoryId ? p.subcategoryId : s.subcategoryId,
                         amount: p.amount || String(toMajor(s.amount, settings.decimals)),
                         accountId: p.accountId ?? s.accountId,
-                      }))}
+                      })); }}
                       className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex justify-between gap-2"
                     >
                       <span className="truncate">{s.note}</span>
