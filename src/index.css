@@ -130,6 +130,16 @@
   html {
     @apply font-sans;
     }
+  /* iOS Safari gives native date inputs an intrinsic width/height that ignores w-full/h-*, so they overflow their container. */
+  input[type="date"] {
+    -webkit-appearance: none;
+    appearance: none;
+    min-width: 0;
+    }
+  input[type="date"]::-webkit-date-and-time-value {
+    margin: 0;
+    text-align: left;
+    }
 }
 /* ---- UnMoney tokens ---- */
 @theme inline {
