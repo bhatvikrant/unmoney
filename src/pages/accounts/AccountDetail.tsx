@@ -29,7 +29,7 @@ export default function AccountDetail() {
   const { id } = useParams();
   const nav = useNavigate();
   const { settings, categoryById, accountName, accounts, fmt } = useApp();
-  const { month, range, shift } = useMonthParam();
+  const { month, range, shift, setMonth } = useMonthParam();
   const [gran, setGran] = useState<"daily" | "monthly" | "yearly">("daily");
   const r = gran === "yearly" ? yearRange(parseMonthKey(month).y, settings.monthStartDay) : range;
   const view = useView();
@@ -47,7 +47,7 @@ export default function AccountDetail() {
     <>
       <PageHeader back="/payment-methods" title={a.name} right={<><Button variant="ghost" size="icon" aria-label="Edit" onClick={() => nav(`/payment-methods/${a._id}/edit`)}><Pencil className="size-4" /></Button>
         <Select value={gran} onValueChange={(v) => setGran(v as typeof gran)}><SelectTrigger className="h-8 w-16"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">D</SelectItem><SelectItem value="monthly">M</SelectItem><SelectItem value="yearly">Y</SelectItem></SelectContent></Select></>}
-        sub={<div className="mx-auto max-w-3xl"><MonthNav label={gran === "yearly" ? String(parseMonthKey(month).y) : monthLabel(month)} onPrev={() => shift(gran === "yearly" ? -12 : -1)} onNext={() => shift(gran === "yearly" ? 12 : 1)} /></div>} />
+        sub={<div className="mx-auto max-w-3xl"><MonthNav label={gran === "yearly" ? String(parseMonthKey(month).y) : monthLabel(month)} onPrev={() => shift(gran === "yearly" ? -12 : -1)} onNext={() => shift(gran === "yearly" ? 12 : 1)} month={month} onPick={setMonth} /></div>} />
       <Page className="pb-8">
         {a.archivedAt ? (
           <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border bg-muted/50 px-3 py-2 text-sm" role="status">
