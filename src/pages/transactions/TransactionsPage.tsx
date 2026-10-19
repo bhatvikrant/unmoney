@@ -31,6 +31,21 @@ import { kindLabel } from "../../../shared/defaults";
 
 type View = "daily" | "calendar" | "weekly" | "monthly" | "summary";
 
+const SWIPE_HINT_KEY = "unmoney.swipeHintSeen";
+/**
+ * Once: a left swipe on an entry opens its Delete rather than the next month, so say where that
+ * swipe still works. Kept per device (cleared with the rest on sign-out).
+ */
+function swipeHintOnce() {
+  try {
+    if (localStorage.getItem(SWIPE_HINT_KEY)) return;
+    localStorage.setItem(SWIPE_HINT_KEY, "1");
+  } catch {
+    return;
+  }
+  toast("Swiping left on an entry shows Delete. For the next month, swipe on a date row or tap the › arrow.", { duration: 6000 });
+}
+
 export default function TransactionsPage() {
   const nav = useNavigate();
   const { settings, ledger } = useApp();
@@ -47,7 +62,7 @@ export default function TransactionsPage() {
   // a fresh sheet on every open, so it starts from the filter in the URL (not ticks a Clear removed)
   const [filterKey, setFilterKey] = useState(0);
   const bulk = useBulkSelect();
-  const swipe = useSwipe(() => shift(1), () => shift(-1), !bulk.active);
+  const swipe = useSwipe(() => shift(1), () => shift(-1), !bulk.active, swipeHintOnce);
 
   const snap = useView();
   const raw = useMemo(() => txListRange(snap, range.from, range.to), [snap, range.from, range.to]);
