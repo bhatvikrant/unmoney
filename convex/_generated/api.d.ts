@@ -15,6 +15,7 @@ import type * as http from "../http.js";
 import type * as imports from "../imports.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_snapshot from "../lib/snapshot.js";
+import type * as migrations from "../migrations.js";
 import type * as passcode from "../passcode.js";
 import type * as repeats from "../repeats.js";
 import type * as seed from "../seed.js";
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   imports: typeof imports;
   "lib/auth": typeof lib_auth;
   "lib/snapshot": typeof lib_snapshot;
+  migrations: typeof migrations;
   passcode: typeof passcode;
   repeats: typeof repeats;
   seed: typeof seed;

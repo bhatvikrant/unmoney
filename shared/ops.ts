@@ -10,7 +10,8 @@
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import { addMonths, todayISO } from "./dates";
 import { currencyInfo } from "./currencies";
-import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_INCOME_CATEGORIES } from "./defaults";
+import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_INCOME_CATEGORIES, type AccountKind } from "./defaults";
+import { drawsFromLinked, resolveKind } from "./ledger";
 import { nextOccurrence, type Frequency } from "./repeat";
 import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
@@ -85,7 +86,9 @@ export type TxFields = {
 };
 export type AccountFields = {
   name: string;
-  groupId: Id<"accountGroups">;
+  kind: AccountKind;
+  /** Left out for a method outside any group. */
+  groupId?: Id<"accountGroups">;
   initialBalance: number;
   includeInTotals: boolean;
   hidden: boolean;
@@ -105,7 +108,7 @@ export type ImportRow = {
   /** HH:MM, when the source has times (Money Manager's Excel export does). */
   time?: string;
 };
-export type NewImportAccount = { name: string; groupKind: Doc<"accountGroups">["kind"] };
+export type NewImportAccount = { name: string; kind: AccountKind };
 export type CatType = "income" | "expense";
 /** A category in a tidy-up plan: an existing one, or one that a "create" step earlier in the plan makes. */
 export type CatRef = { id: Id<"categories"> } | { newKey: string };
@@ -138,8 +141,9 @@ export interface Ops {
   "settings.setPasscode": { args: { hash?: string; salt?: string }; result: void };
   "settings.setDefaultAccount": { args: { id?: Id<"accounts"> }; result: void };
 
-  "accountGroups.create": { args: { name: string; kind: Doc<"accountGroups">["kind"] }; result: Id<"accountGroups"> };
-  "accountGroups.update": { args: { id: Id<"accountGroups">; name?: string; kind?: Doc<"accountGroups">["kind"] }; result: void };
+  "accountGroups.create": { args: { name: string }; result: Id<"accountGroups"> };
+  "accountGroups.update": { args: { id: Id<"accountGroups">; name?: string }; result: void };
+  /** Deletes the group; the methods in it move out of any group. */
   "accountGroups.remove": { args: { id: Id<"accountGroups"> }; result: void };
   "accountGroups.restore": { args: { id: Id<"accountGroups"> }; result: void };
   "accountGroups.reorder": { args: { ids: Id<"accountGroups">[] }; result: void };
@@ -150,7 +154,11 @@ export interface Ops {
   "accounts.remove": { args: { id: Id<"accounts"> }; result: void };
   "accounts.restore": { args: { id: Id<"accounts"> }; result: void };
   "accounts.permanentlyDelete": { args: { id: Id<"accounts"> }; result: void };
-  "accounts.reorder": { args: { items: { id: Id<"accounts">; groupId: Id<"accountGroups"> }[] }; result: void };
+  "accounts.reorder": { args: { items: { id: Id<"accounts">; groupId?: Id<"accountGroups"> }[] }; result: void };
+  /** Puts methods into a group (at its end), or out of every group when groupId is left out. */
+  "accounts.move": { args: { ids: Id<"accounts">[]; groupId?: Id<"accountGroups"> }; result: void };
+  /** Migration: gives every account without a kind its group's old kind. Safe to run any number of times. */
+  "accounts.adoptKinds": { args: Record<string, never>; result: number };
   "accounts.payCard": { args: { id: Id<"accounts">; amount: number; date: string; fromAccountId?: Id<"accounts"> }; result: Id<"transactions"> };
 
   "categories.create": { args: { type: "income" | "expense"; name: string; parentId?: Id<"categories"> }; result: Id<"categories"> };
@@ -168,7 +176,7 @@ export interface Ops {
   "transactions.bulkRemove": { args: { ids: Id<"transactions">[] }; result: void };
   "transactions.importRows": {
     /**
-     * createMissing: categories · createAccounts: accounts, in the Others group · skipInvalid: import the good rows, report the rest ·
+     * createMissing: categories · createAccounts: accounts, of type Other · new accounts land outside any group · skipInvalid: import the good rows, report the rest ·
      * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry ·
      * rowOffset: numbering of the first row, for chunked imports · format: how the whole file writes dates and numbers
      */
@@ -254,6 +262,8 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "accounts.restore": ["accountGroups", "accounts"],
   "accounts.permanentlyDelete": ["accounts", "transactions"],
   "accounts.reorder": ["accountGroups", "accounts"],
+  "accounts.move": ["accountGroups", "accounts"],
+  "accounts.adoptKinds": ["accountGroups", "accounts"],
   "accounts.payCard": ["accounts", "transactions"],
   "categories.create": ["categories"],
   "categories.update": ["categories"],
@@ -542,11 +552,13 @@ function validateTx(w: Work, t: TxFields): TxFields {
   return c;
 }
 
-function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Doc<"accountGroups"> {
+/** Checks a payment method and returns its kind (an op from an older app may only name a group). */
+function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): AccountKind {
   if (!a.name.trim()) throw new Error("Name is required");
   checkAmount(a.initialBalance);
-  const group = w.must("accountGroups", a.groupId, "Pick a group");
-  if (group.kind === "card") {
+  if (a.groupId && w.must("accountGroups", a.groupId, "That group is gone").deletedAt) throw new Error("That group is deleted");
+  const kind = resolveKind(a, w.snap.accountGroups) as AccountKind;
+  if (kind === "card") {
     if (!a.billingAccountId) throw new Error("A credit card needs a billing account");
     if (a.billingAccountId === selfId) throw new Error("A card cannot bill itself");
     w.must("accounts", a.billingAccountId, "Billing account not found");
@@ -554,12 +566,13 @@ function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Do
       if (d === undefined || d < 1 || d > 31) throw new Error("Settlement and payment days must be between 1 and 31");
     }
   }
-  if (group.kind === "debitCard") {
-    if (!a.linkedAccountId) throw new Error("A debit card needs a linked bank account");
-    if (a.linkedAccountId === selfId) throw new Error("A debit card cannot link to itself");
-    w.must("accounts", a.linkedAccountId, "Linked account not found");
+  if (kind === "debitCard" && !a.linkedAccountId) throw new Error("A debit card needs a linked bank account");
+  if ((kind === "debitCard" || kind === "upi") && a.linkedAccountId) {
+    if (a.linkedAccountId === selfId) throw new Error("A payment method cannot link to itself");
+    const linked = w.must("accounts", a.linkedAccountId, "Linked account not found");
+    if (drawsFromLinked({ kind: resolveKind(linked, w.snap.accountGroups), linkedAccountId: linked.linkedAccountId })) throw new Error("Link to a bank account, not to another linked method");
   }
-  return group;
+  return kind;
 }
 
 const templateOf = (t: TxFields): Template => ({
@@ -884,10 +897,10 @@ const handlers: Handlers = {
     });
     const groupIds = new Map<string, Id<"accountGroups">>();
     let order = 0;
-    for (const g of DEFAULT_GROUPS) groupIds.set(g.kind, w.insert("accountGroups", { name: g.name, kind: g.kind as Doc<"accountGroups">["kind"], order: order++ }));
+    for (const name of DEFAULT_GROUPS) groupIds.set(name, w.insert("accountGroups", { name, order: order++ }));
     order = 0;
     for (const a of DEFAULT_ACCOUNTS) {
-      w.insert("accounts", { groupId: groupIds.get(a.groupKind)!, name: a.name, initialBalance: 0, includeInTotals: true, hidden: false, order: order++, transferAsExpense: false });
+      w.insert("accounts", { groupId: groupIds.get(a.group), kind: a.kind, name: a.name, initialBalance: 0, includeInTotals: true, hidden: false, order: order++, transferAsExpense: false });
     }
     order = 0;
     for (const name of DEFAULT_EXPENSE_CATEGORIES) w.insert("categories", { type: "expense", name, order: order++ });
@@ -935,18 +948,23 @@ const handlers: Handlers = {
     w.patch("settings", s._id, { defaultAccountId: id });
   },
 
-  "accountGroups.create": (w, { name, kind }) => {
+  "accountGroups.create": (w, { name }) => {
     if (!name.trim()) throw new Error("Name is required");
-    return w.insert("accountGroups", { name: name.trim(), kind, order: nextOrder(w.snap.accountGroups) });
+    return w.insert("accountGroups", { name: name.trim(), order: nextOrder(w.snap.accountGroups) });
   },
-  "accountGroups.update": (w, { id, name, kind }) => {
+  "accountGroups.update": (w, { id, name }) => {
     w.must("accountGroups", id);
-    w.patch("accountGroups", id, { ...(name !== undefined ? { name: name.trim() } : {}), ...(kind ? { kind } : {}) });
+    if (name !== undefined && !name.trim()) throw new Error("Name is required");
+    w.patch("accountGroups", id, name !== undefined ? { name: name.trim() } : {});
   },
   "accountGroups.remove": (w, { id }) => {
     w.must("accountGroups", id);
-    if (w.snap.accounts.some((a) => a.groupId === id && !a.deletedAt)) throw new Error("Move or delete the accounts in this group first");
-    w.patch("accountGroups", id, { deletedAt: Date.now() });
+    // Its methods (deleted ones too, so restoring one does not bring the group back) move out of any group.
+    // Each keeps its kind: a method in a legacy group whose kind came from the group gets it now.
+    for (const a of [...w.snap.accounts]) {
+      if (a.groupId === id) w.patch("accounts", a._id, { groupId: undefined, kind: resolveKind(a, w.snap.accountGroups) as AccountKind });
+    }
+    w.patch("accountGroups", id, { deletedAt: w.at });
   },
   "accountGroups.restore": (w, { id }) => {
     w.must("accountGroups", id);
@@ -957,19 +975,21 @@ const handlers: Handlers = {
   },
 
   "accounts.create": (w, a) => {
-    validateAccount(w, a);
-    return w.insert("accounts", { ...a, name: a.name.trim(), order: nextOrder(w.snap.accounts) });
+    const kind = validateAccount(w, a);
+    return w.insert("accounts", { ...a, kind, name: a.name.trim(), order: nextOrder(w.snap.accounts) });
   },
   "accounts.update": (w, { id, ...a }) => {
     w.must("accounts", id);
-    const group = validateAccount(w, a, id);
+    const kind = validateAccount(w, a, id);
     w.patch("accounts", id, {
       ...a,
+      kind,
+      groupId: a.groupId,
       name: a.name.trim(),
-      billingAccountId: group.kind === "card" ? a.billingAccountId : undefined,
-      settlementDay: group.kind === "card" ? a.settlementDay : undefined,
-      paymentDay: group.kind === "card" ? a.paymentDay : undefined,
-      linkedAccountId: group.kind === "debitCard" ? a.linkedAccountId : undefined,
+      billingAccountId: kind === "card" ? a.billingAccountId : undefined,
+      settlementDay: kind === "card" ? a.settlementDay : undefined,
+      paymentDay: kind === "card" ? a.paymentDay : undefined,
+      linkedAccountId: kind === "debitCard" || kind === "upi" ? a.linkedAccountId : undefined,
     });
   },
   "accounts.setHidden": (w, { id, hidden }) => {
@@ -982,9 +1002,9 @@ const handlers: Handlers = {
   },
   "accounts.restore": (w, { id }) => {
     const a = w.must("accounts", id);
+    // A method whose group was deleted meanwhile comes back outside any group.
     const g = w.get("accountGroups", a.groupId);
-    if (g?.deletedAt) w.patch("accountGroups", g._id, { deletedAt: undefined });
-    w.patch("accounts", id, { deletedAt: undefined });
+    w.patch("accounts", id, { deletedAt: undefined, kind: resolveKind(a, w.snap.accountGroups) as AccountKind, ...(g && !g.deletedAt ? {} : { groupId: undefined }) });
   },
   "accounts.permanentlyDelete": (w, { id }) => {
     w.must("accounts", id);
@@ -993,10 +1013,29 @@ const handlers: Handlers = {
   },
   "accounts.reorder": (w, { items }) => {
     items.forEach((it, i) => {
-      w.must("accounts", it.id);
-      w.must("accountGroups", it.groupId);
-      w.patch("accounts", it.id, { order: i, groupId: it.groupId });
+      const a = w.must("accounts", it.id);
+      if (it.groupId) w.must("accountGroups", it.groupId);
+      w.patch("accounts", it.id, { order: i, groupId: it.groupId, kind: resolveKind(a, w.snap.accountGroups) as AccountKind });
     });
+  },
+  "accounts.move": (w, { ids, groupId }) => {
+    if (!ids.length) throw new Error("Pick at least one payment method");
+    if (groupId && w.must("accountGroups", groupId, "That group is gone").deletedAt) throw new Error("That group is deleted");
+    // Moved methods go to the end of their new section, in the order they were listed in.
+    let order = nextOrder(w.snap.accounts);
+    for (const a of [...w.snap.accounts].filter((x) => ids.includes(x._id)).sort((x, y) => x.order - y.order)) {
+      if (a.groupId === groupId) continue;
+      w.patch("accounts", a._id, { groupId, order: order++, kind: resolveKind(a, w.snap.accountGroups) as AccountKind });
+    }
+  },
+  "accounts.adoptKinds": (w) => {
+    let n = 0;
+    for (const a of [...w.snap.accounts]) {
+      if (a.kind) continue;
+      w.patch("accounts", a._id, { kind: resolveKind(a, w.snap.accountGroups) as AccountKind });
+      n++;
+    }
+    return n;
   },
   "accounts.payCard": (w, { id, amount, date, fromAccountId }) => {
     const card = w.must("accounts", id);
@@ -1147,23 +1186,21 @@ const handlers: Handlers = {
   "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
     const settings = w.requireSettings();
     const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
-    // Accounts the import should create first. Cards need a bank to bill / link to, so non-card kinds go first.
+    // Payment methods the import should create first, all outside any group. Cards need a bank to bill / link to, so other kinds go first.
+    // (An older app sends the kind as groupKind.)
+    const kindOfNew = (a: NewImportAccount) => a.kind ?? (a as unknown as { groupKind?: AccountKind }).groupKind ?? "other";
+    const isCardKind = (k: string) => k === "card" || k === "debitCard";
     const wanted = (newAccounts ?? []).filter((a) => a.name.trim() && !accByName.has(a.name.trim().toLowerCase()));
-    wanted.sort((a, b) => Number(a.groupKind === "card" || a.groupKind === "debitCard") - Number(b.groupKind === "card" || b.groupKind === "debitCard"));
-    const groupFor = (kind: Doc<"accountGroups">["kind"]): Id<"accountGroups"> => {
-      const g = w.snap.accountGroups.find((x) => x.kind === kind && !x.deletedAt);
-      if (g) return g._id;
-      const def = DEFAULT_GROUPS.find((x) => x.kind === kind);
-      return w.insert("accountGroups", { name: def?.name ?? kind, kind, order: nextOrder(w.snap.accountGroups) });
-    };
+    wanted.sort((a, b) => Number(isCardKind(kindOfNew(a))) - Number(isCardKind(kindOfNew(b))));
+    const kindOfAcc = (x: Doc<"accounts">) => resolveKind(x, w.snap.accountGroups);
     const createdBanks: Doc<"accounts">[] = [];
     for (const a of wanted) {
-      const kind = a.groupKind;
-      const bank = createdBanks[0] ?? [...accByName.values()].find((x) => w.get("accountGroups", x.groupId)?.kind === "bank")
-        ?? [...accByName.values()].find((x) => !["card", "debitCard"].includes(w.get("accountGroups", x.groupId)?.kind ?? ""));
-      if ((kind === "card" || kind === "debitCard") && !bank) throw new Error(`"${a.name}" is a card but there is no bank account for it to bill. Add a bank account first.`);
+      const kind = kindOfNew(a);
+      const bank = createdBanks[0] ?? [...accByName.values()].find((x) => kindOfAcc(x) === "bank")
+        ?? [...accByName.values()].find((x) => !isCardKind(kindOfAcc(x)) && !drawsFromLinked({ kind: kindOfAcc(x), linkedAccountId: x.linkedAccountId }));
+      if (isCardKind(kind) && !bank) throw new Error(`"${a.name}" is a card but there is no bank account for it to bill. Add a bank account first.`);
       const id = w.insert("accounts", {
-        groupId: groupFor(kind), name: a.name.trim(), initialBalance: 0, includeInTotals: true, hidden: false,
+        kind, name: a.name.trim(), initialBalance: 0, includeInTotals: true, hidden: false,
         order: nextOrder(w.snap.accounts), transferAsExpense: false,
         ...(kind === "card" ? { billingAccountId: bank!._id, settlementDay: 1, paymentDay: 15 } : {}),
         ...(kind === "debitCard" ? { linkedAccountId: bank!._id } : {}),
@@ -1265,15 +1302,11 @@ const handlers: Handlers = {
     // Only create accounts some imported row still uses.
     const used = new Set(fresh.flatMap((p) => [p._acc.toLowerCase(), ...(p._to ? [p._to.toLowerCase()] : [])]));
     const createdAccounts: string[] = [];
-    if ([...toCreateAccs.keys()].some((k) => used.has(k))) {
-      let group = w.snap.accountGroups.find((g) => !g.deletedAt && g.kind === "other");
-      if (!group) group = w.get("accountGroups", w.insert("accountGroups", { name: "Others", kind: "other", order: nextOrder(w.snap.accountGroups) }))!;
-      for (const [key, name] of toCreateAccs) {
-        if (!used.has(key) || accByName.has(key)) continue;
-        const id = w.insert("accounts", { groupId: group._id, name, initialBalance: 0, includeInTotals: true, hidden: false, order: nextOrder(w.snap.accounts), transferAsExpense: false });
-        accByName.set(key, w.get("accounts", id)!);
-        createdAccounts.push(name);
-      }
+    for (const [key, name] of toCreateAccs) {
+      if (!used.has(key) || accByName.has(key)) continue;
+      const id = w.insert("accounts", { kind: "other", name, initialBalance: 0, includeInTotals: true, hidden: false, order: nextOrder(w.snap.accounts), transferAsExpense: false });
+      accByName.set(key, w.get("accounts", id)!);
+      createdAccounts.push(name);
     }
     // Only create categories some imported row still uses.
     const usedCats = new Set(fresh.flatMap((p) => (p._catName ? [`${p.type}:${p._catName.toLowerCase()}`, `${p.type}:${p._catName.toLowerCase()}:${(p._subName ?? "").toLowerCase()}`] : [])));
@@ -1469,15 +1502,21 @@ const handlers: Handlers = {
     if (!data || data.version !== 1) throw new Error("Not an UnMoney backup file");
     for (const t of ["notes", "categories", "repeats", "bookmarks", "budgets", "accounts", "accountGroups", "currencies"] as const) w.clear(t);
     if (entries) w.clear("transactions");
+    // Backups from before payment methods had their own kind keep it on the group: carry it over.
+    const oldGroups = (data.accountGroups ?? []).map((g) => ({ _id: g._id as string, kind: g.kind as string | undefined }));
     const groupIds = new Map<string, Id<"accountGroups">>();
-    for (const g of data.accountGroups ?? []) groupIds.set(g._id as string, w.insert("accountGroups", strip(g) as never));
+    for (const g of data.accountGroups ?? []) {
+      const { kind, ...rest } = strip(g);
+      void kind;
+      groupIds.set(g._id as string, w.insert("accountGroups", rest as never));
+    }
     const accountIds = new Map<string, Id<"accounts">>();
     for (const a of data.accounts ?? []) {
       const { billingAccountId, linkedAccountId, ...rest } = strip(a);
       void billingAccountId; void linkedAccountId;
-      const groupId = groupIds.get(a.groupId as string);
-      if (!groupId) continue;
-      accountIds.set(a._id as string, w.insert("accounts", { ...rest, groupId } as never));
+      const kind = resolveKind({ kind: a.kind as string | undefined, groupId: a.groupId as string | undefined }, oldGroups);
+      // A method whose group is not in the backup comes back outside any group.
+      accountIds.set(a._id as string, w.insert("accounts", { ...rest, kind, groupId: groupIds.get(a.groupId as string) } as never));
     }
     for (const a of data.accounts ?? []) {
       const self = accountIds.get(a._id as string);

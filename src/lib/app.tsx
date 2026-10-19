@@ -1,11 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { type Ctx as LedgerCtx } from "../../shared/ledger";
 import { formatMoney } from "../../shared/money";
 import { dueRepeats } from "../../shared/ops";
 import { todayISO } from "../../shared/dates";
 import { accountsList, categoriesList, currenciesList, groupsList, ledgerOf, type AccountRow, type AccountGroupRow } from "../../shared/views";
-import { useStore, useView } from "./store";
+import { useOp, useStore, useView } from "./store";
+import { getRates } from "./fxRates";
 import { applyTheme } from "./theme";
 
 export type Settings = Doc<"settings">;
@@ -102,4 +103,62 @@ export function useCatchUpRepeats() {
     if (due) dispatch("repeats.catchUp", { today }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [due, today]);
+}
+
+/**
+ * Payment methods used to take their type from their group. Copy it onto any that still lack
+ * one, once, as an ordinary op: it works offline and the server runs the same change.
+ */
+export function useAdoptAccountKinds() {
+  const { dispatch, view } = useStore();
+  const needed = view.accounts.some((a) => !a.kind);
+  useEffect(() => {
+    if (needed) dispatch("accounts.adoptKinds", {}).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needed]);
+}
+
+/**
+ * Fetch the latest rates (reusing a recent fetch) and store the ones that moved on the sub currencies,
+ * so new entries pick them up. Custom currencies are never touched, and neither are saved entries:
+ * each keeps the rate it was saved with.
+ */
+export function useRefreshRates() {
+  const { settings, currencies } = useApp();
+  const setRates = useOp("currencies.setRates");
+  const base = settings.mainCurrency;
+  const latest = useRef({ base, currencies });
+  useEffect(() => { latest.current = { base, currencies }; }, [base, currencies]);
+  return useCallback(async (opts?: { maxAge?: number; force?: boolean }) => {
+    const fx = await getRates(base, opts);
+    // Only rates we just reached go into the ledger: saved ones may be older than what another device stored.
+    if (!fx || fx.fallback || fx.base !== latest.current.base) return fx;
+    const rates = latest.current.currencies
+      .filter((c) => !c.isCustom && fx.rates[c.code] > 0 && fx.rates[c.code] !== c.rate)
+      .map((c) => ({ id: c._id, rate: fx.rates[c.code] }));
+    if (rates.length) await setRates({ rates }).catch(() => {});
+    return fx;
+  }, [base, setRates]);
+}
+
+/** Keep sub currency rates current: on start, when the main currency changes, and when the app comes back online or into view. */
+export function useAutoRefreshRates() {
+  const { currencies } = useApp();
+  const refresh = useRefreshRates();
+  const needed = currencies.some((c) => !c.isCustom);
+  useEffect(() => {
+    if (!needed) return;
+    const run = () => void refresh();
+    const online = () => void refresh({ force: true });
+    const visible = () => { if (document.visibilityState === "visible") run(); };
+    run();
+    window.addEventListener("online", online);
+    window.addEventListener("focus", run);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("focus", run);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [needed, refresh]);
 }

@@ -3,11 +3,13 @@ import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 export const txType = v.union(v.literal("income"), v.literal("expense"), v.literal("transfer"));
-export const groupKind = v.union(
+/** What a payment method is. Decides behaviour: credit cards get billing cycles, debit cards (and linked UPIs) draw from a bank account. */
+export const accountKind = v.union(
   v.literal("cash"),
   v.literal("bank"),
   v.literal("card"),
   v.literal("debitCard"),
+  v.literal("upi"),
   v.literal("savings"),
   v.literal("prepaid"),
   v.literal("investment"),
@@ -73,17 +75,27 @@ export default defineSchema({
     defaultAccountId: v.optional(v.id("accounts")),
   }).index("by_user", ["userId"]),
 
+  /** Folders that organise payment methods. They have no behaviour of their own. */
   accountGroups: defineTable({
     userId: v.id("users"),
     name: v.string(),
-    kind: groupKind,
+    /**
+     * Legacy: groups used to carry the type of every account in them. The type now lives on each
+     * account (the "accounts.adoptKinds" op and migrations:accountKinds copy it over); this is only
+     * read as a fallback for accounts that have not been migrated yet.
+     */
+    kind: v.optional(accountKind),
     order: v.number(),
     deletedAt: v.optional(v.number()),
   }).index("by_user", ["userId"]),
 
+  /** Payment methods. The table keeps its old name to avoid a data migration. */
   accounts: defineTable({
     userId: v.id("users"),
-    groupId: v.id("accountGroups"),
+    /** Unset when the method sits outside any group. */
+    groupId: v.optional(v.id("accountGroups")),
+    /** Optional only until every account has been migrated; every write sets it. */
+    kind: v.optional(accountKind),
     name: v.string(),
     initialBalance: v.number(),
     includeInTotals: v.boolean(),

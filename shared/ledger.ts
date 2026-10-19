@@ -19,7 +19,8 @@ export type TxLike = {
 
 export type AccountLike = {
   _id: string;
-  groupId: string;
+  groupId?: string;
+  kind?: string;
   initialBalance: number;
   includeInTotals: boolean;
   hidden: boolean;
@@ -31,38 +32,49 @@ export type AccountLike = {
   deletedAt?: number;
 };
 
-export type GroupLike = { _id: string; kind: string };
+/** Only legacy groups have a kind; it is the fallback for accounts that predate per-account kinds. */
+export type GroupLike = { _id: string; kind?: string };
 
 export type LedgerSettings = { cardExpenseDisplay: "atTime" | "lumpSum" };
 
 export type Kinds = { income: number; expense: number; transfer: number };
 
+/** Accounts in the context always carry a kind, resolved by resolveKind. */
 export type Ctx = {
-  accounts: Map<string, AccountLike>;
-  groups: Map<string, GroupLike>;
+  accounts: Map<string, AccountLike & { kind: string }>;
   settings: LedgerSettings;
 };
 
+/** An account's kind: its own, or for an account not migrated yet, its group's old kind. */
+export function resolveKind(a: { kind?: string; groupId?: string }, groups: Map<string, GroupLike> | GroupLike[]): string {
+  if (a.kind) return a.kind;
+  if (!a.groupId) return "other";
+  const g = Array.isArray(groups) ? groups.find((x) => x._id === a.groupId) : groups.get(a.groupId);
+  return g?.kind ?? "other";
+}
+
 export function buildCtx(accounts: AccountLike[], groups: GroupLike[], settings: LedgerSettings): Ctx {
+  const byId = new Map(groups.map((g) => [g._id, g]));
   return {
-    accounts: new Map(accounts.map((a) => [a._id, a])),
-    groups: new Map(groups.map((g) => [g._id, g])),
+    accounts: new Map(accounts.map((a) => [a._id, { ...a, kind: resolveKind(a, byId) }])),
     settings,
   };
 }
 
-export function groupKindOf(ctx: Ctx, accountId: string | undefined): string | undefined {
-  if (!accountId) return undefined;
-  const a = ctx.accounts.get(accountId);
-  return a ? ctx.groups.get(a.groupId)?.kind : undefined;
+export function kindOf(ctx: Ctx, accountId: string | undefined): string | undefined {
+  return accountId ? ctx.accounts.get(accountId)?.kind : undefined;
 }
 
 export function isCreditCard(ctx: Ctx, accountId: string | undefined): boolean {
-  return groupKindOf(ctx, accountId) === "card";
+  return kindOf(ctx, accountId) === "card";
 }
 
-export function isDebitCard(ctx: Ctx, accountId: string | undefined): boolean {
-  return groupKindOf(ctx, accountId) === "debitCard";
+/**
+ * Methods whose spending comes out of another account: debit cards, and UPIs that are linked to
+ * a bank account (an unlinked UPI holds its own balance, like a wallet).
+ */
+export function drawsFromLinked(a: { kind?: string; linkedAccountId?: string }): boolean {
+  return a.kind === "debitCard" || (a.kind === "upi" && !!a.linkedAccountId);
 }
 
 /** How a transaction counts in income / expense / transfer totals for the ledger, stats and budgets. */
@@ -103,7 +115,7 @@ export function sumKinds(txs: TxLike[], ctx: Ctx): Kinds {
 /** The account that actually holds the money for a transaction (debit cards hit their linked account). */
 export function holderOf(ctx: Ctx, accountId: string): string {
   const a = ctx.accounts.get(accountId);
-  if (a && isDebitCard(ctx, accountId) && a.linkedAccountId) return a.linkedAccountId;
+  if (a && drawsFromLinked(a) && a.linkedAccountId) return a.linkedAccountId;
   return accountId;
 }
 

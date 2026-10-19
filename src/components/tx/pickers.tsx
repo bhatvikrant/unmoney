@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-export function AccountPicker({ open, onOpenChange, onPick, title = "Account", exclude }: {
+export function AccountPicker({ open, onOpenChange, onPick, title = "Payment method", exclude }: {
   open: boolean; onOpenChange: (o: boolean) => void; onPick: (id: Id<"accounts">) => void; title?: string; exclude?: string;
 }) {
   const { accountGroups } = useApp();
@@ -26,8 +26,8 @@ export function AccountPicker({ open, onOpenChange, onPick, title = "Account", e
       </div>
       {byGroup ? (
         visible.map((g) => (
-          <div key={g.group._id} className="mb-2">
-            <div className="px-2 text-xs text-muted-foreground py-1">{g.group.name}</div>
+          <div key={g.id} className="mb-2">
+            <div className="px-2 text-xs text-muted-foreground py-1">{g.name}</div>
             <div className="grid grid-cols-3 gap-1.5">
               {g.accounts.map((a) => (
                 <button key={a._id} type="button" onClick={() => { onPick(a._id); onOpenChange(false); }} className="rounded-md border px-2 py-2 text-sm text-left truncate hover:bg-accent">
@@ -44,7 +44,7 @@ export function AccountPicker({ open, onOpenChange, onPick, title = "Account", e
           ))}
         </div>
       )}
-      {!flat.length ? <div className="text-sm text-muted-foreground p-4 text-center">No accounts yet. Add one from the Accounts tab.</div> : null}
+      {!flat.length ? <div className="text-sm text-muted-foreground p-4 text-center">No payment methods yet. Add one from the Payment methods tab.</div> : null}
     </BottomSheet>
   );
 }
