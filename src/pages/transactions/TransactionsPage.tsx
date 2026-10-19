@@ -8,7 +8,7 @@ import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
 import { useShortcuts, useSwipe } from "@/lib/shortcuts";
 import { useOpenEntry } from "@/lib/nav";
-import { useMonthParam, useMonthsWithData } from "@/lib/period-hooks";
+import { useMonthParam, useMonthsWithData, usePeriodNeighbours } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
 import { addDays, parts, todayISO, weekday, MONTH_SHORT } from "../../../shared/dates";
 import { formatNumber } from "../../../shared/money";
@@ -49,16 +49,19 @@ function swipeHintOnce() {
 export default function TransactionsPage() {
   const nav = useNavigate();
   const { settings, ledger } = useApp();
-  const { month, range, shift, setMonth } = useMonthParam();
+  const { month, range, setMonth } = useMonthParam();
   const monthsWithData = useMonthsWithData("transactions");
   const openEntry = useOpenEntry();
   const entryOpen = useLocation().pathname.startsWith("/t/");
   const thisMonth = monthKeyForDate(todayISO(), settings.monthStartDay);
   const goToday = () => setMonth(thisMonth);
-  // The page stops at the current month: there is nothing to see in a future month yet.
-  const next = () => { if (month < thisMonth) shift(1); };
+  // Only months with an entry (and the current one) can be shown: the arrows, shortcuts and swipes skip the rest.
+  const nb = usePeriodNeighbours("monthly", month, monthsWithData.dates);
+  const reachable = (m: string) => m === thisMonth || monthsWithData.months.has(m);
+  const prev = () => { if (nb.prev) setMonth(nb.prev); };
+  const next = () => { if (nb.next) setMonth(nb.next); };
   // not while an entry is open beside the list: they would replace it and lose unsaved edits
-  useShortcuts({ n: () => openEntry("new", { date: addDate() }), "/": () => nav("/search"), ArrowLeft: () => shift(-1), ArrowRight: next, t: goToday }, !entryOpen);
+  useShortcuts({ n: () => openEntry("new", { date: addDate() }), "/": () => nav("/search"), ArrowLeft: prev, ArrowRight: next, t: goToday }, !entryOpen);
   const [sp, setSp] = useSearchParams();
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
@@ -66,7 +69,7 @@ export default function TransactionsPage() {
   // a fresh sheet on every open, so it starts from the filter in the URL (not ticks a Clear removed)
   const [filterKey, setFilterKey] = useState(0);
   const bulk = useBulkSelect();
-  const swipe = useSwipe(next, () => shift(-1), !bulk.active, swipeHintOnce);
+  const swipe = useSwipe(next, prev, !bulk.active, swipeHintOnce);
 
   const snap = useView();
   const raw = useMemo(() => txListRange(snap, range.from, range.to), [snap, range.from, range.to]);
@@ -109,7 +112,7 @@ export default function TransactionsPage() {
         }
         sub={
           <div className="mx-auto max-w-3xl">
-            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={next} month={month} onPick={setMonth} maxMonth={thisMonth} withData={monthsWithData.months} spent={monthsWithData.spent} />
+            <MonthNav label={monthLabel(month)} onPrev={nb.prev ? prev : undefined} onNext={nb.next ? next : undefined} month={month} onPick={setMonth} withData={monthsWithData.months} spent={monthsWithData.spent} />
             <SegmentedTabs value={view} onChange={setView} items={[
               { value: "daily", label: "Daily" }, { value: "calendar", label: "Calendar" }, { value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }, { value: "summary", label: "Summary" },
             ]} />
@@ -130,7 +133,7 @@ export default function TransactionsPage() {
         {raw && view === "daily" ? <TransactionList txs={txs} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}
         {raw && view === "weekly" ? <WeeklyView txs={txs} range={range} /> : null}
-        {view === "monthly" ? <MonthlyView month={month} onPick={(m) => { if (m > thisMonth) return; setMonth(m); setView("daily"); }} /> : null}
+        {view === "monthly" ? <MonthlyView month={month} reachable={reachable} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}
         {raw && view === "summary" ? <SummaryView txs={txs} month={month} range={range} /> : null}
       </Page>
       </div>
@@ -251,7 +254,7 @@ function WeeklyView({ txs, range }: { txs: Tx[]; range: { from: string; to: stri
   );
 }
 
-function MonthlyView({ month, onPick }: { month: string; onPick: (m: string) => void }) {
+function MonthlyView({ month, reachable, onPick }: { month: string; reachable: (m: string) => boolean; onPick: (m: string) => void }) {
   const { settings, ledger } = useApp();
   const { y } = parseMonthKey(month);
   const yr = yearRange(y, settings.monthStartDay);
@@ -268,7 +271,7 @@ function MonthlyView({ month, onPick }: { month: string; onPick: (m: string) => 
     <div>
       <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-4 py-1.5 text-[11px] text-muted-foreground border-b"><span>{y}</span><span>Income</span><span>Expenses</span><span>Total</span></div>
       {rows.map((r) => (
-        <button key={r.key} type="button" onClick={() => onPick(r.key)} className={cn("grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-4 py-3 border-b text-sm w-full text-left hover:bg-accent/40", r.key === month && "bg-accent/30")}>
+        <button key={r.key} type="button" disabled={!reachable(r.key)} title={reachable(r.key) ? undefined : "Nothing this month"} onClick={() => onPick(r.key)} className={cn("grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-4 py-3 border-b text-sm w-full text-left hover:bg-accent/40 disabled:pointer-events-none disabled:opacity-40", r.key === month && "bg-accent/30")}>
           <span>{r.label}</span>
           <Money amount={r.income} kind="income" className="text-xs" />
           <Money amount={r.expense} kind="expense" className="text-xs" />
