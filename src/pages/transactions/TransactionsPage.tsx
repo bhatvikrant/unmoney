@@ -319,7 +319,9 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
 }
 
 function FilterSheet({ open, onOpenChange, txs }: { open: boolean; onOpenChange: (o: boolean) => void; txs: Tx[] }) {
-  const { accountGroups, categories, ledger } = useApp();
+  const { accountGroups, archivedAccounts, categories, ledger } = useApp();
+  // Archived methods can still be filtered on, to look back at their entries.
+  const sections = archivedAccounts.length ? [...accountGroups, { id: "archived", name: "Archived", accounts: archivedAccounts }] : accountGroups;
   const [sp, setSp] = useSearchParams();
   const [tab, setTab] = useState<"income" | "expense" | "account">("expense");
   const [acc, setAcc] = useState<Set<string>>(() => new Set((sp.get("acc") ?? "").split(",").filter(Boolean)));
@@ -351,7 +353,7 @@ function FilterSheet({ open, onOpenChange, txs }: { open: boolean; onOpenChange:
     <BottomSheet open={open} onOpenChange={onOpenChange} title="Filter">
       <SegmentedTabs value={tab} onChange={setTab} items={[{ value: "income", label: "Income" }, { value: "expense", label: "Expenses" }, { value: "account", label: "Payment method" }]} className="mb-2" />
       {tab === "account" ? (
-        accountGroups.map((g) => (
+        sections.map((g) => (
           <div key={g.id}>
             <div className="px-2 py-1 text-xs text-muted-foreground">{g.name}</div>
             {g.accounts.map((a) => (

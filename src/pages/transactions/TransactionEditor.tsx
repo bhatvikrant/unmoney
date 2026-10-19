@@ -27,9 +27,9 @@ import { cn } from "@/lib/utils";
 
 type TxType = "income" | "expense" | "transfer";
 
-/** The account a new entry starts on: the chosen default while it is still visible, else the first visible one. */
-function defaultAccount(accounts: { _id: Id<"accounts">; hidden?: boolean }[], preferred?: Id<"accounts">) {
-  const visible = accounts.filter((a) => !a.hidden);
+/** The account a new entry starts on: the chosen default while it is still visible, else the first visible one. Archived ones never. */
+function defaultAccount(accounts: { _id: Id<"accounts">; hidden?: boolean; archivedAt?: number }[], preferred?: Id<"accounts">) {
+  const visible = accounts.filter((a) => !a.hidden && !a.archivedAt);
   return (visible.find((a) => a._id === preferred) ?? visible[0])?._id;
 }
 
