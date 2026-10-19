@@ -1,6 +1,5 @@
 import { useOp } from "@/lib/store";
 import { useState } from "react";
-import { toast } from "sonner";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -29,14 +28,13 @@ export default function PasscodeSettings() {
               await setPasscode({ hash: await hashPin(pin, salt), salt });
               markUnlocked();
               setStage(null);
-              toast.success("Passcode set");
             }} />
             <div className="text-center mt-6"><Button variant="ghost" onClick={() => setStage(null)}>Cancel</Button></div>
           </div>
         ) : (
           <>
             <Section>
-              <Row label="Passcode lock" hint="Asks for a 4-digit code when the app opens" right={s.passcodeHash ? <Button variant="outline" size="sm" onClick={async () => { await setPasscode({}); toast.success("Passcode removed"); }}>Turn off</Button> : <Button size="sm" onClick={() => setStage("enter")}>Turn on</Button>} />
+              <Row label="Passcode lock" hint="Asks for a 4-digit code when the app opens" right={s.passcodeHash ? <Button variant="outline" size="sm" onClick={async () => { await setPasscode({}); }}>Turn off</Button> : <Button size="sm" onClick={() => setStage("enter")}>Turn on</Button>} />
               {s.passcodeHash ? <Row label="Change passcode" onClick={() => setStage("enter")} /> : null}
               <Row label="Require again after" right={<Select value={s.lockAfter} onValueChange={(v) => update({ patch: { lockAfter: v as "always" | "5m" | "1h" } })}><SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="always">Every open</SelectItem><SelectItem value="5m">5 minutes</SelectItem><SelectItem value="1h">1 hour</SelectItem></SelectContent></Select>} />
             </Section>

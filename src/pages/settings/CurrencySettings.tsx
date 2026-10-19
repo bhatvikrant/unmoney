@@ -1,6 +1,5 @@
 import { useOp } from "@/lib/store";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { useApp } from "@/lib/app";
 import { CURRENCIES } from "../../../shared/currencies";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -40,8 +39,8 @@ export default function CurrencySettings() {
           <AlertDialogHeader><AlertDialogTitle>Switch to {picking}?</AlertDialogTitle><AlertDialogDescription>Keep your data (amounts stay as entered and are simply shown in the new currency), or start over with an empty ledger.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="destructive" onClick={async () => { await change({ code: picking!, keepData: false }); setPicking(null); toast.success("Data initialised"); }}>Data initialisation</Button>
-            <AlertDialogAction onClick={async () => { await change({ code: picking!, keepData: true }); setPicking(null); toast.success("Currency changed"); }}>Data retention</AlertDialogAction>
+            <Button variant="destructive" onClick={async () => { await change({ code: picking!, keepData: false }); setPicking(null); }}>Data initialisation</Button>
+            <AlertDialogAction onClick={async () => { await change({ code: picking!, keepData: true }); setPicking(null); }}>Data retention</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
