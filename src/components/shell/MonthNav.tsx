@@ -9,8 +9,10 @@ import { cn } from "@/lib/utils";
 
 type Props = {
   label: string;
-  onPrev: () => void;
-  onNext: () => void;
+  /** Left arrow. Leave it out when there is nothing earlier to show: the arrow is then disabled. */
+  onPrev?: () => void;
+  /** Right arrow. Leave it out when there is nothing later to show: the arrow is then disabled. */
+  onNext?: () => void;
   /** Tapping the label: either open the month picker (when `month` + `onPick` are given) or run this. */
   onClick?: () => void;
   /** The month the label shows. With `onPick`, tapping the label opens a month picker. */
@@ -20,39 +22,37 @@ type Props = {
   withData?: Set<MonthKey>;
   /** What was spent in each month, shown under its name. */
   spent?: Map<MonthKey, number>;
-  /** The latest month that can be shown: Next is disabled there, and later months are greyed out in the picker. */
-  maxMonth?: MonthKey;
 };
 
-export function MonthNav({ label, onPrev, onNext, onClick, month, onPick, withData, spent, maxMonth }: Props) {
+export function MonthNav({ label, onPrev, onNext, onClick, month, onPick, withData, spent }: Props) {
   const labelCls = "text-sm font-medium px-3 py-1 rounded-md hover:bg-accent";
   return (
     <div className="flex items-center justify-between px-2 py-1">
-      <Button variant="ghost" size="icon" aria-label="Previous" onClick={onPrev}><ChevronLeft className="size-5" /></Button>
+      <Button variant="ghost" size="icon" aria-label="Previous" disabled={!onPrev} onClick={onPrev}><ChevronLeft className="size-5" /></Button>
       {month && onPick ? (
-        <MonthPicker month={month} onPick={onPick} withData={withData} spent={spent} maxMonth={maxMonth}>
+        <MonthPicker month={month} onPick={onPick} withData={withData} spent={spent}>
           <button type="button" className={cn(labelCls, "data-[state=open]:bg-accent")} aria-label={`${label}. Pick a month`}>{label}</button>
         </MonthPicker>
       ) : (
         <button type="button" className={labelCls} onClick={onClick}>{label}</button>
       )}
-      <Button variant="ghost" size="icon" aria-label="Next" disabled={!!maxMonth && !!month && month >= maxMonth} onClick={onNext}><ChevronRight className="size-5" /></Button>
+      <Button variant="ghost" size="icon" aria-label="Next" disabled={!onNext} onClick={onNext}><ChevronRight className="size-5" /></Button>
     </div>
   );
 }
 
 /** Popover with a year stepper and a 4×3 month grid. Wraps the trigger element. */
-export function MonthPicker({ month, onPick, withData, spent, maxMonth, children }: { month: MonthKey; onPick: (m: MonthKey) => void; withData?: Set<MonthKey>; spent?: Map<MonthKey, number>; maxMonth?: MonthKey; children: React.ReactNode }) {
+export function MonthPicker({ month, onPick, withData, spent, children }: { month: MonthKey; onPick: (m: MonthKey) => void; withData?: Set<MonthKey>; spent?: Map<MonthKey, number>; children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [year, setYear] = useState(() => parseMonthKey(month).y);
   const { settings, fmt } = useApp();
   const sel = parseMonthKey(month);
   const thisMonth = monthKeyForDate(todayISO(), settings.monthStartDay);
   // A month is reachable when it has data, or is the current or selected month. The year arrows stop at the first and last reachable years.
-  const reachable = (key: MonthKey) => (!maxMonth || key <= maxMonth) && (!withData || key === month || key === thisMonth || withData.has(key));
+  const reachable = (key: MonthKey) => !withData || key === month || key === thisMonth || withData.has(key);
   const years = withData ? [sel.y, parseMonthKey(thisMonth).y, ...[...withData].map((k) => parseMonthKey(k).y)] : [];
   const minYear = withData ? Math.min(...years) : -Infinity;
-  const maxYear = Math.min(withData ? Math.max(...years) : Infinity, maxMonth ? parseMonthKey(maxMonth).y : Infinity);
+  const maxYear = withData ? Math.max(...years) : Infinity;
 
   const pick = (m: MonthKey) => { onPick(m); setOpen(false); };
   const onOpenChange = (o: boolean) => { if (o) setYear(sel.y); setOpen(o); };
@@ -84,7 +84,7 @@ export function MonthPicker({ month, onPick, withData, spent, maxMonth, children
                 type="button"
                 aria-pressed={selected}
                 disabled={empty}
-                title={empty ? (maxMonth && key > maxMonth ? "Not yet" : "Nothing this month") : undefined}
+                title={empty ? "Nothing this month" : undefined}
                 onClick={() => pick(key)}
                 className={cn(
                   "flex flex-col items-center justify-center gap-0.5 rounded-md text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:text-muted-foreground/40",
