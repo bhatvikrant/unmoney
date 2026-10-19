@@ -103,3 +103,16 @@ export function useCatchUpRepeats() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [due, today]);
 }
+
+/**
+ * Payment methods used to take their type from their group. Copy it onto any that still lack
+ * one, once, as an ordinary op: it works offline and the server runs the same change.
+ */
+export function useAdoptAccountKinds() {
+  const { dispatch, view } = useStore();
+  const needed = view.accounts.some((a) => !a.kind);
+  useEffect(() => {
+    if (needed) dispatch("accounts.adoptKinds", {}).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needed]);
+}
