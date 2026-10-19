@@ -12,6 +12,7 @@ import { HistorySection } from "@/components/HistorySection";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SegmentedTabs } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,6 +24,7 @@ export default function CategoriesSettings() {
   const create = useOp("categories.create");
   const update = useOp("categories.update");
   const remove = useOp("categories.remove");
+  const confirm = useConfirm();
   const reorder = useOp("categories.reorder");
   const setArchived = useOp("categories.setArchived");
   const [showArchived, setShowArchived] = useState(false);
@@ -53,7 +55,7 @@ export default function CategoriesSettings() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   }
   const del = async (id: Id<"categories">, name: string) => {
-    if (!window.confirm(`Delete "${name}"? Existing entries keep it as a deleted category.`)) return;
+    if (!(await confirm({ title: `Delete "${name}"?`, description: "Existing entries keep it as a deleted category." }))) return;
     await remove({ id });
   };
   return (

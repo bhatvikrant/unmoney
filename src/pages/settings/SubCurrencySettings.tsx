@@ -12,6 +12,7 @@ import { localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { EmptyState } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -54,6 +55,7 @@ export default function SubCurrencySettings() {
   const add = useOp("currencies.add");
   const update = useOp("currencies.update");
   const remove = useOp("currencies.remove");
+  const confirm = useConfirm();
   const reorder = useOp("currencies.reorder");
   const refreshRates = useRefreshRates();
   const mainSide: RateSide = { code: s.mainCurrency, symbol: s.symbol, symbolPosition: s.symbolPosition };
@@ -103,7 +105,7 @@ export default function SubCurrencySettings() {
               <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
               <div className="flex-1 px-1 min-w-0"><div className="truncate">{c.code} · {c.name}{c.isCustom ? " (custom)" : ""}</div><div className="text-xs text-muted-foreground">{formatRate(mainSide, c, c.rate)}</div></div>
               <Button variant="ghost" size="icon" className="size-7" aria-label="Edit" onClick={() => setEdit({ id: c._id, code: c.code, rate: toShown(c.rate, c.rate < 1), flip: c.rate < 1, savedRate: c.rate, symbolPosition: c.symbolPosition, symbol: c.symbol, isCustom: c.isCustom })}><Pencil className="size-4" /></Button>
-              <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => remove({ id: c._id })}><Trash2 className="size-4" /></Button>
+              <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={async () => { if (await confirm({ title: `Remove ${c.code}?`, description: "Entries already recorded in it keep their amounts.", action: "Remove" })) await remove({ id: c._id }); }}><Trash2 className="size-4" /></Button>
             </div>
           ))}
         </div>

@@ -8,6 +8,7 @@ import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Money } from "@/components/shell/Money";
 import { EmptyState } from "@/components/shell/misc";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,7 @@ export default function BookmarksPage() {
   const view = useView();
   const list = useMemo(() => bookmarksList(view), [view]);
   const undoable = useUndoableDelete();
+  const confirm = useConfirm();
   const reorder = useOp("bookmarks.reorder");
   const [edit, setEdit] = useState(false);
   const move = (i: number, dir: -1 | 1) => {
@@ -53,7 +55,7 @@ export default function BookmarksPage() {
                   </div>
                   <Money amount={t.amount} kind={kind} />
                 </button>
-                {edit ? <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => { const doc = view.bookmarks.find((x) => x._id === b._id); if (doc) void undoable.bookmark(doc); }}><Trash2 className="size-4" /></Button> : null}
+                {edit ? <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={async () => { const doc = view.bookmarks.find((x) => x._id === b._id); if (doc && (await confirm({ title: "Delete this bookmark?", description: "The entry it was made from stays in the ledger." }))) void undoable.bookmark(doc); }}><Trash2 className="size-4" /></Button> : null}
               </div>
             );
           })}
