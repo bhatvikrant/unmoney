@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { Bookmark, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Palette, PiggyBank, Repeat, SlidersHorizontal, Tags, WalletCards } from "lucide-react";
+import { Bookmark, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Tags, WalletCards } from "lucide-react";
 import type { ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import { SyncBadge } from "@/components/shell/SyncStatus";
@@ -61,6 +61,9 @@ export default function SettingsPage() {
           {link(<Repeat />, "Repeats", "/settings/repeats", { hint: "Rent, salary, subscriptions" })}
           {link(<PiggyBank />, "Budgets", "/budget/settings")}
           {link(<Bookmark />, "Bookmarks", "/bookmarks", { hint: "Entries you save to add again" })}
+        </Section>
+        <Section title="Look back">
+          {link(<Sparkles />, "Monthly recaps", "/recaps", { hint: "Every month's spending as a short story", under: ["/recap"] })}
         </Section>
         <Section title="Preferences">
           {link(<SlidersHorizontal />, "Preferences", "/settings/preferences", { hint: "Period, start screen, entry form", under: ["/settings/period"] })}

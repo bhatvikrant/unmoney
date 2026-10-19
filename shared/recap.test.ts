@@ -3,7 +3,7 @@ import type { Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "./ops";
 import { statsByCategory } from "./views";
 import { monthRange } from "./period";
-import { monthRecap, recapNudge, recapText, RECAP_MIN_ENTRIES, RECAP_NUDGE_DAYS, type RecapCard } from "./recap";
+import { monthRecap, recapIndex, recapNudge, recapText, RECAP_MIN_ENTRIES, RECAP_NUDGE_DAYS, type RecapCard } from "./recap";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -237,4 +237,27 @@ test("recapText writes the three-line summary", () => {
     keptPct: 30, noSpend: 5, repeat: { text: "Coffee", count: 22 },
   }, "September 2026", fmt)).toBe("September 2026 · UnMoney\nSpent ₹84,310 (8% less than Aug) · Top: Food 31% · Biggest: Flight to Goa ₹18,400\nKept 30% of income · 5 no-spend days · \"Coffee\" ×22");
   expect(recapText({ range: { from: "2026-05-01", to: "2026-05-31" }, entries: 5, strip: [], spent: 100, noSpend: 1 }, "May 2026", fmt)).toBe("May 2026 · UnMoney\nSpent ₹1\n1 no-spend day");
+});
+
+test("recapIndex lists every month with expenses, newest first, with the current month on top", () => {
+  const f = fresh();
+  september(f);
+  f.expense("2026-06-03", 500, "Food", "Snack");
+  f.expense("2026-06-10", 700, "Food", "Snack");
+  f.income("2026-07-01", 100000); // income only: no row
+  f.expense("2026-10-02", 620, "Food", "Groceries");
+  const rows = recapIndex(f.snap, "2026-10-19");
+  expect(rows.map((r) => [r.month, r.state, r.entries])).toEqual([
+    ["2026-10", "current", 1],
+    ["2026-09", "ready", 8],
+    ["2026-06", "thin", 2],
+  ]);
+  expect(rows[0].readyOn).toBe("2026-11-01");
+  expect(rows[1].cards).toBe(monthRecap(f.snap, "2026-09")!.cards.length);
+  expect(rows[1].spent).toBe(269100);
+  // an empty ledger still shows the current month, so the page can say when the first recap comes
+  expect(recapIndex(fresh().snap, "2026-10-19")).toEqual([{ month: "2026-10", entries: 0, spent: 0, state: "current", readyOn: "2026-11-01" }]);
+  // with monthStartDay 25 the current month's recap is ready the day after its logical end
+  const g = fresh(25);
+  expect(recapIndex(g.snap, "2026-10-19")[0]).toMatchObject({ month: "2026-09", state: "current", readyOn: "2026-10-25" });
 });
