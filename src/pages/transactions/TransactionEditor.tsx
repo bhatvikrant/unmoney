@@ -12,6 +12,7 @@ import { todayISO } from "../../../shared/dates";
 import { evaluateExpression, formatRate, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { useCloseEntry, useOpenEntry } from "@/lib/nav";
+import { useColumn } from "@/components/shell/SplitLayout";
 import { useUndoableDelete } from "@/lib/undo";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
@@ -58,8 +59,10 @@ type Form = {
   repeat: RepeatChoice;
 };
 
-/** `panel`: shown beside the ledger on a wide screen (EntryRoute) rather than as its own screen. */
-export default function TransactionEditor({ panel = false }: { panel?: boolean }) {
+/** `panel`: shown beside a list on a wide screen (LedgerRoute, SplitLayout) rather than as its own screen. */
+export default function TransactionEditor(props: { panel?: boolean }) {
+  const column = useColumn();
+  const panel = props.panel ?? column === "detail";
   const { id } = useParams();
   const [sp] = useSearchParams();
   const view = useView();

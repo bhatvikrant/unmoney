@@ -81,8 +81,10 @@ export function SegmentedTabs<T extends string>({ value, onChange, items, classN
   );
 }
 
-export function Row({ label, value, onClick, right, className, hint, info }: {
+export function Row({ label, value, onClick, right, className, hint, info, active }: {
   label: ReactNode; value?: ReactNode; onClick?: () => void; right?: ReactNode; className?: string; hint?: ReactNode;
+  /** The row's page is open beside the list (wide screens). */
+  active?: boolean;
   /** Longer explanation shown behind an (i) icon next to the label. */
   info?: ReactNode;
 }) {
@@ -99,14 +101,14 @@ export function Row({ label, value, onClick, right, className, hint, info }: {
       {right}
     </>
   );
-  const cls = cn("flex items-center gap-3 px-4 py-3 border-b last:border-b-0 w-full text-left", onClick && "hover:bg-accent/50 active:bg-accent", className);
+  const cls = cn("flex items-center gap-3 px-4 py-3 border-b last:border-b-0 w-full text-left", onClick && "hover:bg-accent/50 active:bg-accent", active && "bg-accent", className);
   if (!onClick) return <div className={cls}>{inner}</div>;
   // A div with role=button (not <button>) so the info icon and other controls can sit inside it.
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); }
   };
-  return <div role="button" tabIndex={0} className={cn(cls, "focus-visible:outline-none focus-visible:bg-accent/50")} onClick={onClick} onKeyDown={onKey}>{inner}</div>;
+  return <div role="button" tabIndex={0} aria-current={active || undefined} className={cn(cls, "focus-visible:outline-none focus-visible:bg-accent/50")} onClick={onClick} onKeyDown={onKey}>{inner}</div>;
 }
 
 export function Section({ title, children, className }: { title?: ReactNode; children: ReactNode; className?: string }) {

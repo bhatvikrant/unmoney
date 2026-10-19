@@ -13,6 +13,7 @@ import type { Tx } from "@/components/tx/TransactionList";
 import type { BulkSelect } from "@/components/tx/useBulkSelect";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useBottomBar } from "@/components/shell/SplitLayout";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -21,6 +22,7 @@ type Edit = null | "date" | "note" | "delete";
 
 /** Action bar (plus the pickers and dialogs it opens) for the entries ticked in `bulk`. */
 export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
+  const bar = useBottomBar();
   const { ledger } = useApp();
   const view = useView();
   const bulkUpdate = useOp("transactions.bulkUpdate");
@@ -94,7 +96,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   return (
     <>
       {/* beside an open entry (wide screens) it spans the list only, not the entry's own bar */}
-      <div className={cn("fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom", entryOpen && "lg:right-[440px]")}>
+      <div className={cn(bar, "z-30 bg-background/95 backdrop-blur border-t md:safe-bottom", entryOpen && bar.startsWith("fixed") && "lg:right-[440px]")}>
         <div className="mx-auto max-w-3xl">
           <div className="flex items-center gap-2 px-3 pt-2 text-sm">
             <Button variant="outline" size="sm" onClick={() => (n === txs.length ? bulk.clear() : bulk.selectAll(txs))}>{n === txs.length && n > 0 ? "Clear" : "Select all"}</Button>
