@@ -106,3 +106,39 @@ export function elapsedFraction(r: Range, today: ISODate): number {
   const done = Math.min(total, Math.max(0, (new Date(today).getTime() - new Date(r.from).getTime()) / 86400000 + 1));
   return done / total;
 }
+
+/** Whether any of `dates` (sorted ascending, no duplicates needed) falls inside `r`. Binary search. */
+export function rangeHasDate(dates: ISODate[], r: Range): boolean {
+  let lo = 0;
+  let hi = dates.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (dates[mid] < r.from) lo = mid + 1; else hi = mid;
+  }
+  return lo < dates.length && dates[lo] <= r.to;
+}
+
+/**
+ * The nearest period before (`dir` -1) or after (`dir` 1) `key` that holds one of `dates` or `today`,
+ * so the arrows skip empty months and stop at the first and last ones with anything in them.
+ * Undefined when there is no such period, so the arrow can be disabled.
+ */
+export function neighbourPeriod(
+  key: string,
+  dir: 1 | -1,
+  dates: ISODate[],
+  today: ISODate,
+  rangeOf: (k: string) => Range,
+  shift: (k: string, n: number) => string,
+): string | undefined {
+  const first = dates.length ? (dates[0] < today ? dates[0] : today) : today;
+  const last = dates.length ? (dates[dates.length - 1] > today ? dates[dates.length - 1] : today) : today;
+  let k = key;
+  for (let i = 0; i < 10000; i++) {
+    k = shift(k, dir);
+    const r = rangeOf(k);
+    if (dir > 0 ? r.from > last : r.to < first) return undefined;
+    if (inRange(today, r) || rangeHasDate(dates, r)) return k;
+  }
+  return undefined;
+}

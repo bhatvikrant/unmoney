@@ -3,7 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MonthNav } from "@/components/shell/MonthNav";
 import { Input } from "@/components/ui/input";
 import { useStatPeriod } from "./period";
-import { useMonthsWithData } from "@/lib/period-hooks";
+import { useMonthsWithData, usePeriodNeighbours } from "@/lib/period-hooks";
 import { cn } from "@/lib/utils";
 
 export function StatsHeaderBar() {
@@ -11,6 +11,8 @@ export function StatsHeaderBar() {
   const { pathname, search } = useLocation();
   const p = useStatPeriod();
   const monthsWithData = useMonthsWithData("transactions");
+  // The arrows only go to weeks, months or years that have an entry (or the current one). A custom range has no arrows.
+  const nb = usePeriodNeighbours(p.period === "custom" ? "monthly" : p.period, p.key, monthsWithData.dates);
   const tabs = [{ to: "/stats", label: "Stats" }, { to: "/budget", label: "Budget" }, { to: "/notes", label: "Note" }];
   return (
     <div className="mx-auto max-w-3xl">
@@ -32,7 +34,7 @@ export function StatsHeaderBar() {
       {p.period === "custom" ? (
         <div className="flex gap-2 px-3 pb-2"><Input type="date" value={p.from} onChange={(e) => p.set({ from: e.target.value })} /><Input type="date" value={p.to} onChange={(e) => p.set({ to: e.target.value })} /></div>
       ) : (
-        <MonthNav label={p.label} onPrev={() => p.shift(-1)} onNext={() => p.shift(1)} month={p.period === "monthly" ? p.month : undefined} onPick={(m) => p.set({ month: m })} withData={monthsWithData.months} spent={monthsWithData.spent} />
+        <MonthNav label={p.label} onPrev={nb.prev ? () => p.go(nb.prev!) : undefined} onNext={nb.next ? () => p.go(nb.next!) : undefined} month={p.period === "monthly" ? p.month : undefined} onPick={(m) => p.set({ month: m })} withData={monthsWithData.months} spent={monthsWithData.spent} />
       )}
     </div>
   );
