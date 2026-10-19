@@ -1,0 +1,44 @@
+import { useEffect, useLayoutEffect, useRef, type TouchEvent } from "react";
+
+const typing = (t: EventTarget | null) =>
+  t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
+
+/**
+ * Single-key shortcuts for a screen: { n: newEntry, ArrowLeft: prev, … }. Ignored while typing,
+ * with a modifier held, or while a dialog or sheet is open (it has the keyboard then).
+ */
+export function useShortcuts(keys: Record<string, () => void>, enabled = true) {
+  const ref = useRef(keys);
+  useLayoutEffect(() => { ref.current = keys; });
+  useEffect(() => {
+    if (!enabled) return;
+    const h = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      const fn = ref.current[e.key];
+      if (!fn) return;
+      e.preventDefault();
+      fn();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [enabled]);
+}
+
+/** Touch handlers for a horizontal swipe: left calls onLeft (next), right calls onRight (previous). */
+export function useSwipe(onLeft: () => void, onRight: () => void, enabled = true) {
+  const start = useRef<{ x: number; y: number } | null>(null);
+  return {
+    onTouchStart: (e: TouchEvent) => { start.current = enabled && e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; },
+    onTouchEnd: (e: TouchEvent) => {
+      const s = start.current;
+      start.current = null;
+      if (!s) return;
+      const dx = e.changedTouches[0].clientX - s.x;
+      const dy = e.changedTouches[0].clientY - s.y;
+      // clearly sideways and long enough, so scrolling the list never changes the month
+      if (Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+      if (dx < 0) onLeft(); else onRight();
+    },
+  };
+}

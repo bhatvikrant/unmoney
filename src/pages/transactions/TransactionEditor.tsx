@@ -178,6 +178,21 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
     if (!isEdit) amountRef.current?.focus();
   }, [isEdit]);
 
+  // Desktop: Enter saves (Ctrl/⌘+Enter even from the description), Esc goes back. A field that
+  // uses Enter itself (tags) prevents it first; an open sheet or dialog keeps its own keys.
+  const saveRef = useRef(save);
+  useLayoutEffect(() => { saveRef.current = save; });
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || busy || sheet || confirm) return;
+      const t = e.target as HTMLElement;
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey || (t.tagName === "INPUT" && !e.shiftKey))) { e.preventDefault(); void saveRef.current("save"); }
+      else if (e.key === "Escape" && !(t.tagName === "INPUT" || t.tagName === "TEXTAREA")) goBack();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [busy, sheet, confirm, goBack]);
+
   function buildArgs() {
     const amountMajor = evaluateExpression(f.amount, LOCALE_DECIMAL);
     if (amountMajor === null) throw new Error("Enter an amount");
