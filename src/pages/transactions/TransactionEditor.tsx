@@ -153,6 +153,9 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   const refreshRates = useRefreshRates();
   const fx = useFxState(settings.mainCurrency);
   const rateAge = sub && f.rateFromFeed ? staleLabel(fx) : null;
+  // A rate from the feed follows the latest one while it is current (say, back online with the
+  // editor open); when it is not, the stored rate is used and its age is shown.
+  const rate = (sub && f.rateFromFeed && !rateAge ? fx.rates?.rates[sub.code] : undefined) ?? f.rate;
   const ratesAge = staleLabel(fx, "Rates");
 
   /** Use the latest rate for a newly picked currency; an entry keeps the rate it was saved with. */
@@ -162,18 +165,15 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
     setF((p) => ({ ...p, subCurrency: c.code, rate: keep ?? c.rate, rateFromFeed: fromFeed, subAmount: p.subAmount || p.amount }));
     setSheet(null);
     if (!fromFeed) return;
-    void refreshRates().then((r) => {
-      const latest = r && !r.fallback ? r.rates[c.code] : undefined;
-      if (latest) setF((p) => (p.subCurrency === c.code && p.rateFromFeed ? { ...p, rate: latest } : p));
-    });
+    void refreshRates();
   }
 
   const mainMajor = useMemo(() => {
     if (!sub) return evaluateExpression(f.amount);
     const s = evaluateExpression(f.subAmount);
     if (s === null) return null;
-    return f.rate ? s / f.rate : null;
-  }, [f.amount, f.subAmount, f.rate, sub]);
+    return rate ? s / rate : null;
+  }, [f.amount, f.subAmount, rate, sub]);
 
   useEffect(() => {
     if (sub && mainMajor !== null) set("amount", String(Math.round(mainMajor * 10 ** settings.decimals) / 10 ** settings.decimals));
@@ -214,7 +214,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
       amount,
       subAmount: sub ? toMinor(evaluateExpression(f.subAmount) ?? 0, sub.decimals) : undefined,
       subCurrency: sub ? sub.code : undefined,
-      exchangeRate: sub ? f.rate : undefined,
+      exchangeRate: sub ? rate : undefined,
       note: f.note,
       description: f.description || undefined,
       tags: f.tags,
@@ -335,7 +335,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
               <div className="flex-1 flex items-center gap-2 text-sm">
                 <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value); const s = evaluateExpression(f.subAmount); if (m && s) setF((p) => ({ ...p, rate: s / m, rateFromFeed: false })); }} />
                 <span className="flex flex-col items-end text-xs text-muted-foreground whitespace-nowrap">
-                  <span>1 {settings.mainCurrency} = {f.rate ? (Math.round(f.rate * 10000) / 10000) : "?"} {sub.code}</span>
+                  <span>1 {settings.mainCurrency} = {rate ? (Math.round(rate * 10000) / 10000) : "?"} {sub.code}</span>
                   {rateAge ? <span className="text-[11px] text-muted-foreground/80">{rateAge}</span> : null}
                 </span>
               </div>
