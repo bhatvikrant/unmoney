@@ -25,6 +25,7 @@ import { isIOS, promptInstall, useInstallState } from "@/lib/pwa";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -44,6 +45,7 @@ export default function ImportPage() {
   const [sp, setSp] = useSearchParams();
   const pending = useQuery(api.imports.pending);
   const discard = useMutation(api.imports.discardPending);
+  const confirm = useConfirm();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [reading, setReading] = useState(false);
   const pickRef = useRef<HTMLInputElement>(null);
@@ -124,7 +126,7 @@ export default function ImportPage() {
                     hint={`${kb(p.size)} · sent ${new Date(p.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`}
                     right={
                       <div className="flex gap-2">
-                        <Button size="sm" variant="ghost" onClick={() => void discard({ id: p._id })}>Discard</Button>
+                        <Button size="sm" variant="ghost" onClick={async () => { if (await confirm({ title: `Discard ${p.name}?`, description: "The file is removed and nothing from it is imported.", action: "Discard" })) await discard({ id: p._id }); }}>Discard</Button>
                         <Button size="sm" disabled={reading} onClick={() => setSp({ pending: p._id })}>Review</Button>
                       </div>
                     }
@@ -225,6 +227,7 @@ function IosSteps() {
   const status = useQuery(api.imports.linkStatus);
   const createLink = useAction(api.imports.createLink);
   const revoke = useMutation(api.imports.revokeLink);
+  const confirm = useConfirm();
   const [link, setLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -261,7 +264,7 @@ function IosSteps() {
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}{status ? "Copy a new link" : "Copy import link"}
             </Button>
             {status ? (
-              <Button size="sm" variant="ghost" onClick={async () => { await revoke({}); setLink(null); setCopied(false); }}>Turn off link</Button>
+              <Button size="sm" variant="ghost" onClick={async () => { if (!(await confirm({ title: "Turn off the import link?", description: "The shortcut stops working until you copy a new link into it.", action: "Turn off" }))) return; await revoke({}); setLink(null); setCopied(false); }}>Turn off link</Button>
             ) : null}
           </div>
           {link ? <Input readOnly value={link} onFocus={(e) => e.currentTarget.select()} className="h-8 text-xs" aria-label="Import link" /> : null}
