@@ -1,0 +1,7 @@
+From: HDFC Bank InstaAlerts <alerts@hdfcbank.net>
+Subject: Balance update for your account
+Received: 2026-10-18T02:00:00Z
+
+Dear Customer,
+
+The available balance in your a/c XX1234 as on 18-10-26 is Rs 42,310.50.

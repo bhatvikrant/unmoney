@@ -1,0 +1,16 @@
+From: Zomato <order@zomato.com>
+Subject: Your order from Meghana Foods has been delivered
+Received: 2026-10-18T15:45:00Z
+
+Hi Arjun, your order has been delivered. Enjoy your meal!
+
+Order ID: 5531234567
+Meghana Foods, Koramangala
+18 Oct 2026, 9:10 PM
+
+Chicken Biryani x 1  ₹320
+Paneer Butter Masala x 1  ₹240
+Delivery charges  ₹52
+
+Total Paid ₹612
+Paid using HDFC Bank UPI

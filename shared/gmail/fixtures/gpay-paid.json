@@ -1,0 +1,17 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "google-pay",
+    "type": "debit",
+    "amount": 450,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "13:12",
+    "last4": "1234",
+    "bankName": "HDFC",
+    "channel": "upi",
+    "merchantRaw": "Swiggy",
+    "vpa": "swiggy.upi@axisbank"
+  }
+}

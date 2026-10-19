@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "icici",
+    "type": "debit",
+    "amount": 1199,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "09:15",
+    "last4": "7001",
+    "bankName": "ICICI",
+    "channel": "card",
+    "merchantRaw": "NETFLIX.COM"
+  }
+}

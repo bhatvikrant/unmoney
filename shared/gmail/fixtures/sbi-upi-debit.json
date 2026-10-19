@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "sbi",
+    "type": "debit",
+    "amount": 1500,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "last4": "2233",
+    "bankName": "SBI",
+    "channel": "upi",
+    "merchantRaw": "Mr RAVI KUMAR"
+  }
+}

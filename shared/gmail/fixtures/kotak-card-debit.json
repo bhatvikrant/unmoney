@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "kotak",
+    "type": "debit",
+    "amount": 4299,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "20:15",
+    "last4": "5511",
+    "bankName": "Kotak",
+    "channel": "card",
+    "merchantRaw": "MYNTRA DESIGNS PVT LTD"
+  }
+}

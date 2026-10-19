@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "axis",
+    "type": "debit",
+    "amount": 320,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "10:41",
+    "last4": "9900",
+    "bankName": "Axis",
+    "channel": "upi",
+    "merchantRaw": "BLINKIT COMMERCE"
+  }
+}

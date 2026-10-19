@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "spotify",
+    "type": "debit",
+    "amount": 119,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "last4": "4521",
+    "channel": "card",
+    "merchantRaw": "Spotify",
+    "item": "Spotify Premium Individual"
+  }
+}
