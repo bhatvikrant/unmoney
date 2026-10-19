@@ -8,7 +8,7 @@ import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
 import { useShortcuts, useSwipe } from "@/lib/shortcuts";
 import { useOpenEntry } from "@/lib/nav";
-import { useMonthParam } from "@/lib/period-hooks";
+import { useMonthParam, useMonthsWithData } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
 import { addDays, parts, todayISO, weekday, MONTH_SHORT } from "../../../shared/dates";
 import { formatNumber } from "../../../shared/money";
@@ -50,6 +50,7 @@ export default function TransactionsPage() {
   const nav = useNavigate();
   const { settings, ledger } = useApp();
   const { month, range, shift, setMonth } = useMonthParam();
+  const monthsWithData = useMonthsWithData("transactions");
   const openEntry = useOpenEntry();
   const entryOpen = useLocation().pathname.startsWith("/t/");
   const goToday = () => setMonth(monthKeyForDate(todayISO(), settings.monthStartDay));
@@ -105,7 +106,7 @@ export default function TransactionsPage() {
         }
         sub={
           <div className="mx-auto max-w-3xl">
-            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} month={month} onPick={setMonth} />
+            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} month={month} onPick={setMonth} withData={monthsWithData} />
             <SegmentedTabs value={view} onChange={setView} items={[
               { value: "daily", label: "Daily" }, { value: "calendar", label: "Calendar" }, { value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }, { value: "summary", label: "Summary" },
             ]} />
