@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { useGoBack } from "@/lib/nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,7 @@ import { toMinor } from "../../../shared/money";
 export default function AccountEditor() {
   const { id } = useParams();
   const nav = useNavigate();
+  const goBack = useGoBack();
   const { settings, accounts, groups } = useApp();
   const existing = id ? accounts.find((a) => a._id === id) : undefined;
   const liveGroups = groups.filter((g) => !g.deletedAt).sort((a, b) => a.order - b.order);
@@ -53,7 +55,7 @@ export default function AccountEditor() {
       };
       if (id) await update({ id: id as Id<"accounts">, ...args }); else await create(args);
       toast.success("Saved");
-      if (id) nav(-1); else nav("/accounts");
+      if (id) goBack("/accounts"); else nav("/accounts");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   }
 
