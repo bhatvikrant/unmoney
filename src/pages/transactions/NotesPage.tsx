@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { todayISO } from "../../../shared/dates";
 
 export default function NotesPage() {
-  const { month, range, shift } = useMonthParam();
+  const { month, range, shift, setMonth } = useMonthParam();
   const [sp, setSp] = useSearchParams();
   const view = useView();
   const notes = useMemo(() => notesRange(view, range.from, range.to), [view, range.from, range.to]);
@@ -38,7 +38,7 @@ export default function NotesPage() {
 
   return (
     <>
-      <PageHeader back="/" title="Notes" sub={<div className="mx-auto max-w-3xl"><MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} /></div>} />
+      <PageHeader back="/" title="Notes" sub={<div className="mx-auto max-w-3xl"><MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} month={month} onPick={setMonth} /></div>} />
       <Page>
         {notes && !notes.length ? <EmptyState title="No notes this month" hint="Notes are daily memos. They show as coloured dots on the calendar." /> : null}
         <div className="bg-card border-y">
