@@ -8,7 +8,7 @@ import { bookmarksList, noteSuggestions, txGet, txTags, type TxDetail } from "..
 import { useApp, useRefreshRates } from "@/lib/app";
 import { staleLabel, useFxState } from "@/lib/fxRates";
 import { todayISO } from "../../../shared/dates";
-import { evaluateExpression, toMajor, toMinor } from "../../../shared/money";
+import { evaluateExpression, formatRate, toMajor, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
@@ -159,6 +159,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   // Custom currencies (gold, points) never come from the feed: with only those, say nothing about it.
   const usesFeed = currencies.some((c) => !c.isCustom);
   const ratesAge = usesFeed ? staleLabel(fx, "Rates") : null;
+  const mainSide = { code: settings.mainCurrency, symbol: settings.symbol, symbolPosition: settings.symbolPosition };
 
   /** Use the latest rate for a newly picked currency; an entry keeps the rate it was saved with. */
   function pickCurrency(c: (typeof currencies)[number]) {
@@ -337,7 +338,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
               <div className="flex-1 flex items-center gap-2 text-sm">
                 <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value); const s = evaluateExpression(f.subAmount); if (m && s) setF((p) => ({ ...p, rate: s / m, rateFromFeed: false })); }} />
                 <span className="flex flex-col items-end text-xs text-muted-foreground whitespace-nowrap">
-                  <span>1 {settings.mainCurrency} = {rate ? (Math.round(rate * 10000) / 10000) : "?"} {sub.code}</span>
+                  <span>{rate ? formatRate(mainSide, sub, rate) : "No rate"}</span>
                   {rateAge ? <span className="text-[11px] text-muted-foreground/80">{rateAge}</span> : null}
                 </span>
               </div>
@@ -426,7 +427,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           <button type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", !sub && "bg-accent")} onClick={() => { setF((p) => ({ ...p, subCurrency: "", subAmount: "", rate: undefined, rateFromFeed: false })); setSheet(null); }}>{settings.mainCurrency} <span className="text-muted-foreground text-xs">main</span></button>
           {currencies.map((c) => (
             <button key={c._id} type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", sub?.code === c.code && "bg-accent")} onClick={() => pickCurrency(c)}>
-              {c.code} <span className="text-muted-foreground text-xs">1 {settings.mainCurrency} = {c.rate}</span>
+              {c.code} <span className="text-muted-foreground text-xs">{formatRate(mainSide, c, c.rate)}</span>
             </button>
           ))}
         </div>
