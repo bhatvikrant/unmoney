@@ -1,21 +1,34 @@
-export const DEFAULT_GROUPS: { name: string; kind: string }[] = [
-  { name: "Cash", kind: "cash" },
-  { name: "Accounts", kind: "bank" },
-  { name: "Card", kind: "card" },
-  { name: "Debit Card", kind: "debitCard" },
-  { name: "Savings", kind: "savings" },
-  { name: "Top-Up / Prepaid", kind: "prepaid" },
-  { name: "Investments", kind: "investment" },
-  { name: "Overdrafts", kind: "overdraft" },
-  { name: "Loan", kind: "loan" },
-  { name: "Insurance", kind: "insurance" },
-  { name: "Others", kind: "other" },
+import type { Doc } from "../convex/_generated/dataModel";
+
+export type AccountKind = NonNullable<Doc<"accounts">["kind"]>;
+
+/** Every type a payment method can have, in picker order. */
+export const ACCOUNT_KINDS: { kind: AccountKind; label: string }[] = [
+  { kind: "cash", label: "Cash" },
+  { kind: "bank", label: "Bank account" },
+  { kind: "card", label: "Credit card" },
+  { kind: "debitCard", label: "Debit card" },
+  { kind: "upi", label: "UPI" },
+  { kind: "prepaid", label: "Wallet / prepaid" },
+  { kind: "savings", label: "Savings" },
+  { kind: "investment", label: "Investment" },
+  { kind: "overdraft", label: "Overdraft" },
+  { kind: "loan", label: "Loan" },
+  { kind: "insurance", label: "Insurance" },
+  { kind: "other", label: "Other" },
 ];
 
-export const DEFAULT_ACCOUNTS: { name: string; groupKind: string }[] = [
-  { name: "Cash", groupKind: "cash" },
-  { name: "Bank", groupKind: "bank" },
-  { name: "Card", groupKind: "card" },
+export function kindLabel(kind: string | undefined): string {
+  return ACCOUNT_KINDS.find((k) => k.kind === kind)?.label ?? "Other";
+}
+
+/** Groups a new user starts with. Only names: a group is a folder and has no type. */
+export const DEFAULT_GROUPS = ["Cash", "Credit cards", "Debit cards", "Bank accounts", "UPIs"];
+
+export const DEFAULT_ACCOUNTS: { name: string; kind: AccountKind; group: string }[] = [
+  { name: "Cash", kind: "cash", group: "Cash" },
+  { name: "Bank", kind: "bank", group: "Bank accounts" },
+  { name: "Card", kind: "card", group: "Credit cards" },
 ];
 
 export const DEFAULT_EXPENSE_CATEGORIES = [

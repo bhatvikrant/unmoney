@@ -37,12 +37,12 @@ export default function AccountDetail() {
   const data = useMemo(() => accountGet(view, realId, gran, r.from, r.to, today), [view, realId, gran, r.from, r.to, today]);
   const payCard = useOp("accounts.payCard");
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
-  if (!data) return <><PageHeader back="/accounts" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Account not found</div></>;
+  if (!data) return <><PageHeader back="/payment-methods" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Payment method not found</div></>;
   const a = data.account;
   const nameOf = (key: string) => categoryById.get(key)?.name ?? (key === "none" ? "Uncategorised" : accountName(key));
   return (
     <>
-      <PageHeader back="/accounts" title={a.name} right={<><Button variant="ghost" size="icon" aria-label="Edit" onClick={() => nav(`/accounts/${a._id}/edit`)}><Pencil className="size-4" /></Button>
+      <PageHeader back="/payment-methods" title={a.name} right={<><Button variant="ghost" size="icon" aria-label="Edit" onClick={() => nav(`/payment-methods/${a._id}/edit`)}><Pencil className="size-4" /></Button>
         <Select value={gran} onValueChange={(v) => setGran(v as typeof gran)}><SelectTrigger className="h-8 w-16"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">D</SelectItem><SelectItem value="monthly">M</SelectItem><SelectItem value="yearly">Y</SelectItem></SelectContent></Select></>}
         sub={<div className="mx-auto max-w-3xl"><MonthNav label={gran === "yearly" ? String(parseMonthKey(month).y) : monthLabel(month)} onPrev={() => shift(gran === "yearly" ? -12 : -1)} onNext={() => shift(gran === "yearly" ? 12 : 1)} /></div>} />
       <Page className="pb-8">
@@ -79,7 +79,7 @@ export default function AccountDetail() {
             <div className="space-y-3">
               <div className="space-y-1.5"><Label>Amount ({settings.mainCurrency})</Label><Input inputMode="decimal" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} /></div>
               <div className="space-y-1.5"><Label>Date</Label><Input type="date" value={pay.date} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>From account</Label>
+              <div className="space-y-1.5"><Label>Pay from</Label>
                 <Select value={pay.from} onValueChange={(v) => setPay({ ...pay, from: v })}><SelectTrigger className="w-full"><SelectValue placeholder="Pick" /></SelectTrigger><SelectContent>{accounts.filter((x) => x._id !== a._id && x.kind !== "card").map((x) => <SelectItem key={x._id} value={x._id}>{x.name} · {fmt(x.balance)}</SelectItem>)}</SelectContent></Select>
               </div>
             </div>
