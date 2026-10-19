@@ -89,14 +89,14 @@ export function completeSheets(snap: Snapshot): { sheet: string; data: SheetRows
     ]);
   }
 
-  const accounts: SheetRows = [["Payment method", "Group", "Type", "Opening balance", "Include in totals", "Hidden", "Transfer as expense", "Billing account", "Settlement day", "Payment day", "Linked account", "Bank", "Last 4 digits", "Card colour", "Description", "Deleted"]];
+  const accounts: SheetRows = [["Payment method", "Group", "Type", "Opening balance", "Include in totals", "Hidden", "Transfer as expense", "Billing account", "Settlement day", "Payment day", "Linked account", "Bank", "Last 4 digits", "Card colour", "Description", "Archived", "Deleted"]];
   for (const a of snap.accounts) {
     const g = a.groupId ? grp.get(a.groupId) : undefined;
-    accounts.push([a.name, g && !g.deletedAt ? g.name : null, kindLabel(resolveKind(a, snap.accountGroups)), major(a.initialBalance), a.includeInTotals, a.hidden, a.transferAsExpense, name(acc, a.billingAccountId), a.settlementDay ?? null, a.paymentDay ?? null, name(acc, a.linkedAccountId), a.bankName ?? null, a.last4 ?? null, a.color ?? null, a.description ?? null, !!a.deletedAt]);
+    accounts.push([a.name, g && !g.deletedAt ? g.name : null, kindLabel(resolveKind(a, snap.accountGroups)), major(a.initialBalance), a.includeInTotals, a.hidden, a.transferAsExpense, name(acc, a.billingAccountId), a.settlementDay ?? null, a.paymentDay ?? null, name(acc, a.linkedAccountId), a.bankName ?? null, a.last4 ?? null, a.color ?? null, a.description ?? null, !!a.archivedAt, !!a.deletedAt]);
   }
 
-  const categories: SheetRows = [["Type", "Category", "Parent category", "Deleted"]];
-  for (const c of snap.categories) categories.push([c.type === "income" ? "Income" : "Expense", c.name, name(cat, c.parentId), !!c.deletedAt]);
+  const categories: SheetRows = [["Type", "Category", "Parent category", "Archived", "Deleted"]];
+  for (const c of snap.categories) categories.push([c.type === "income" ? "Income" : "Expense", c.name, name(cat, c.parentId), !!c.archivedAt, !!c.deletedAt]);
 
   const budgets: SheetRows = [["Category", "Period", "Amount", "Overrides (period start = amount)"]];
   for (const b of snap.budgets) {
