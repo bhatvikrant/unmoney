@@ -25,7 +25,11 @@ export default function SearchPage() {
     (sp.get(key) ?? fallback) as T,
     (v: string) => setSp((p) => { const n = new URLSearchParams(p); if (v && v !== fallback) n.set(key, v); else n.delete(key); return n; }, { replace: true }),
   ] as const;
-  const [q, setQ] = param("q", "");
+  // The box keeps its own state: the router updates the URL inside a transition, and an input
+  // driven from there would lose keystrokes and its caret. The URL just mirrors it.
+  const [urlQ, setUrlQ] = param("q", "");
+  const [q, setQState] = useState<string>(urlQ);
+  const setQ = (v: string) => { setQState(v); setUrlQ(v); };
   const [showFilters, setShowFilters] = useState(() => ["from", "to", "type", "account", "category", "tag"].some((k) => sp.has(k)));
   const [from, setFrom] = param("from", "");
   const [to, setTo] = param("to", "");

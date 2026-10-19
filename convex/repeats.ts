@@ -36,6 +36,7 @@ export const materialiseAll = internalMutation({
 export const materialiseUser = internalMutation({
   args: { userId: v.id("users"), today: v.string() },
   handler: async (ctx, { userId, today }) => {
+    if (!(await ctx.db.get(userId))) return; // deleted meanwhile
     const [outcome] = await runOps(ctx, userId, [{ id: `cron_${today}_${userId}_${Date.now()}`, kind: "repeats.catchUp", args: { today }, at: Date.now() }]);
     if (outcome.status === "rejected") console.error(`repeats.catchUp failed for ${userId}: ${outcome.error}`);
   },

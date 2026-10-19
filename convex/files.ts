@@ -28,11 +28,22 @@ export const generateUploadUrl = mutation({
   },
 });
 
-/** Called by the app right after an upload, before the file is used anywhere. */
+/** How soon after an upload the uploader must claim it; older owner-less files are not claimable. */
+const CLAIM_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * Called by the app right after an upload, before the file is used anywhere. Only a fresh upload
+ * can be claimed, so nobody can take over a file from before owners were recorded (whose id they
+ * may know from a backup) and lock its real owner out.
+ */
 export const claim = mutation({
   args: { storageId: v.id("_storage") },
   handler: async (ctx, { storageId }) => {
     const userId = await requireUser(ctx);
+    const file = await ctx.db.system.get(storageId);
+    if (!file) throw new Error("File not found");
+    const owner = await ownerOf(ctx, storageId);
+    if (!owner && Date.now() - file._creationTime > CLAIM_WINDOW_MS) throw new Error("That file can no longer be claimed");
     await setOwner(ctx, userId, storageId);
   },
 });
