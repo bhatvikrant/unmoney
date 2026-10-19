@@ -20,6 +20,7 @@ import { useMonthParam } from "@/lib/period-hooks";
 import { amountInput, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
 import { parseMonthKey, yearRange } from "../../../shared/period";
 import { todayISO } from "../../../shared/dates";
+import { useToday } from "@/lib/today";
 import { toMinor } from "../../../shared/money";
 import { cardColorOf } from "../../../shared/defaults";
 import { CardFace } from "@/components/CardFace";
@@ -34,7 +35,8 @@ export default function AccountDetail() {
   const view = useView();
   const { resolveId } = useStore();
   const realId = resolveId(id ?? "");
-  const data = useMemo(() => accountGet(view, realId, gran, r.from, r.to), [view, realId, gran, r.from, r.to]);
+  const today = useToday();
+  const data = useMemo(() => accountGet(view, realId, gran, r.from, r.to, today), [view, realId, gran, r.from, r.to, today]);
   const payCard = useOp("accounts.payCard");
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
   if (!data) return <><PageHeader back="/payment-methods" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Payment method not found</div></>;
@@ -52,7 +54,11 @@ export default function AccountDetail() {
           </div>
         ) : null}
         <div className="flex items-center justify-between px-4 py-2">
-          <div><div className="text-xs text-muted-foreground">{data.kind === "card" ? "Card balance" : "Balance"}</div><Money amount={data.balance} kind={data.balance < 0 ? "expense" : "income"} className="text-xl font-semibold" /></div>
+          <div>
+            <div className="text-xs text-muted-foreground">{data.kind === "card" ? "Card balance today" : "Balance today"}</div>
+            <Money amount={data.balance} kind={data.balance < 0 ? "expense" : "income"} className="text-xl font-semibold" />
+            {data.upcoming ? <div className="text-xs text-muted-foreground">Upcoming <Money amount={data.upcoming} sign muted /> · then <Money amount={data.balance + data.upcoming} muted /></div> : null}
+          </div>
           {data.card ? (
             <div className="text-right text-xs">
               <div>Payable <Money amount={data.card.payable} kind="expense" /></div>

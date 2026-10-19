@@ -81,11 +81,15 @@ export default function AccountsPage() {
                           {a.bankName || a.last4 ? <span className="block truncate text-xs text-muted-foreground">{[a.bankName, a.last4 && `•• ${a.last4}`].filter(Boolean).join(" · ")}</span> : null}
                         </span>
                         {a.kind === "card" ? (
-                          <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><Money amount={a.payable ?? 0} kind="expense" /><div className="text-[10px] text-muted-foreground"><Money amount={a.balance} muted /></div></span><Money amount={a.outstanding ?? 0} kind="expense" /></span>
+                          <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><Money amount={a.payable ?? 0} kind="expense" /><div className="text-[10px] text-muted-foreground"><Money amount={a.balance} muted /></div></span><span><Money amount={a.outstanding ?? 0} kind="expense" />{a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={-a.upcoming} sign muted /> upcoming</div> : null}</span></span>
                         ) : a.linked ? (
                           <span className="text-right"><Money amount={-(a.monthlyUsage ?? 0)} className="text-muted-foreground" /><div className="text-[10px] text-muted-foreground">this month</div></span>
                         ) : (
-                          <Money amount={a.balance} kind={!a.includeInTotals ? "plain" : a.balance < 0 ? "expense" : "income"} />
+                          <span className="text-right">
+                            <Money amount={a.balance} kind={!a.includeInTotals ? "plain" : a.balance < 0 ? "expense" : "income"} />
+                            {/* future-dated entries are not in the balance yet */}
+                            {a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={a.upcoming} sign muted /> upcoming</div> : null}
+                          </span>
                         )}
                       </>
                     );

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
+import { useMediaQuery, WIDE } from "@/lib/media";
 
 /**
  * Back to the previous screen, or to `fallback` when UnMoney was opened straight on this one
@@ -11,4 +12,50 @@ export function useGoBack() {
     if ((window.history.state as { idx?: number } | null)?.idx) nav(-1);
     else nav(fallback, { replace: true });
   }, [nav]);
+}
+
+/** Params that belong to the entry form rather than to the list it was opened from. */
+const ENTRY_PARAMS = ["date", "bookmark", "type", "from"];
+
+/** The list's own params (month, view, filters) from a URL's query string. */
+function listQuery(search: string): string {
+  const params = new URLSearchParams(search);
+  for (const k of ENTRY_PARAMS) params.delete(k);
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
+/**
+ * Open an entry (an id, or "new" with its own params) keeping the list's month, view and filters in
+ * the URL. On a wide screen an entry opened from the ledger shows beside it, so it takes the
+ * ledger's place in history rather than adding a step, and says so with `from=ledger` (in the URL,
+ * because changing the ledger's month or filters rewrites the query and drops history state).
+ * Elsewhere it is a new screen, and Back returns.
+ */
+export function useOpenEntry() {
+  const nav = useNavigate();
+  const { pathname, search } = useLocation();
+  const wide = useMediaQuery(WIDE);
+  return useCallback((id: string, extra: Record<string, string> = {}) => {
+    const besideLedger = wide && (pathname === "/" || (pathname.startsWith("/t/") && new URLSearchParams(search).get("from") === "ledger"));
+    const params = new URLSearchParams(listQuery(search));
+    for (const [k, v] of Object.entries(extra)) params.set(k, v);
+    if (besideLedger) params.set("from", "ledger");
+    const query = params.toString();
+    nav(`/t/${id}${query ? `?${query}` : ""}`, { replace: besideLedger || pathname.startsWith("/t/") });
+  }, [nav, pathname, search, wide]);
+}
+
+/**
+ * Leave an entry: back to the ledger as it is now (month and filters may have changed while the
+ * entry was open) when it was shown beside it, else back to wherever it was opened from.
+ */
+export function useCloseEntry() {
+  const nav = useNavigate();
+  const goBack = useGoBack();
+  const { search } = useLocation();
+  return useCallback(() => {
+    if (new URLSearchParams(search).get("from") === "ledger") nav(`/${listQuery(search)}`, { replace: true });
+    else goBack();
+  }, [nav, goBack, search]);
 }

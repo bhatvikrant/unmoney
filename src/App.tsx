@@ -12,8 +12,8 @@ import SignIn from "@/pages/auth/SignIn";
 import Onboarding from "@/pages/auth/Onboarding";
 import Lock from "@/pages/auth/Lock";
 import AppShell from "@/components/shell/AppShell";
-import TransactionsPage from "@/pages/transactions/TransactionsPage";
-import TransactionEditor from "@/pages/transactions/TransactionEditor";
+import LedgerRoute from "@/pages/transactions/LedgerRoute";
+import { useMediaQuery, WIDE } from "@/lib/media";
 import SearchPage from "@/pages/transactions/SearchPage";
 import BookmarksPage from "@/pages/transactions/BookmarksPage";
 import NotesPage from "@/pages/transactions/NotesPage";
@@ -114,9 +114,9 @@ function Gate() {
       <ScrollToTop />
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<TransactionsPage />} />
-          <Route path="t/new" element={<TransactionEditor />} />
-          <Route path="t/:id" element={<TransactionEditor />} />
+          <Route index element={<LedgerRoute />} />
+          <Route path="t/new" element={<LedgerRoute />} />
+          <Route path="t/:id" element={<LedgerRoute />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="bookmarks" element={<BookmarksPage />} />
           <Route path="notes" element={<NotesPage />} />
@@ -174,9 +174,18 @@ function Moved({ from, to }: { from: string; to: string }) {
   return <Navigate to={`${to}${pathname.slice(from.length)}${search}${hash}`} replace />;
 }
 
-/** Every page change, including back/forward, starts at the top. */
+/**
+ * Every page change, including back/forward, starts at the top; except, on a wide screen, opening
+ * or switching entries beside the ledger, which stays where it was.
+ */
 function ScrollToTop() {
   const { pathname } = useLocation();
-  useLayoutEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  const wide = useMediaQuery(WIDE);
+  const prev = useRef(pathname);
+  useLayoutEffect(() => {
+    const ledger = (p: string) => p === "/" || p.startsWith("/t/");
+    if (!(wide && ledger(prev.current) && ledger(pathname))) window.scrollTo(0, 0);
+    prev.current = pathname;
+  }, [pathname, wide]);
   return null;
 }
