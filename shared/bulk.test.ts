@@ -89,3 +89,18 @@ test("fewer decimal places rounds amounts instead of multiplying what they show"
   expect(chunked.settings[0].decimals).toBe(0);
   expect(describe(chunked)).toEqual(describe(oneShot));
 });
+
+test("nothing new lands on a deleted account; a schedule on one stops", () => {
+  let s = ledger();
+  const food = s.categories.find((c) => c.name === "Food")!._id;
+  const card = s.accounts[2]._id;
+  s = run(s, "transactions.create", { type: "expense", accountId: card, categoryId: food, amount: 999, note: "sub", tags: [], photoIds: [], date: "2026-01-05", repeat: { frequency: "monthly" } }).snap;
+  const entry = s.transactions.find((t) => t.note === "sub")!;
+  s = run(s, "accounts.remove", { id: card }).snap;
+  expect(() => run(s, "transactions.create", { type: "expense", accountId: card, categoryId: food, amount: 1, note: "", tags: [], photoIds: [], date: "2026-02-01" })).toThrow(/deleted/);
+  // the entry already there can still be edited
+  expect(() => run(s, "transactions.update", { ...entry, id: entry._id, note: "fixed" })).not.toThrow();
+  const after = run(s, "repeats.catchUp", { today: "2026-06-01" }).snap;
+  expect(after.transactions.filter((t) => t.note === "sub").length).toBe(1);
+  expect(after.repeats.find((r) => r.kind === "repeat")!.active).toBe(false);
+});

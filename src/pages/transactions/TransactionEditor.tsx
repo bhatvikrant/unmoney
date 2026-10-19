@@ -435,7 +435,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => copy({ id: id!, useToday: false }).then((nid) => { toast.success("Copied"); nav(`/t/${nid}`, { replace: true }); })}>Date of entry</AlertDialogAction>
-            <AlertDialogAction onClick={() => copy({ id: id!, useToday: true }).then((nid) => { toast.success("Copied"); nav(`/t/${nid}`, { replace: true }); })}>Today's date</AlertDialogAction>
+            <AlertDialogAction onClick={() => copy({ id: id!, useToday: true, today: todayISO() }).then((nid) => { toast.success("Copied"); nav(`/t/${nid}`, { replace: true }); })}>Today's date</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

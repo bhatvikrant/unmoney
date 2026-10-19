@@ -9,7 +9,8 @@ import { primeKeyboard } from "@/lib/keyboard";
 import { useMonthParam } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
 import { addDays, parts, todayISO, weekday, MONTH_SHORT } from "../../../shared/dates";
-import { monthKey, monthRange, parseMonthKey, weekRange, weeksInRange, yearRange } from "../../../shared/period";
+import { formatNumber } from "../../../shared/money";
+import { monthKey, monthKeyForDate, monthRange, parseMonthKey, weekRange, weeksInRange, yearRange } from "../../../shared/period";
 import { kindsOf, sumKinds } from "../../../shared/ledger";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { MonthNav } from "@/components/shell/MonthNav";
@@ -35,6 +36,8 @@ export default function TransactionsPage() {
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
   const [filterOpen, setFilterOpen] = useState(false);
+  // a fresh sheet on every open, so it starts from the filter in the URL (not ticks a Clear removed)
+  const [filterKey, setFilterKey] = useState(0);
   const bulk = useBulkSelect();
 
   const snap = useView();
@@ -73,12 +76,12 @@ export default function TransactionsPage() {
           <>
             {view === "daily" ? <Button variant="ghost" size="icon" aria-label="Select entries" className={cn(bulk.active && "text-primary")} onClick={() => (bulk.active ? bulk.exit() : bulk.start())}><CheckSquare className="size-5" /></Button> : null}
             <Button variant="ghost" size="icon" aria-label="Bookmarks" onClick={() => nav("/bookmarks")}><Star className="size-5" /></Button>
-            <Button variant="ghost" size="icon" aria-label="Filter" className={cn(filtered && "text-primary")} onClick={() => setFilterOpen(true)}><SlidersHorizontal className="size-5" /></Button>
+            <Button variant="ghost" size="icon" aria-label="Filter" className={cn(filtered && "text-primary")} onClick={() => { setFilterKey((k) => k + 1); setFilterOpen(true); }}><SlidersHorizontal className="size-5" /></Button>
           </>
         }
         sub={
           <div className="mx-auto max-w-3xl">
-            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} onClick={() => setMonth(monthKey(parts(todayISO()).y, parts(todayISO()).m))} />
+            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} onClick={() => setMonth(monthKeyForDate(todayISO(), settings.monthStartDay))} />
             <SegmentedTabs value={view} onChange={setView} items={[
               { value: "daily", label: "Daily" }, { value: "calendar", label: "Calendar" }, { value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }, { value: "summary", label: "Summary" },
             ]} />
@@ -103,7 +106,7 @@ export default function TransactionsPage() {
       {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[calc(var(--tabbar-h)+6rem)] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
       {bulk.active && view === "daily" ? null : <Fab onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${addDate()}`); }} />}
       {view === "daily" ? <BulkBar bulk={bulk} txs={txs} /> : null}
-      <FilterSheet open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
+      <FilterSheet key={filterKey} open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>
   );
 }
@@ -136,8 +139,9 @@ function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: st
   const today = todayISO();
   const labels = [0, 1, 2, 3, 4, 5, 6].map((i) => (settings.weekStartDay + i) % 7);
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const { fmt } = useApp();
-  const short = (n: number) => fmt(n).replace(/^[-+]?[^\d-]+\s?/, "");
+  // amounts without the symbol, keeping the sign (a refund day is negative)
+  const { settings: st } = useApp();
+  const short = (n: number) => formatNumber(n, st.decimals);
   return (
     <>
       <div className="grid grid-cols-7 text-center text-[11px] text-muted-foreground border-b">
@@ -171,7 +175,7 @@ function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: st
             <TransactionList txs={byDay.get(day)?.list ?? []} emptyText="Nothing on this day" />
             <div className="flex gap-2 px-2 pt-3">
               <Button className="flex-1" onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${day}`); }}>Add entry</Button>
-              <Button variant="outline" className="flex-1" onClick={() => nav(`/notes?date=${day}`)}>Add note</Button>
+              <Button variant="outline" className="flex-1" onClick={() => nav(`/notes?date=${day}&month=${monthKeyForDate(day, settings.monthStartDay)}`)}>Add note</Button>
             </div>
           </>
         ) : null}
