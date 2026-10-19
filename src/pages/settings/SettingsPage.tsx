@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { useOp, useStore } from "@/lib/store";
 import { SyncBadge } from "@/components/shell/SyncStatus";
 import { InstallRow } from "./InstallRow";
+import { DeleteAccountRow } from "./DeleteAccount";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -84,6 +85,7 @@ export default function SettingsPage() {
         <Section title="Data">
           {link("Import from Money Manager", "/import", undefined, "Bring over your accounts, categories and history from Money Manager's Excel export.")}
           {link("Backup, restore, import & export", "/settings/backup")}
+          <DeleteAccountRow />
         </Section>
         <p className="px-4 pt-6 text-xs text-muted-foreground">UnMoney · works offline and syncs across your devices.</p>
       </Page>
