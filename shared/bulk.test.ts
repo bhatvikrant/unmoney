@@ -79,3 +79,13 @@ test("changing currency rescales what repeats and bookmarks will enter", () => {
   expect(after.repeats.find((r) => r.kind === "repeat")!.template.amount).toBe(16);
   expect(after.bookmarks[0].template.amount).toBe(5);
 });
+
+test("fewer decimal places rounds amounts instead of multiplying what they show", () => {
+  const s = ledger();
+  const before = s.transactions.map((t) => t.amount / 100);
+  const chunked = run(run(s, "transactions.rescale", { ids: s.transactions.map((t) => t._id), factor: 0.01 }).snap, "settings.changeDecimals", { decimals: 0, entries: false }).snap;
+  const oneShot = run(s, "settings.changeDecimals", { decimals: 0 }).snap;
+  expect(chunked.transactions.map((t) => t.amount)).toEqual(before.map(Math.round));
+  expect(chunked.settings[0].decimals).toBe(0);
+  expect(describe(chunked)).toEqual(describe(oneShot));
+});
