@@ -11,6 +11,7 @@ import { formatRate, parseNumber, rateAmount, type RateSide } from "../../../sha
 import { localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { EmptyState } from "@/components/shell/misc";
+import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
@@ -92,6 +93,10 @@ export default function SubCurrencySettings() {
     catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
   }
   const move = (i: number, dir: -1 | 1) => { const ids = currencies.map((c) => c._id); const j = i + dir; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; reorder({ ids }); };
+  const swipe = useSwipedRow();
+  const del = (c: { _id: Id<"currencies">; code: string }) =>
+    confirm({ title: `Remove ${c.code}?`, description: "Entries already recorded in it keep their amounts.", action: "Remove" })
+      .then(async (ok) => { if (ok) await remove({ id: c._id }); }).finally(swipe.close);
 
   return (
     <>
@@ -100,13 +105,15 @@ export default function SubCurrencySettings() {
         {!currencies.length ? <EmptyState title="No sub currencies" hint={`Add currencies you spend in. Rates are relative to ${s.mainCurrency} and stay up to date when you're online; past entries keep their rate.`} action={<Button onClick={() => setAdding(true)}>Add a currency</Button>} /> : null}
         <div className="bg-card border-y">
           {currencies.map((c, i) => (
-            <div key={c._id} className="flex items-center gap-1 px-2 py-2 border-b last:border-b-0 text-sm">
-              <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
-              <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
-              <div className="flex-1 px-1 min-w-0"><div className="truncate">{c.code} · {c.name}{c.isCustom ? " (custom)" : ""}</div><div className="text-xs text-muted-foreground">{formatRate(mainSide, c, c.rate)}</div></div>
-              <Button variant="ghost" size="icon" className="size-7" aria-label="Edit" onClick={() => setEdit({ id: c._id, code: c.code, rate: toShown(c.rate, c.rate < 1), flip: c.rate < 1, savedRate: c.rate, symbolPosition: c.symbolPosition, symbol: c.symbol, isCustom: c.isCustom })}><Pencil className="size-4" /></Button>
-              <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={async () => { if (await confirm({ title: `Remove ${c.code}?`, description: "Entries already recorded in it keep their amounts.", action: "Remove" })) await remove({ id: c._id }); }}><Trash2 className="size-4" /></Button>
-            </div>
+            <SwipeToDelete key={c._id} className="border-b last:border-b-0" label="Remove" {...swipe.row(c._id)} onDelete={() => void del(c)}>
+              <div className="flex items-center gap-1 px-2 py-2 text-sm">
+                <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
+                <div className="flex-1 px-1 min-w-0"><div className="truncate">{c.code} · {c.name}{c.isCustom ? " (custom)" : ""}</div><div className="text-xs text-muted-foreground">{formatRate(mainSide, c, c.rate)}</div></div>
+                <Button variant="ghost" size="icon" className="size-7" aria-label="Edit" onClick={() => setEdit({ id: c._id, code: c.code, rate: toShown(c.rate, c.rate < 1), flip: c.rate < 1, savedRate: c.rate, symbolPosition: c.symbolPosition, symbol: c.symbol, isCustom: c.isCustom })}><Pencil className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => void del(c)}><Trash2 className="size-4" /></Button>
+              </div>
+            </SwipeToDelete>
           ))}
         </div>
         {ratesAge ? <p className="px-4 pt-2 text-xs text-muted-foreground">{ratesAge}</p> : null}

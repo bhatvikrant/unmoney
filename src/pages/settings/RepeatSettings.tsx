@@ -6,6 +6,7 @@ import type { Doc } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { EmptyState } from "@/components/shell/misc";
+import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -27,6 +28,11 @@ export default function RepeatSettings() {
   const remove = useOp("repeats.remove");
   const confirm = useConfirm();
   const [edit, setEdit] = useState<null | { r: Doc<"repeats">; frequency: Doc<"repeats">["frequency"]; endDate: string; nextDate: string; amount: string; note: string; active: boolean }>(null);
+  const swipe = useSwipedRow();
+  // From a swiped row or the editor's button: asks first. Resolves true once the schedule is gone.
+  const del = (id: Doc<"repeats">["_id"]) =>
+    confirm({ title: "Delete this schedule?", description: "Entries it already created stay in the ledger. No new ones will be added." })
+      .then(async (ok) => { if (ok) await remove({ id }); return ok; }).finally(swipe.close);
   return (
     <>
       <PageHeader back="/settings" title="Repeat settings" />
@@ -37,11 +43,13 @@ export default function RepeatSettings() {
             const t = r.template;
             const kind = t.type === "income" ? "income" : t.type === "expense" ? "expense" : "transfer";
             return (
-              <button key={r._id} type="button" onClick={() => setEdit({ r, frequency: r.frequency, endDate: r.endDate ?? "", nextDate: r.nextDate, amount: amountInput(t.amount, settings.decimals), note: t.note, active: r.active })} className={cn("w-full flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm text-left hover:bg-accent/40", !r.active && "opacity-60")}>
-                <div className="w-20 shrink-0 text-xs text-muted-foreground line-clamp-2">{t.type === "transfer" ? "Transfer" : categoryLabel(t)}</div>
-                <div className="flex-1 min-w-0"><div className="truncate">{t.note || accountName(t.accountId)}</div><div className="text-xs text-muted-foreground">{r.kind === "installment" ? `${r.installmentCount} installments from ${r.startDate}` : `${FREQ_LABEL[r.frequency]} · next ${r.nextDate}${r.endDate ? ` · until ${r.endDate}` : ""}`}{!r.active ? " · stopped" : ""}</div></div>
-                <Money amount={t.amount} kind={kind} />
-              </button>
+              <SwipeToDelete key={r._id} className="border-b last:border-b-0" {...swipe.row(r._id)} onDelete={() => void del(r._id)}>
+                <button type="button" onClick={() => setEdit({ r, frequency: r.frequency, endDate: r.endDate ?? "", nextDate: r.nextDate, amount: amountInput(t.amount, settings.decimals), note: t.note, active: r.active })} className={cn("w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left hover:bg-accent/40", !r.active && "opacity-60")}>
+                  <div className="w-20 shrink-0 text-xs text-muted-foreground line-clamp-2">{t.type === "transfer" ? "Transfer" : categoryLabel(t)}</div>
+                  <div className="flex-1 min-w-0"><div className="truncate">{t.note || accountName(t.accountId)}</div><div className="text-xs text-muted-foreground">{r.kind === "installment" ? `${r.installmentCount} installments from ${r.startDate}` : `${FREQ_LABEL[r.frequency]} · next ${r.nextDate}${r.endDate ? ` · until ${r.endDate}` : ""}`}{!r.active ? " · stopped" : ""}</div></div>
+                  <Money amount={t.amount} kind={kind} />
+                </button>
+              </SwipeToDelete>
             );
           })}
         </div>
@@ -65,7 +73,7 @@ export default function RepeatSettings() {
             </div>
           ) : edit ? <p className="text-sm text-muted-foreground">All {edit.r.installmentCount} entries were created when the plan was set. Edit or delete them from the ledger (use "This and future" to change the rest).</p> : null}
           <DialogFooter>
-            <Button variant="destructive" onClick={async () => { if (!(await confirm({ title: "Delete this schedule?", description: "Entries it already created stay in the ledger. No new ones will be added." }))) return; await remove({ id: edit!.r._id }); setEdit(null); }}>Delete schedule</Button>
+            <Button variant="destructive" onClick={async () => { if (await del(edit!.r._id)) setEdit(null); }}>Delete schedule</Button>
             {edit?.r.kind === "repeat" ? <Button onClick={async () => { try { await update({ id: edit.r._id, frequency: edit.frequency, endDate: edit.endDate || null, nextDate: edit.nextDate, active: edit.active, template: { ...edit.r.template, amount: toMinor(edit.amount, settings.decimals, LOCALE_DECIMAL), note: edit.note } }); setEdit(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Save</Button> : null}
           </DialogFooter>
         </DialogContent>
