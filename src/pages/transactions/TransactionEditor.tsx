@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowLeftRight, Calculator, Globe, Repeat, Star, Copy, Trash2, X } from "lucide-react";
+import { ArrowLeftRight, Calculator, ChevronRight, ExternalLink, Globe, Repeat, Star, Copy, Trash2, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
@@ -26,6 +26,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DeleteSeriesEntryDialog } from "@/components/tx/DeleteSeriesEntryDialog";
+import { SplitDialog } from "@/components/tx/SplitDialog";
+import { expenseUrl } from "@/lib/unsplit";
 import { cn } from "@/lib/utils";
 
 type TxType = "income" | "expense" | "transfer";
@@ -144,7 +146,7 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
   const { settings, accountName, categoryLabel, currencies, fmt, accounts } = useApp();
   const [f, setF] = useState<Form>(initial);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
-  const [sheet, setSheet] = useState<null | "account" | "to" | "category" | "keypad" | "feeKeypad" | "repeat" | "currency">(null);
+  const [sheet, setSheet] = useState<null | "account" | "to" | "category" | "keypad" | "feeKeypad" | "repeat" | "currency" | "split">(null);
   const [noteFocus, setNoteFocus] = useState(false);
   const [notePicked, setNotePicked] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -156,6 +158,9 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
   const copy = useOp("transactions.copy");
   const addBookmark = useOp("bookmarks.create");
   const removeBookmark = useOp("bookmarks.remove");
+  const setSplit = useOp("transactions.setSplit");
+  // the saved entry, for the split: only an expense that is saved can be shared, and the link lives on it
+  const saved = useMemo(() => (id ? view.transactions.find((t) => t._id === id) : undefined), [view, id]);
   const bookmarked = useMemo(() => (id ? view.bookmarks.find((b) => b.transactionId === id) : undefined), [view, id]);
   const tagList = useMemo(() => txTags(view), [view]);
   const wantSuggestions = settings.autocompleteEnabled && noteFocus && !notePicked && f.type !== "transfer";
@@ -422,6 +427,25 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
           <div className="px-4 py-3"><PhotoField photoIds={f.photoIds} onChange={(ids) => set("photoIds", ids)} /></div>
         </div>
 
+        {saved?.type === "expense" ? (
+          <div className="mt-3 border-y bg-card">
+            {saved.split ? (
+              <div className="flex items-center gap-2 px-4 py-2.5 text-sm">
+                <Users className="size-4 text-muted-foreground shrink-0" />
+                <a href={expenseUrl(saved.split.expenseId)} target="_blank" rel="noopener" className="flex-1 min-w-0 flex items-center gap-1 hover:underline underline-offset-4">Split on UnSplit <ExternalLink className="size-3 text-muted-foreground" /></a>
+                <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => void setSplit({ ids: [saved._id], split: null }).then(() => toast("Link to the split removed"))}>Unlink</Button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setSheet("split")} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left hover:bg-accent/40">
+                <Users className="size-4 text-muted-foreground shrink-0" />
+                <span className="flex-1">Split on UnSplit</span>
+                <span className="text-xs text-muted-foreground">Share it with others</span>
+                <ChevronRight className="size-4 text-muted-foreground" />
+              </button>
+            )}
+          </div>
+        ) : null}
+
       </Page>
 
       <div className={cn("z-30 bg-background/95 backdrop-blur border-t", panel ? "sticky bottom-0" : "fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 md:safe-bottom")}>
@@ -452,6 +476,7 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
         <AmountKeypad open onOpenChange={(o) => !o && setSheet(null)} initial={sub ? f.subAmount : f.amount} currencyLabel={sub ? sub.code : settings.mainCurrency} onDone={(v) => set(sub ? "subAmount" : "amount", v)} />
       ) : null}
       <RepeatSheet open={sheet === "repeat"} onOpenChange={(o) => !o && setSheet(null)} value={f.repeat} onChange={(r) => set("repeat", r)} />
+      {saved ? <SplitDialog open={sheet === "split"} onOpenChange={(o) => !o && setSheet(null)} txs={[saved]} /> : null}
       <BottomSheet open={sheet === "currency"} onOpenChange={(o) => !o && setSheet(null)} title="Currency">
         <div className="grid grid-cols-2 gap-1.5 px-2">
           <button type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", !sub && "bg-accent")} onClick={() => { setF((p) => ({ ...p, subCurrency: "", subAmount: "", rate: undefined, rateFromFeed: false })); setSheet(null); }}>{settings.mainCurrency} <span className="text-muted-foreground text-xs">main</span></button>
