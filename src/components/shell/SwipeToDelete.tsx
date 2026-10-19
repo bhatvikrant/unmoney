@@ -49,7 +49,8 @@ export function SwipeToDelete({ children, open, onOpenChange, onDelete, disabled
   }
 
   return (
-    <div className={cn("relative overflow-hidden", className)}>
+    // data-swipe-row lets a page-level swipe (the month swipe on Transactions) leave this row's gesture alone
+    <div data-swipe-row={disabled ? undefined : open ? "open" : "closed"} className={cn("relative overflow-hidden", className)}>
       <button type="button" tabIndex={open ? 0 : -1} aria-hidden={!open} onClick={onDelete}
         className={cn("absolute inset-y-0 right-0 flex w-[88px] flex-col items-center justify-center gap-0.5 bg-destructive text-xs font-medium text-white", !open && !dragging && "invisible")}>
         <Trash2 className="size-4" />{label}

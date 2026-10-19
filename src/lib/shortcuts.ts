@@ -25,11 +25,18 @@ export function useShortcuts(keys: Record<string, () => void>, enabled = true) {
   }, [enabled]);
 }
 
-/** Touch handlers for a horizontal swipe: left calls onLeft (next), right calls onRight (previous). */
+/**
+ * Touch handlers for a horizontal swipe: left calls onLeft (next), right calls onRight (previous).
+ * A swipe that starts on a swipe-to-delete row is that row's: a left swipe opens it, and a right
+ * swipe on an open row closes it. A right swipe on a closed row still counts.
+ */
 export function useSwipe(onLeft: () => void, onRight: () => void, enabled = true) {
-  const start = useRef<{ x: number; y: number } | null>(null);
+  const start = useRef<{ x: number; y: number; row?: string } | null>(null);
   return {
-    onTouchStart: (e: TouchEvent) => { start.current = enabled && e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; },
+    onTouchStart: (e: TouchEvent) => {
+      const row = (e.target as HTMLElement).closest?.("[data-swipe-row]")?.getAttribute("data-swipe-row") ?? undefined;
+      start.current = enabled && e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY, row } : null;
+    },
     onTouchEnd: (e: TouchEvent) => {
       const s = start.current;
       start.current = null;
@@ -38,6 +45,7 @@ export function useSwipe(onLeft: () => void, onRight: () => void, enabled = true
       const dy = e.changedTouches[0].clientY - s.y;
       // clearly sideways and long enough, so scrolling the list never changes the month
       if (Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+      if (s.row && (dx < 0 || s.row === "open")) return;
       if (dx < 0) onLeft(); else onRight();
     },
   };
