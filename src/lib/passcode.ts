@@ -72,21 +72,3 @@ export function recordFailure() {
 export function clearFailures() {
   localStorage.removeItem(FAIL_KEY);
 }
-
-// ---- forgotten passcode ----
-
-const RESET_KEY = "unmoney:resetPasscodeFor";
-
-/** Forgot the passcode: remember to remove it once this user has signed in with Google again. */
-export function requestPasscodeReset(userId: string) {
-  localStorage.setItem(RESET_KEY, userId);
-}
-
-export function passcodeResetPendingFor(userId: string | null): boolean {
-  return !!userId && localStorage.getItem(RESET_KEY) === userId;
-}
-
-export function clearPasscodeReset() {
-  localStorage.removeItem(RESET_KEY);
-  clearFailures();
-}

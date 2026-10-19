@@ -65,6 +65,8 @@ export default defineSchema({
     repeatDisplay: v.union(v.literal("onDate"), v.literal("firstOfMonth")),
     cardExpenseDisplay: v.union(v.literal("atTime"), v.literal("lumpSum")),
     passcodeHash: v.optional(v.string()),
+    /** "Forgot passcode" was asked for at this time; a sign-in after it removes the passcode (convex/passcode.ts). */
+    passcodeResetRequestedAt: v.optional(v.number()),
     passcodeSalt: v.optional(v.string()),
     lockAfter: v.union(v.literal("always"), v.literal("5m"), v.literal("1h")),
     /** Account a new entry starts on; falls back to the first visible account when unset or gone. */
