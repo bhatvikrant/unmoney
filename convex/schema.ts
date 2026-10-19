@@ -193,6 +193,12 @@ export default defineSchema({
     size: v.number(),
   }).index("by_user", ["userId"]),
 
+  /** Who uploaded each stored file (receipt photos, import inbox), so nobody else can read or delete it. */
+  fileOwners: defineTable({
+    userId: v.id("users"),
+    storageId: v.id("_storage"),
+  }).index("by_storage", ["storageId"]),
+
   /** Ops the client has synced, for idempotent retries. */
   syncOps: defineTable({
     userId: v.id("users"),

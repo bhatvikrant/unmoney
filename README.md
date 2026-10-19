@@ -57,6 +57,12 @@ The Vercel project is connected to the GitHub repo, so every push to `main` buil
 
 `vercel.json` sets the build command to `npx convex deploy --cmd 'npm run build'`, so every Vercel build pushes `convex/` to production and bakes the production `VITE_CONVEX_URL` into the bundle (it needs `CONVEX_DEPLOY_KEY` in the Vercel env). It also rewrites every path to `index.html` so React Router deep links work.
 
+Once, after the deploy that added `fileOwners`: record who owns the photos and import files uploaded before it (until this runs, those older files stay readable by any signed-in user who has their id):
+
+```bash
+npx convex run --prod files:backfillOwners
+```
+
 If the production URL ever changes (custom domain), update it on the backend: `npx convex env set --prod SITE_URL https://<new host>`.
 
 ### Google sign-in in production
