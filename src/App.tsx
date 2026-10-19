@@ -124,11 +124,12 @@ function Gate() {
           <Route path="stats/c/:id" element={<CategoryDetail />} />
           <Route path="budget" element={<BudgetPage />} />
           <Route path="budget/settings" element={<BudgetSettings />} />
-          <Route path="accounts" element={<AccountsPage />} />
-          <Route path="accounts/new" element={<AccountEditor />} />
-          <Route path="accounts/order" element={<AccountOrder />} />
-          <Route path="accounts/:id" element={<AccountDetail />} />
-          <Route path="accounts/:id/edit" element={<AccountEditor />} />
+          <Route path="payment-methods" element={<AccountsPage />} />
+          <Route path="payment-methods/new" element={<AccountEditor />} />
+          <Route path="payment-methods/order" element={<AccountOrder />} />
+          <Route path="payment-methods/:id" element={<AccountDetail />} />
+          <Route path="payment-methods/:id/edit" element={<AccountEditor />} />
+          <Route path="accounts/*" element={<Moved from="/accounts" to="/payment-methods" />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/categories" element={<CategoriesSettings />} />
           <Route path="settings/categories/tidy" element={<CategoryTidyUp />} />
@@ -140,8 +141,10 @@ function Gate() {
           <Route path="settings/style" element={<StyleSettings />} />
           <Route path="settings/backup" element={<BackupSettings />} />
           <Route path="import" element={<ImportPage />} />
-          <Route path="settings/account-groups" element={<AccountGroupSettings />} />
-          <Route path="settings/deleted-accounts" element={<DeletedAccounts />} />
+          <Route path="settings/groups" element={<AccountGroupSettings />} />
+          <Route path="settings/deleted-payment-methods" element={<DeletedAccounts />} />
+          <Route path="settings/account-groups" element={<Navigate to="/settings/groups" replace />} />
+          <Route path="settings/deleted-accounts" element={<Navigate to="/settings/deleted-payment-methods" replace />} />
           <Route path="settings/transfer-expense" element={<TransferExpenseSettings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
@@ -163,6 +166,12 @@ export default function App() {
   if (!isAuthenticated) return <SignIn />;
   if (!status.live) return <FirstFetch />;
   return <Gate />;
+}
+
+/** An old address (bookmarks, the installed app's history) sent on to where that page lives now. */
+function Moved({ from, to }: { from: string; to: string }) {
+  const { pathname, search, hash } = useLocation();
+  return <Navigate to={`${to}${pathname.slice(from.length)}${search}${hash}`} replace />;
 }
 
 /** Every page change, including back/forward, starts at the top. */

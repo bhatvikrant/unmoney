@@ -12,7 +12,8 @@ import { Check, Copy, Download, FileSpreadsheet, Share2, Smartphone } from "luci
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { applyOp, detectImportFormat, type ImportFormat, type NewImportAccount, type OpResult } from "../../../shared/ops";
-import { accountNamesIn, ACCOUNT_KINDS, guessGroupKind } from "@/lib/csv";
+import { accountNamesIn, guessKind } from "@/lib/csv";
+import { ACCOUNT_KINDS } from "../../../shared/defaults";
 import { CURRENCIES } from "../../../shared/currencies";
 import { useStore, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
@@ -319,9 +320,9 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
     const have = new Set(view.accounts.filter((a) => !a.deletedAt).map((a) => a.name.trim().toLowerCase()));
     return accountNamesIn(loaded.rows).filter((n) => !have.has(n.toLowerCase()));
   }, [loaded.rows, view.accounts]);
-  const [kinds, setKinds] = useState<Record<string, NewImportAccount["groupKind"]>>({});
+  const [kinds, setKinds] = useState<Record<string, NewImportAccount["kind"]>>({});
   const newAccounts = useMemo<NewImportAccount[] | undefined>(
-    () => (createAccounts ? newNames.map((name) => ({ name, groupKind: kinds[name] ?? guessGroupKind(name) })) : undefined),
+    () => (createAccounts ? newNames.map((name) => ({ name, kind: kinds[name] ?? guessKind(name) })) : undefined),
     [createAccounts, newNames, kinds],
   );
   const hasCommas = useMemo(() => loaded.rows.some((r) => (r.amount ?? "").includes(",")), [loaded.rows]);
@@ -414,21 +415,21 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
         ) : null}
       </Section>
       {createAccounts && newNames.length ? (
-        <Section title="New accounts">
+        <Section title="New payment methods">
           {newNames.map((name) => (
             <Row key={name} label={name} right={
-              <Select value={kinds[name] ?? guessGroupKind(name)} onValueChange={(v) => setKinds((k) => ({ ...k, [name]: v as NewImportAccount["groupKind"] }))}>
+              <Select value={kinds[name] ?? guessKind(name)} onValueChange={(v) => setKinds((k) => ({ ...k, [name]: v as NewImportAccount["kind"] }))}>
                 <SelectTrigger className="h-8 w-40" aria-label={`Type of ${name}`}><SelectValue /></SelectTrigger>
                 <SelectContent>{ACCOUNT_KINDS.map((k) => <SelectItem key={k.kind} value={k.kind}>{k.label}</SelectItem>)}</SelectContent>
               </Select>
             } />
           ))}
-          <p className="px-4 py-2 text-xs text-muted-foreground">Credit cards bill the first bank account, settle on the 1st and are paid on the 15th; change that in Accounts after the import.</p>
+          <p className="px-4 py-2 text-xs text-muted-foreground">They go outside any group. Credit cards bill the first bank account, settle on the 1st and are paid on the 15th; change that in Payment methods after the import.</p>
         </Section>
       ) : null}
       <Section title="Options">
         <label className="flex items-center gap-3 px-4 py-3 border-b text-sm"><Checkbox checked={createMissing} onCheckedChange={(v) => setCreateMissing(!!v)} />Create categories that don't exist yet</label>
-        <label className="flex items-center gap-3 px-4 py-3 text-sm"><Checkbox checked={createAccounts} onCheckedChange={(v) => setCreateAccounts(!!v)} />Create accounts that don't exist yet</label>
+        <label className="flex items-center gap-3 px-4 py-3 text-sm"><Checkbox checked={createAccounts} onCheckedChange={(v) => setCreateAccounts(!!v)} />Create payment methods that don't exist yet</label>
         {hasSlashDates ? (
           <Row label="Dates are written" right={
             <Select value={format.dateOrder} onValueChange={(v) => setFormat((f) => ({ ...f, dateOrder: v as ImportFormat["dateOrder"] }))}>
@@ -450,7 +451,7 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
         <div className="overflow-x-auto max-h-64">
           <table className="text-xs w-full">
             <thead className="bg-muted sticky top-0">
-              <tr>{["Date", "Account", "Category", "Note", "Amount", "Type"].map((h) => <th key={h} className="text-left px-2 py-1 font-medium">{h}</th>)}</tr>
+              <tr>{["Date", "Payment method", "Category", "Note", "Amount", "Type"].map((h) => <th key={h} className="text-left px-2 py-1 font-medium">{h}</th>)}</tr>
             </thead>
             <tbody>
               {loaded.rows.slice(0, 50).map((r, i) => (

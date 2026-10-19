@@ -26,6 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { BudgetBar } from "@/components/BudgetBars";
 import { downloadText, toCSV } from "@/lib/csv";
 import { cn } from "@/lib/utils";
+import { kindLabel } from "../../../shared/defaults";
 
 type View = "daily" | "calendar" | "weekly" | "monthly" | "summary";
 
@@ -252,23 +253,23 @@ function MonthlyView({ month, onPick }: { month: string; onPick: (m: string) => 
 function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: { from: string; to: string } }) {
   const nav = useNavigate();
   const snap = useView();
-  const { ledger, groupById, accountById, categoryById } = useApp();
+  const { ledger, accountById, categoryById } = useApp();
   const status = useMemo(() => budgetStatus(snap, "monthly", month), [snap, month]);
   const byGroup = useMemo(() => {
     const exp = new Map<string, number>();
     const tr = new Map<string, number>();
     for (const t of txs) {
       const k = kindsOf(t, ledger);
-      const g = accountById.get(t.accountId)?.groupId ?? "none";
+      const g = accountById.get(t.accountId)?.kind ?? "other";
       if (k.expense) exp.set(g, (exp.get(g) ?? 0) + k.expense);
       if (k.transfer) tr.set(g, (tr.get(g) ?? 0) + k.transfer);
     }
-    const name = (g: string) => groupById.get(g)?.name ?? "Other";
+    const name = kindLabel;
     return {
       expenses: [...exp.entries()].map(([g, a]) => ({ name: name(g), amount: a })).sort((a, b) => b.amount - a.amount),
       transfers: [...tr.entries()].map(([g, a]) => ({ name: name(g), amount: a })).sort((a, b) => b.amount - a.amount),
     };
-  }, [txs, ledger, accountById, groupById]);
+  }, [txs, ledger, accountById]);
 
   async function exportMonth() {
     try {
@@ -293,11 +294,11 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
         </div>
       ) : !status?.total ? <div className="px-4 text-xs text-muted-foreground">No budgets yet.</div> : null}
 
-      <div className="px-4 pt-5 pb-1 text-xs uppercase tracking-wide text-muted-foreground">Expenses by account type</div>
+      <div className="px-4 pt-5 pb-1 text-xs uppercase tracking-wide text-muted-foreground">Expenses by payment method type</div>
       <div className="border-y bg-card">
         {byGroup.expenses.length ? byGroup.expenses.map((r) => <div key={r.name} className="flex justify-between px-4 py-2.5 border-b last:border-b-0 text-sm"><span>{r.name}</span><Money amount={r.amount} kind="expense" /></div>) : <div className="px-4 py-3 text-sm text-muted-foreground">None</div>}
       </div>
-      <div className="px-4 pt-5 pb-1 text-xs uppercase tracking-wide text-muted-foreground">Transfers by account type</div>
+      <div className="px-4 pt-5 pb-1 text-xs uppercase tracking-wide text-muted-foreground">Transfers by payment method type</div>
       <div className="border-y bg-card">
         {byGroup.transfers.length ? byGroup.transfers.map((r) => <div key={r.name} className="flex justify-between px-4 py-2.5 border-b last:border-b-0 text-sm"><span>{r.name}</span><Money amount={r.amount} kind="transfer" /></div>) : <div className="px-4 py-3 text-sm text-muted-foreground">None</div>}
       </div>
@@ -337,11 +338,11 @@ function FilterSheet({ open, onOpenChange, txs }: { open: boolean; onOpenChange:
   const cats = categories.filter((c) => c.type === tab && !c.parentId && !c.deletedAt);
   return (
     <BottomSheet open={open} onOpenChange={onOpenChange} title="Filter">
-      <SegmentedTabs value={tab} onChange={setTab} items={[{ value: "income", label: "Income" }, { value: "expense", label: "Expenses" }, { value: "account", label: "Account" }]} className="mb-2" />
+      <SegmentedTabs value={tab} onChange={setTab} items={[{ value: "income", label: "Income" }, { value: "expense", label: "Expenses" }, { value: "account", label: "Payment method" }]} className="mb-2" />
       {tab === "account" ? (
         accountGroups.map((g) => (
-          <div key={g.group._id}>
-            <div className="px-2 py-1 text-xs text-muted-foreground">{g.group.name}</div>
+          <div key={g.id}>
+            <div className="px-2 py-1 text-xs text-muted-foreground">{g.name}</div>
             {g.accounts.map((a) => (
               <label key={a._id} className="flex items-center gap-3 px-2 py-2 text-sm">
                 <Checkbox checked={acc.has(a._id)} onCheckedChange={() => toggle(acc, setAcc, a._id)} />
