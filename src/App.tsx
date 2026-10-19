@@ -21,6 +21,7 @@ import TransactionEditor from "@/pages/transactions/TransactionEditor";
 import { SplitLayout } from "@/components/shell/SplitLayout";
 import BookmarksPage from "@/pages/transactions/BookmarksPage";
 import NotesPage from "@/pages/transactions/NotesPage";
+import UnsplitReturn from "@/pages/transactions/UnsplitReturn";
 import StatsPage from "@/pages/stats/StatsPage";
 import CategoryDetail from "@/pages/stats/CategoryDetail";
 import BudgetPage from "@/pages/stats/BudgetPage";
@@ -120,7 +121,7 @@ function Gate() {
       <ScrollToTop />
       <Routes>
         {/* full screen, beside the shell: no sidebar or tab bar behind the story cards */}
-        <Route path="recap/:month" element={<RecapPage />} />
+        <Route path="recap/:key" element={<RecapPage />} />
         <Route element={<AppShell />}>
           <Route index element={<LedgerRoute />} />
           <Route path="t/new" element={<LedgerRoute />} />
@@ -135,6 +136,8 @@ function Gate() {
             <Route path="t/:id" element={<TransactionEditor />} />
           </Route>
           <Route path="notes" element={<NotesPage />} />
+          {/* back from UnSplit with the expense it made from entries chosen here */}
+          <Route path="unsplit/return" element={<UnsplitReturn />} />
           <Route path="recaps" element={<RecapsPage />} />
           <Route path="stats" element={<SplitLayout list={<StatsPage />} label="Category" />}>
             <Route path="c/:id" element={<CategoryDetail />} />

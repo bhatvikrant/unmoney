@@ -2,8 +2,11 @@ import { expect, test } from "vitest";
 import type { Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "./ops";
 import { statsByCategory } from "./views";
-import { monthRange } from "./period";
-import { monthRecap, recapIndex, recapNudge, recapText, RECAP_MIN_ENTRIES, RECAP_NUDGE_DAYS, type RecapCard } from "./recap";
+import { monthRange, yearRange } from "./period";
+import {
+  monthRecap, recapIndex, recapNudge, recapText, yearQualifies, yearRecap, yearRecapNudge,
+  PERSONALITY, RECAP_MIN_ENTRIES, RECAP_NUDGE_DAYS, RECAP_YEAR_MIN_MONTHS, RECAP_YEAR_NUDGE_DAYS, type RecapCard,
+} from "./recap";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -247,7 +250,7 @@ test("recapIndex lists every month with expenses, newest first, with the current
   f.income("2026-07-01", 100000); // income only: no row
   f.expense("2026-10-02", 620, "Food", "Groceries");
   const rows = recapIndex(f.snap, "2026-10-19");
-  expect(rows.map((r) => [r.month, r.state, r.entries])).toEqual([
+  expect(rows.map((r) => [r.kind === "month" ? r.month : r.year, r.state, r.entries])).toEqual([
     ["2026-10", "current", 1],
     ["2026-09", "ready", 8],
     ["2026-06", "thin", 2],
@@ -256,8 +259,278 @@ test("recapIndex lists every month with expenses, newest first, with the current
   expect(rows[1].cards).toBe(monthRecap(f.snap, "2026-09")!.cards.length);
   expect(rows[1].spent).toBe(269100);
   // an empty ledger still shows the current month, so the page can say when the first recap comes
-  expect(recapIndex(fresh().snap, "2026-10-19")).toEqual([{ month: "2026-10", entries: 0, spent: 0, state: "current", readyOn: "2026-11-01" }]);
+  expect(recapIndex(fresh().snap, "2026-10-19")).toEqual([{ kind: "month", month: "2026-10", entries: 0, spent: 0, state: "current", readyOn: "2026-11-01" }]);
   // with monthStartDay 25 the current month's recap is ready the day after its logical end
   const g = fresh(25);
   expect(recapIndex(g.snap, "2026-10-19")[0]).toMatchObject({ month: "2026-09", state: "current", readyOn: "2026-10-25" });
+});
+
+// ---- the year (docs/specs/yearly-recap.md) ----
+
+const yearCard = <K extends RecapCard["kind"]>(cards: RecapCard[], kind: K) => card(cards, kind)!;
+
+/**
+ * A full 2026: rent on the 1st (scheduled), coffee most days, lunches, a few big entries, times on
+ * most entries, income every month, and a 2025 to compare with.
+ */
+function fullYear(f: ReturnType<typeof fresh>) {
+  for (let m = 1; m <= 12; m++) {
+    const mm = String(m).padStart(2, "0");
+    f.expense(`2026-${mm}-01`, 60000, "Household", "Rent", { repeat: { frequency: "monthly" }, time: "09:00" });
+    for (let d = 2; d <= 28; d += 2) f.expense(`2026-${mm}-${String(d).padStart(2, "0")}`, 180 + m, "Food", "Coffee", { time: d % 4 === 0 ? "20:15" : "08:30" });
+    for (let d = 3; d <= 27; d += 4) f.expense(`2026-${mm}-${String(d).padStart(2, "0")}`, 450, "Food", "Lunch", { time: "13:05", accountId: f.bank._id });
+    for (let d = 5; d <= 25; d += 5) f.expense(`2026-${mm}-${String(d).padStart(2, "0")}`, 330, "Transport", "Uber");
+    f.income(`2026-${mm}-01`, 150000);
+  }
+  f.expense("2026-12-12", 80000, "Transport", "Flights to Lisbon", { time: "05:40", accountId: f.bank._id });
+  f.expense("2026-07-03", 42500, "Apparel", "Laptop", { accountId: f.bank._id });
+  // 2025: thinner, no Apparel, more Transport
+  for (let m = 1; m <= 12; m++) {
+    const mm = String(m).padStart(2, "0");
+    f.expense(`2025-${mm}-01`, 55000, "Household", "Rent");
+    f.expense(`2025-${mm}-10`, 9000, "Transport", "Trains");
+    f.expense(`2025-${mm}-11`, 1000, "Food", "Lunch");
+    f.expense(`2025-${mm}-12`, 1000, "Food", "Lunch");
+    f.expense(`2025-${mm}-13`, 1000, "Food", "Lunch");
+    f.income(`2025-${mm}-01`, 120000);
+  }
+}
+
+test("the year total equals statsByCategory over yearRange, and the cards run in spec order", () => {
+  const f = fresh();
+  fullYear(f);
+  const r = yearRecap(f.snap, 2026)!;
+  const range = yearRange(2026, 1);
+  expect(r.range).toEqual(range);
+  expect(r.month).toBe("2026");
+  const stats = statsByCategory(f.snap, range.from, range.to, "expense");
+  expect(yearCard(r.cards, "total").amount).toBe(stats.total);
+  expect(yearCard(r.cards, "total").scope).toBe("year");
+  expect(yearCard(r.cards, "total").prevLabel).toBe("2025");
+  expect(yearCard(r.cards, "categories").total).toBe(stats.total);
+  expect(yearCard(r.cards, "categories").top.map((t) => t.id)).toEqual(stats.items.slice(0, 5).map((i) => i.id));
+  expect(yearCard(r.cards, "months").perMonth.reduce((s, m) => s + m.amount, 0)).toBe(stats.total);
+  expect(kinds(r.cards)).toEqual(["cover", "total", "months", "categories", "top5", "biggest", "calendar", "clock", "methods", "changes", "new", "inout", "personality", "closer"]);
+  expect(yearCard(r.cards, "cover")).toMatchObject({ scope: "year", count: 14, days: 365 });
+  expect(yearCard(r.cards, "changes")).toMatchObject({ scope: "year", prevLabel: "2025", threshold: stats.total * 0.02 });
+  expect(yearCard(r.cards, "biggest").tx.note).toBe("Flights to Lisbon");
+  // only notes seen more than once make the list
+  expect(yearCard(r.cards, "top5").notes.map((n) => [n.text, n.count])).toEqual([["Coffee", 14 * 12], ["Lunch", 7 * 12], ["Uber", 5 * 12], ["Rent", 12]]);
+  expect(yearCard(r.cards, "top5").everyDays).toBeCloseTo(365 / (14 * 12));
+  const inout = yearCard(r.cards, "inout");
+  expect(inout.income).toBe(150000 * 12);
+  expect(inout.keptPct).toBe(Math.round(((150000 * 12 - stats.total) / (150000 * 12)) * 100));
+  expect(inout.bestMonth).toBeDefined();
+  expect(inout.budgetMonths).toBeUndefined();
+  const closer = yearCard(r.cards, "closer").summary;
+  expect(closer).toMatchObject({ spent: stats.total, prevLabel: "2025", biggest: { note: "Flights to Lisbon", amount: 80000 }, repeat: { text: "Coffee", count: 14 * 12 } });
+  expect(closer.personality).toBeDefined();
+});
+
+test("a year needs RECAP_YEAR_MIN_MONTHS qualifying months", () => {
+  const f = fresh();
+  for (let m = 1; m < RECAP_YEAR_MIN_MONTHS; m++) for (let i = 1; i <= RECAP_MIN_ENTRIES; i++) f.expense(`2026-0${m}-0${i}`, 100, "Food", `n${i}`);
+  expect(yearQualifies(f.snap, 2026)).toBe(false);
+  expect(yearRecap(f.snap, 2026)).toBeNull();
+  // a thin month does not count
+  for (let i = 1; i < RECAP_MIN_ENTRIES; i++) f.expense(`2026-0${RECAP_YEAR_MIN_MONTHS}-0${i}`, 100, "Food", `n${i}`);
+  expect(yearQualifies(f.snap, 2026)).toBe(false);
+  f.expense(`2026-0${RECAP_YEAR_MIN_MONTHS}-09`, 100, "Food", "last");
+  expect(yearQualifies(f.snap, 2026)).toBe(true);
+  const r = yearRecap(f.snap, 2026)!;
+  // a sparse year: no previous year, no times, one method, no income
+  expect(kinds(r.cards)).toEqual(["cover", "total", "months", "biggest", "calendar", "personality", "closer"]);
+  expect(yearCard(r.cards, "total").change).toBeUndefined();
+});
+
+test("months: the priciest and lightest months, against the average of the months with entries", () => {
+  const f = fresh();
+  const amounts = [72, 61, 88, 79, 83, 90, 95, 84, 84, 81, 79, 112];
+  amounts.forEach((a, i) => { for (let d = 1; d <= 5; d++) f.expense(`2026-${String(i + 1).padStart(2, "0")}-0${d}`, (a * 1000) / 5, "Food", `n${d}`); });
+  const m = yearCard(yearRecap(f.snap, 2026)!.cards, "months");
+  expect(m.priciest).toBe("2026-12");
+  expect(m.lightest).toBe("2026-02");
+  expect(m.ratio).toBeCloseTo(112 / 61);
+  const avg = amounts.reduce((s, a) => s + a, 0) / 12;
+  expect(m.aboveAvg).toBe(amounts.filter((a) => a > avg).length);
+  expect(m.swing).toBeCloseTo(amounts.reduce((s, a) => s + Math.abs(a - avg), 0) / 12 / avg);
+  expect(m.perMonth.map((x) => x.amount)).toEqual(amounts.map((a) => a * 1000));
+});
+
+test("each personality rule fires on a constructed year, and a flat year is The All-Rounder", () => {
+  const base = () => {
+    const f = fresh();
+    // a flat year: six categories at equal share on fixed days, months swinging well past 15%, no repeats, no times
+    const cats = ["Food", "Household", "Transport", "Apparel", "Health", "Culture"];
+    for (let m = 1; m <= 12; m++) cats.forEach((c, i) => { for (let k = 0; k < 2; k++) f.expense(`2026-${String(m).padStart(2, "0")}-${String(6 + i * 2 + k * 10).padStart(2, "0")}`, 1000 * (1 + (m % 3)), c, `${c} ${k}`); });
+    return f;
+  };
+  const archetype = (f: { snap: Snapshot }) => yearCard(yearRecap(f.snap, 2026)!.cards, "personality");
+  const flat = archetype(base());
+  expect(flat.archetype).toBe("The All-Rounder");
+  expect(flat.why).toBe("No single thing dominated: spread across categories, days and months.");
+  expect(flat.traits).toHaveLength(4);
+  expect(flat.traits.every((t) => !t.matched)).toBe(true);
+  // The Planner: scheduled entries ≥ 35% of spend (the base year is 288,000)
+  const planner = base();
+  planner.expense("2026-03-15", 200000, "Household", "Rent", { repeat: { frequency: "monthly" } });
+  expect(archetype(planner).archetype).toBe("The Planner");
+  expect(archetype(planner).traits[0]).toMatchObject({ label: "Scheduled entries", matched: true });
+  // The Planner by budgets: every budget held in 9+ months
+  let withBudget = run(base().snap, "budgets.upsert", { period: "monthly", amount: 100000000 });
+  const byBudget = archetype({ snap: withBudget });
+  expect(byBudget.archetype).toBe("The Planner");
+  expect(byBudget.traits[0]).toEqual({ label: "Months within budget", value: "12 of 12", matched: true });
+  expect(byBudget.traits.slice(1).every((t) => !t.matched)).toBe(true);
+  withBudget = run(withBudget, "budgets.upsert", { period: "monthly", amount: 1 });
+  expect(archetype({ snap: withBudget }).archetype).toBe("The All-Rounder");
+  // The Homebody: Household ≥ 40%
+  const home = base();
+  home.expense("2026-03-15", 150000, "Household", "Deposit");
+  expect(archetype(home).archetype).toBe("The Homebody");
+  // The Foodie: Food ≥ 30%, widened by a category whose name says food
+  const foodie = base();
+  foodie.expense("2026-03-15", 70000, "Food", "Feast");
+  expect(archetype(foodie).archetype).toBe("The Foodie");
+  const eating = fresh();
+  let s2 = run(eating.snap, "categories.create", { type: "expense", name: "Eating out" });
+  const eatId = s2.categories.find((c) => c.name === "Eating out")!._id;
+  for (let m = 1; m <= 12; m++) {
+    s2 = run(s2, "transactions.create", { type: "expense", accountId: eating.cash._id, categoryId: eatId, amount: 1000, note: "Dinner", date: `2026-${String(m).padStart(2, "0")}-10`, tags: [], photoIds: [] });
+    for (let k = 1; k <= 5; k++) s2 = run(s2, "transactions.create", { type: "expense", accountId: eating.cash._id, categoryId: eating.cat(k <= 2 ? "Household" : "Culture"), amount: 300, note: `h${k}`, date: `2026-${String(m).padStart(2, "0")}-1${k}`, tags: [], photoIds: [] });
+  }
+  expect(archetype({ snap: s2 }).archetype).toBe("The Foodie");
+  expect(archetype({ snap: s2 }).traits[0]).toEqual({ label: "Food", value: "40% of spend", matched: true });
+  // The Explorer: Travel + Transport ≥ 20%
+  const explorer = base();
+  explorer.expense("2026-03-15", 20000, "Transport", "Flights");
+  expect(archetype(explorer).archetype).toBe("The Explorer");
+  // The Weekender: ≥ 45% on Saturdays and Sundays (6 Jun 2026 is a Saturday)
+  const weekender = base();
+  weekender.expense("2026-06-06", 150000, "Health", "Marathon");
+  expect(archetype(weekender).archetype).toBe("The Weekender");
+  // The Night Owl: ≥ 40% of timed entries at or after 21:00, with times on at least half the entries
+  const owl = base();
+  for (let m = 1; m <= 12; m++) for (let k = 0; k < 13; k++) owl.expense(`2026-${String(m).padStart(2, "0")}-2${k % 8 + 1}`, 10, "Food", "Late snack", { time: "22:30" });
+  expect(archetype(owl).archetype).toBe("The Night Owl");
+  expect(archetype(owl).traits[0]).toEqual({ label: "After 9 pm", value: "100% of entries", matched: true });
+  // The Big-Day Spender: the ten largest entries ≥ 40% of the year
+  const big = base();
+  big.expense("2026-03-15", 60000, "Health", "Surgery");
+  big.expense("2026-03-16", 60000, "Apparel", "Suit");
+  big.expense("2026-04-16", 60000, "Culture", "Festival");
+  expect(archetype(big).archetype).toBe("The Big-Day Spender");
+});
+
+test("The Steady Hand fires on even months, and not on a swinging year", () => {
+  // even months, spread over many categories so nothing else fires
+  const f = fresh();
+  const cats = ["Food", "Household", "Transport", "Apparel", "Health", "Culture", "Pets", "Beauty"];
+  for (let m = 1; m <= 12; m++) cats.forEach((c, i) => f.expense(`2026-${String(m).padStart(2, "0")}-${String(3 + i * 2).padStart(2, "0")}`, 1000, c, c));
+  const p = yearCard(yearRecap(f.snap, 2026)!.cards, "personality");
+  expect(p.archetype).toBe("The Steady Hand");
+  expect(p.traits[0]).toEqual({ label: "Month swing", value: "±0%", matched: true });
+  f.expense("2026-12-15", 20000, "Culture", "Concert");
+  expect(yearCard(yearRecap(f.snap, 2026)!.cards, "personality").archetype).toBe("The All-Rounder");
+});
+
+test("On the clock is skipped when fewer than half the entries have a time", () => {
+  const f = fresh();
+  for (let m = 1; m <= 12; m++) for (let k = 1; k <= 6; k++) f.expense(`2026-${String(m).padStart(2, "0")}-0${k}`, 100, "Food", `n${k}`, k <= 3 ? { time: `${String(18 + k).padStart(2, "0")}:00` } : {});
+  // exactly half: enough
+  const half = yearCard(yearRecap(f.snap, 2026)!.cards, "clock");
+  expect(half).toMatchObject({ timed: 36, total: 72, peakHour: 19, morningShare: 0 });
+  expect(half.eveningShare).toBe(1);
+  expect(half.perHour[19]).toBe(12);
+  expect(half.first).toEqual({ time: "19:00", note: "n1", date: "2026-01-01" });
+  f.expense("2026-06-20", 100, "Food", "untimed");
+  expect(card(yearRecap(f.snap, 2026)!.cards, "clock")).toBeUndefined();
+});
+
+test("New this year ignores categories and methods used the year before", () => {
+  const f = fresh();
+  fullYear(f);
+  const n = yearCard(yearRecap(f.snap, 2026)!.cards, "new");
+  // Apparel has one entry (under 5), Food and Transport existed in 2025; the bank account is new in 2026 with 12+ lunches
+  expect(n.items.map((i) => [i.kind, i.name])).toEqual([["account", f.bank.name]]);
+  expect(n.items[0]).toMatchObject({ first: "2026-01-03", count: 7 * 12 + 2 });
+  // a category used in 2025 never counts, even with many entries
+  f.expense("2025-05-05", 100, "Apparel", "Socks");
+  for (let m = 1; m <= 6; m++) f.expense(`2026-0${m}-20`, 2000, "Apparel", "Shirt");
+  expect(yearCard(yearRecap(f.snap, 2026)!.cards, "new").items.some((i) => i.name === "Apparel")).toBe(false);
+  // one never used before does, from its first entry
+  for (let m = 1; m <= 6; m++) f.expense(`2026-0${m}-21`, 500, "Health", "Gym");
+  const items = yearCard(yearRecap(f.snap, 2026)!.cards, "new").items;
+  expect(items.find((i) => i.name === "Health")).toEqual({ kind: "category", name: "Health", first: "2026-01-21", count: 6, amount: 3000 });
+});
+
+test("the calendar's rows follow monthStartDay 25", () => {
+  const f = fresh(25);
+  for (let m = 1; m <= 12; m++) { for (let k = 5; k <= 8; k++) f.expense(`2026-${String(m).padStart(2, "0")}-2${k}`, 100 * k, "Food", `n${k}`); f.expense(`2026-${String(m).padStart(2, "0")}-25`, 100, "Food", "n0"); }
+  const r = yearRecap(f.snap, 2026)!;
+  expect(r.range).toEqual({ from: "2026-01-25", to: "2027-01-24" });
+  const cal = yearCard(r.cards, "calendar");
+  expect(cal.rows).toHaveLength(12);
+  expect(cal.rows[0]).toEqual({ month: "2026-01", from: "2026-01-25", days: 31 });
+  expect(cal.rows[1]).toEqual({ month: "2026-02", from: "2026-02-25", days: 28 });
+  expect(cal.rows[11]).toEqual({ month: "2026-12", from: "2026-12-25", days: 31 });
+  expect(cal.perDay).toHaveLength(365);
+  expect(cal.perDay[0].date).toBe("2026-01-25");
+  expect(cal.rows.reduce((s, x) => s + x.days, 0)).toBe(365);
+  // 25–28 of each month: a four-day streak
+  expect(cal.streak).toBe(4);
+  expect(cal.noSpend).toBe(365 - 48);
+  expect(cal.busiest).toBe("2026-01-28");
+  expect(cal.busiestNotes).toEqual(["n8"]);
+  expect(cal.spendDay.share).toBeGreaterThan(0);
+});
+
+test("yearRecapNudge: the previous year during the first 14 days of logical month 1", () => {
+  const f = fresh();
+  fullYear(f);
+  expect(yearRecapNudge(f.snap, "2027-01-01")).toBe(2026);
+  expect(yearRecapNudge(f.snap, `2027-01-${RECAP_YEAR_NUDGE_DAYS}`)).toBe(2026);
+  expect(yearRecapNudge(f.snap, `2027-01-${RECAP_YEAR_NUDGE_DAYS + 1}`)).toBeNull();
+  expect(yearRecapNudge(f.snap, "2026-12-31")).toBeNull();
+  expect(yearRecapNudge(f.snap, "2027-02-03")).toBeNull();
+  // 2025 has five entries a month, so it qualifies too; an empty 2024 does not
+  expect(yearRecapNudge(f.snap, "2026-01-03")).toBe(2025);
+  expect(yearRecapNudge(f.snap, "2025-01-03")).toBeNull();
+  // with monthStartDay 25, logical 2026 runs 25 Jan 2026 – 24 Jan 2027 and logical January 2027 starts on 25 Jan 2027
+  const g = fresh(25);
+  for (let m = 1; m <= 12; m++) { for (let k = 5; k <= 8; k++) g.expense(`2026-${String(m).padStart(2, "0")}-2${k}`, 100, "Food", `n${k}`); g.expense(`2026-${String(m).padStart(2, "0")}-25`, 100, "Food", "n0"); }
+  expect(yearRecapNudge(g.snap, "2027-01-25")).toBe(2026);
+  expect(yearRecapNudge(g.snap, "2027-02-07")).toBe(2026);
+  expect(yearRecapNudge(g.snap, "2027-02-08")).toBeNull();
+  expect(yearRecapNudge(g.snap, "2027-01-24")).toBeNull();
+  expect(yearRecapNudge(g.snap, "2027-01-03")).toBeNull();
+});
+
+test("recapIndex puts a year row before each finished year's months", () => {
+  const f = fresh();
+  fullYear(f);
+  const rows = recapIndex(f.snap, "2027-01-03");
+  expect(rows[0]).toMatchObject({ kind: "month", month: "2027-01", state: "current" });
+  expect(rows[1]).toMatchObject({ kind: "year", year: 2026, state: "ready", months: 12, cards: 14 });
+  expect(rows[2]).toMatchObject({ kind: "month", month: "2026-12", state: "ready" });
+  expect(rows.find((r) => r.kind === "year" && r.year === 2025)).toMatchObject({ kind: "year", state: "ready", months: 12 });
+  // a year with too few qualifying months is listed, muted
+  const h = fresh();
+  for (let m = 1; m <= 2; m++) for (let k = 1; k <= 5; k++) h.expense(`2025-0${m}-0${k}`, 100, "Food", `n${k}`);
+  const thin = recapIndex(h.snap, "2026-10-19").find((r) => r.kind === "year")!;
+  expect(thin).toMatchObject({ kind: "year", year: 2025, state: "thin", months: 2, entries: 10, spent: 1000 });
+  expect(thin.cards).toBeUndefined();
+  // the year's spent is the Stats figure for the year
+  expect(rows[1].spent).toBe(statsByCategory(f.snap, "2026-01-01", "2026-12-31", "expense").total);
+  // the current year has no row
+  expect(recapIndex(f.snap, "2026-10-19").some((r) => r.kind === "year" && r.year === 2026)).toBe(false);
+});
+
+test("recapText writes the four-line year summary", () => {
+  const fmt = (n: number) => `₹${(n / 100).toLocaleString("en-IN")}`;
+  expect(recapText({
+    range: { from: "2026-01-01", to: "2026-12-31" }, entries: 1842, strip: [],
+    spent: 98431000, change: 0.06, prevLabel: "2025", top: { name: "Food", pct: 0.27 }, biggest: { note: "Flights to Lisbon", amount: 4800000 },
+    keptPct: 34, noSpend: 58, repeat: { text: "Coffee", count: 226 }, personality: "The Planner",
+  }, "2026", fmt, "year")).toBe("2026 · UnMoney\nSpent ₹9,84,310 (6% more than 2025)\nTop: Food 27% · Biggest: Flights to Lisbon ₹48,000 · Most logged: \"Coffee\" ×226\nKept 34% of income · 58 no-spend days · The Planner");
 });

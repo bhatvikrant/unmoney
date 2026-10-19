@@ -67,6 +67,8 @@ export function clean<T extends object>(o: T): T {
 
 export type TxType = "income" | "expense" | "transfer";
 export type Template = Doc<"bookmarks">["template"];
+/** Where an entry was split with other people; only UnSplit so far. */
+export type TxSplit = NonNullable<Doc<"transactions">["split"]>;
 /** Where an entry was read from; only Gmail so far. Set by the drafts ops, never by the entry form. */
 export type TxSource = NonNullable<Doc<"transactions">["source"]>;
 export type TxFields = {
@@ -196,6 +198,8 @@ export interface Ops {
   "transactions.remove": { args: { id: Id<"transactions">; scope?: "one" | "future" | "all" }; result: void };
   "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
   "transactions.bulkRemove": { args: { ids: Id<"transactions">[] }; result: void };
+  /** Link entries to the shared expense they became on UnSplit (or, with null, unlink them). Entries gone meanwhile are left out. */
+  "transactions.setSplit": { args: { ids: Id<"transactions">[]; split: TxSplit | null }; result: void };
   "transactions.importRows": {
     /**
      * createMissing: categories · createAccounts: accounts, of type Other · new accounts land outside any group · skipInvalid: import the good rows, report the rest ·
@@ -310,6 +314,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.remove": ["transactions", "repeats"],
   "transactions.bulkUpdate": ["accounts", "categories", "transactions"],
   "transactions.bulkRemove": ["transactions"],
+  "transactions.setSplit": ["transactions"],
   "transactions.importRows": ["settings", "accountGroups", "accounts", "categories", "currencies", "transactions"],
   "transactions.copy": ["transactions"],
   "transactions.rescale": ["transactions"],
@@ -372,7 +377,8 @@ export function txScope(op: Op): TxScope {
     case "transactions.update": return a.scope === "future" ? { seriesOf: [id] } : { ids: [id] };
     case "transactions.remove": return a.scope === "future" || a.scope === "all" ? { seriesOf: [id] } : { ids: [id] };
     case "transactions.bulkUpdate":
-    case "transactions.bulkRemove": return { ids: a.ids as string[] };
+    case "transactions.bulkRemove":
+    case "transactions.setSplit": return { ids: a.ids as string[] };
     case "transactions.copy": return { ids: [id] };
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
     case "drafts.link": return { ids: [a.transactionId as string] };
@@ -1419,6 +1425,12 @@ const handlers: Handlers = {
     }
   },
 
+  "transactions.setSplit": (w, { ids, split }) => {
+    if (split && (split.app !== "unsplit" || !split.expenseId.trim())) throw new Error("Bad split link");
+    const link = split ? { app: split.app, expenseId: split.expenseId.trim() } : undefined;
+    for (const id of ids) if (w.get("transactions", id)) w.patch("transactions", id, { split: link });
+  },
+
   "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
     const settings = w.requireSettings();
     const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
@@ -1606,8 +1618,8 @@ const handlers: Handlers = {
 
   "transactions.copy": (w, { id, useToday, today }) => {
     const t = w.must("transactions", id);
-    const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, source, ...rest } = t;
-    void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal; void source;
+    const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, split, source, ...rest } = t;
+    void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal; void split; void source;
     return w.insert("transactions", { ...rest, date: useToday ? (today && isDate(today) ? today : todayISO()) : t.date });
   },
 

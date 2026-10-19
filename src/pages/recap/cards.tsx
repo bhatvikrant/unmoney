@@ -1,10 +1,11 @@
 /**
- * One component per recap card kind (spec §4.1–4.3). Every number comes from shared/recap.ts;
- * these only lay it out: a lead-in label with the card's tint square, one big number or
- * headline, a line or two of context, a visual that fills the middle, and a footnote at the
- * bottom. The card lets taps through to the zones beneath it; its buttons and links catch them.
+ * One component per recap card kind (monthly spec §4.1–4.3, yearly spec §4). Every number comes
+ * from shared/recap.ts; these only lay it out: a lead-in label with the card's tint square, one
+ * big number or headline, a line or two of context, a visual that fills the middle, and a
+ * footnote at the bottom. The card lets taps through to the zones beneath it; its buttons and
+ * links catch them. The cards a month and a year share switch their copy on `card.scope`.
  */
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { ArrowDown, ArrowUp, Check, ChevronRight, Copy } from "lucide-react";
 import { toast } from "sonner";
@@ -13,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Money } from "@/components/shell/Money";
 import { colorAt } from "@/pages/stats/charts";
-import { MONTH_LONG, MONTH_SHORT, WEEKDAY_SHORT, parts, weekday, type ISODate } from "../../../shared/dates";
+import { diffDays, MONTH_LONG, MONTH_SHORT, WEEKDAY_SHORT, parts, weekday, type ISODate } from "../../../shared/dates";
 import { parseMonthKey, type MonthKey, type Range } from "../../../shared/period";
 import { pctChange, recapText, type RecapBudgets, type RecapCard, type RecapStrip } from "../../../shared/recap";
 import type { Tx } from "../../../shared/views";
@@ -22,7 +23,9 @@ import type { Tx } from "../../../shared/views";
 const TINT: Record<RecapCard["kind"], string> = {
   cover: "var(--chart-rest)", total: "var(--chart-8)", categories: "var(--chart-1)", biggest: "var(--chart-2)", days: "var(--chart-4)",
   repeat: "var(--chart-7)", changes: "var(--chart-5)", inout: "var(--chart-3)", budgets: "var(--chart-3)", closer: "var(--chart-rest)",
+  months: "var(--chart-4)", top5: "var(--chart-7)", calendar: "var(--chart-8)", clock: "var(--chart-6)", methods: "var(--chart-3)", new: "var(--chart-4)", personality: "var(--chart-7)",
 };
+const WEEKDAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 /** Text drawn on a solid chart colour: a fixed near-black in both themes (spec §4.2). */
 const ON_CHART = "oklch(0.145 0 0)";
 const ON_SIGNAL = "oklch(0.985 0 0)";
@@ -36,6 +39,22 @@ function rangeLabel(r: Range): string {
   const a = parts(r.from), b = parts(r.to);
   return a.m === b.m ? `${a.d}–${b.d} ${MONTH_SHORT[a.m - 1]}` : `${a.d} ${MONTH_SHORT[a.m - 1]} – ${b.d} ${MONTH_SHORT[b.m - 1]}`;
 }
+/** "25 Jan 2026 – 24 Jan 2027": a logical year that straddles two calendar years (month start day ≠ 1). */
+const yearRangeLabel = (r: Range) => `${shortDay(r.from)} ${parts(r.from).y} – ${shortDay(r.to)} ${parts(r.to).y}`;
+/** "8 pm" */
+const hourLabel = (h: number) => `${h % 12 || 12} ${h < 12 ? "am" : "pm"}`;
+/** "8–9 pm", or "11 am – 12 pm" across noon or midnight. */
+function hourRange(h: number): string {
+  const next = (h + 1) % 24;
+  return h < 12 === next < 12 ? `${h % 12 || 12}–${next % 12 || 12} ${h < 12 ? "am" : "pm"}` : `${hourLabel(h)} – ${hourLabel(next)}`;
+}
+/** "05:40" → "5:40 am" */
+function timeLabel(t: string): string {
+  const [h, m] = t.split(":").map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`;
+}
+/** The Stats page for a month key or a year key. */
+const statsPath = (key: string) => (/^\d{4}$/.test(key) ? `/stats?period=yearly&year=${key}` : `/stats?month=${key}`);
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const joinAnd = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
@@ -122,6 +141,21 @@ function BudgetsTile({ budgets, className }: { budgets: RecapBudgets; className?
 type Props<K extends RecapCard["kind"]> = { card: Extract<RecapCard, { kind: K }>; month: MonthKey; onClose?: () => void };
 
 export function CoverCard({ card, month }: Props<"cover">) {
+  if (card.scope === "year") {
+    const straddles = parts(card.range.from).d !== 1;
+    return (
+      <CardFrame kind="cover">
+        <Vis>
+          <Label>Your year in money</Label>
+          <div className="mb-1.5 text-[88px] font-semibold leading-none tracking-[-0.05em]">{month}</div>
+          <Ctx className="mt-[18px]"><B>{plural(card.entries, "entry", "entries")}</B> across {plural(card.days, "day")}</Ctx>
+          <Ctx>{straddles ? `${yearRangeLabel(card.range)} · ` : ""}{plural(card.count, "card")} · under a minute</Ctx>
+        </Vis>
+        <Strip strip={card.strip} />
+        <Foot><span>UnMoney</span><span className="inline-flex items-center gap-1 font-medium text-foreground">Tap to start<ChevronRight className="size-3.5" /></span></Foot>
+      </CardFrame>
+    );
+  }
   const { y } = parseMonthKey(month);
   return (
     <CardFrame kind="cover">
@@ -140,6 +174,7 @@ export function CoverCard({ card, month }: Props<"cover">) {
 
 export function TotalCard({ card, month }: Props<"total">) {
   const { fmt } = useApp();
+  const year = card.scope === "year";
   const max = Math.max(card.amount, card.prev ?? 0, 1);
   const bar = (label: string, amount: number, now: boolean) => (
     <div className="my-1.5 grid grid-cols-[44px_1fr_auto] items-center gap-2.5 text-[13px]">
@@ -154,13 +189,15 @@ export function TotalCard({ card, month }: Props<"total">) {
         <Label>You spent</Label>
         <Num><Money amount={card.amount} kind="expense" /></Num>
         {card.change !== undefined && card.prevLabel ? <Ctx className="flex items-center gap-1"><Delta change={card.change} /> {card.prevLabel}</Ctx> : null}
-        <Ctx>about <B><Money amount={card.perDay} /> a day</B></Ctx>
+        {year && card.perMonth !== undefined
+          ? <Ctx>about <B><Money amount={card.perMonth} /> a month</B> · <Money amount={card.perDay} /> a day</Ctx>
+          : <Ctx>about <B><Money amount={card.perDay} /> a day</B></Ctx>}
         <div className="mt-7">
-          {card.prev !== undefined && card.prevLabel ? bar(card.prevLabel.slice(0, 3), card.prev, false) : null}
-          {bar(longMonth(month).slice(0, 3), card.amount, true)}
+          {card.prev !== undefined && card.prevLabel ? bar(year ? card.prevLabel : card.prevLabel.slice(0, 3), card.prev, false) : null}
+          {bar(year ? month : longMonth(month).slice(0, 3), card.amount, true)}
         </div>
       </Vis>
-      <Foot><span>The same figure as Expenses on Stats</span></Foot>
+      <Foot><span>The same figure as Expenses on Stats{year ? ", Annually" : ""}</span></Foot>
     </CardFrame>
   );
 }
@@ -168,13 +205,25 @@ export function TotalCard({ card, month }: Props<"total">) {
 export function CategoriesCard({ card, month }: Props<"categories">) {
   const nav = useNavigate();
   const { fmt } = useApp();
+  const year = card.scope === "year";
   const n = card.top.length + card.rest.count;
   const lead = card.top[0];
+  const second = card.top[1];
+  const topTwo = lead.pct + (second?.pct ?? 0);
   return (
     <CardFrame kind="categories">
       <Label>Where it went</Label>
-      <H>{lead.name} took the biggest slice</H>
-      <Ctx><B><Money amount={lead.amount} /></B> · {plural(card.lead.count, "entry", "entries")} · {fmt(card.lead.avg)} each on average</Ctx>
+      {year ? (
+        <>
+          <H className="line-clamp-2">{lead.name}{second ? `, then ${second.name}` : ""}</H>
+          <Ctx>Together <B>{topTwo >= 0.48 && topTwo <= 0.52 ? "half the year" : `${pct(topTwo)} of the year`}</B></Ctx>
+        </>
+      ) : (
+        <>
+          <H>{lead.name} took the biggest slice</H>
+          <Ctx><B><Money amount={lead.amount} /></B> · {plural(card.lead.count, "entry", "entries")} · {fmt(card.lead.avg)} each on average</Ctx>
+        </>
+      )}
       <Vis>
         <div className="my-3.5 mb-3 flex max-h-[280px] min-h-[190px] flex-1 flex-col gap-[3px] overflow-hidden rounded-lg">
           {card.top.map((t, i) => (
@@ -189,11 +238,11 @@ export function CategoriesCard({ card, month }: Props<"categories">) {
           ) : null}
         </div>
         <Legend>
-          {card.top.map((t, i) => legendRow(t.id, colorAt(i, n), t.name, fmt(t.amount)))}
-          {card.rest.count ? legendRow("rest", REST, "Everything else", fmt(card.rest.amount), true) : null}
+          {card.top.slice(0, 3).map((t, i) => legendRow(t.id, colorAt(i, n), t.name, fmt(t.amount)))}
+          {!year && card.rest.count ? legendRow("rest", REST, "Everything else", fmt(card.rest.amount), true) : null}
         </Legend>
       </Vis>
-      <Foot><span>{plural(n, "category", "categories")} in all</span><FootLink onClick={() => nav(`/stats?month=${month}`)}>Open Stats</FootLink></Foot>
+      <Foot><span>{plural(n, "category", "categories")} in all</span><FootLink onClick={() => nav(statsPath(month))}>Open Stats</FootLink></Foot>
     </CardFrame>
   );
 }
@@ -203,15 +252,17 @@ export function BiggestCard({ card }: Props<"biggest">) {
   const { accountName, categoryLabel } = useApp();
   const title = (tx: Tx) => tx.note.trim() || categoryLabel(tx) || (tx.type === "transfer" ? `Transfer to ${accountName(tx.toAccountId)}` : "Uncategorised");
   const line = (tx: Tx) => [tx.type === "transfer" ? "Transfer" : categoryLabel(tx) || "Uncategorised", accountName(tx.accountId), dayLabel(tx.date)].join(" · ");
+  const year = card.scope === "year";
   const rows = [{ tx: card.tx, note: title(card.tx), amount: card.tx.amount }, ...card.runnersUp];
   const together = rows.length === 1 ? "The one entry" : rows.length === 2 ? "Top two together" : "Top three together";
+  const period = year ? "the year" : "the month";
   return (
     <CardFrame kind="biggest">
       <Vis>
         <Label>Biggest single spend</Label>
         <Num><Money amount={card.tx.amount} kind="expense" /></Num>
         <H className="line-clamp-2">{title(card.tx)}</H>
-        <Ctx><B>{pct(card.share)}</B> of the month in one entry</Ctx>
+        <Ctx><B>{pct(card.share)}</B> of {period} in one entry{year ? ` · ${dayLabel(card.tx.date)}` : ""}</Ctx>
         <div className="mt-[22px] overflow-hidden rounded-lg border bg-card">
           {rows.map((r, i) => (
             <div key={r.tx._id} className="flex items-center gap-3 border-b px-3 py-2.5 last:border-b-0">
@@ -222,7 +273,7 @@ export function BiggestCard({ card }: Props<"biggest">) {
           ))}
         </div>
       </Vis>
-      <Foot><span>{together}: {pct(card.topShare)} of the month</span><FootLink onClick={() => nav(`/t/${card.tx._id}`)}>Open entry</FootLink></Foot>
+      <Foot><span>{year ? `Your ten largest entries: ${pct(card.topShare)} of the year` : `${together}: ${pct(card.topShare)} of the month`}</span><FootLink onClick={() => nav(`/t/${card.tx._id}`)}>Open entry</FootLink></Foot>
     </CardFrame>
   );
 }
@@ -326,6 +377,7 @@ function moverHeadline(m: { name: string; before: number; after: number }): stri
 
 export function ChangesCard({ card }: Props<"changes">) {
   const { fmt } = useApp();
+  const year = card.scope === "year";
   const [first, ...others] = card.movers;
   const fallers = card.movers.filter((m) => m.after < m.before).map((m) => m.name);
   const biggest = Math.max(1, ...card.movers.map((m) => Math.abs(m.after - m.before)));
@@ -338,7 +390,8 @@ export function ChangesCard({ card }: Props<"changes">) {
       <Vis>
         {card.movers.map((m) => {
           const up = m.after > m.before;
-          const delta = m.before === 0 ? "new" : m.after === 0 ? "gone" : `${up ? "+" : "−"}${pctChange(m.pct!).pct}%`;
+          // a year shows a rise of 2× or more as "N×" (spec §4.2, card 10)
+          const delta = m.before === 0 ? "new" : m.after === 0 ? "gone" : year && m.after / m.before >= 2 ? `${(m.after / m.before).toFixed(1).replace(/\.0$/, "")}×` : `${up ? "+" : "−"}${pctChange(m.pct!).pct}%`;
           return (
             <div key={m.id} className="grid grid-cols-[1fr_96px_auto] items-center gap-3 border-b py-2.5 last:border-b-0">
               <div className="min-w-0 text-[15px]"><span className="block truncate">{m.name}</span><small className="block text-xs text-muted-foreground tabular">{fmt(m.before)} → {fmt(m.after)}</small></div>
@@ -351,14 +404,18 @@ export function ChangesCard({ card }: Props<"changes">) {
           );
         })}
       </Vis>
-      <Foot><span>Only moves above 5% of the month's total</span></Foot>
+      <Foot><span>Only moves above {year ? "2% of the year's" : "5% of the month's"} total</span></Foot>
     </CardFrame>
   );
 }
 
 export function InOutCard({ card }: Props<"inout">) {
   const { fmt } = useApp();
+  const year = card.scope === "year";
   const spentShare = Math.min(1, card.spent / card.income);
+  const foot = year
+    ? (card.prevKeptPct !== undefined ? `Last year: ${card.prevKeptPct}% kept` : "No income recorded the year before")
+    : (card.prevKeptPct !== undefined ? `Last month: ${card.prevKeptPct}% kept` : "No income recorded the month before");
   return (
     <CardFrame kind="inout">
       <Vis>
@@ -375,8 +432,14 @@ export function InOutCard({ card }: Props<"inout">) {
           {legendRow("kept", REST, "Kept", <Money amount={card.income - card.spent} />)}
         </Legend>
         {card.budgets ? <Tiles><BudgetsTile budgets={card.budgets} className="col-span-full" /></Tiles> : null}
+        {year && (card.bestMonth || card.budgetMonths) ? (
+          <Tiles>
+            {card.bestMonth ? <Tile label="Best month" value={longMonth(card.bestMonth.month)} hint={`${card.bestMonth.keptPct}% kept`} /> : null}
+            {card.budgetMonths ? <Tile label="Budgets" value={`${card.budgetMonths.held} of ${card.budgetMonths.total}`} hint="months within budget" /> : null}
+          </Tiles>
+        ) : null}
       </Vis>
-      <Foot><span>{card.prevKeptPct !== undefined ? `Last month: ${card.prevKeptPct}% kept` : "No income recorded the month before"}</span></Foot>
+      <Foot><span>{foot}</span></Foot>
     </CardFrame>
   );
 }
@@ -384,6 +447,19 @@ export function InOutCard({ card }: Props<"inout">) {
 export function BudgetsCard({ card }: Props<"budgets">) {
   const { fmt } = useApp();
   const b = card.budgets;
+  if (card.scope === "year") {
+    return (
+      <CardFrame kind="budgets">
+        <Vis>
+          <Label>Budgets</Label>
+          <H>{b.held} of {b.total} months within budget</H>
+          <Ctx>{b.held === b.total ? "Every budget held in every month" : `${plural(b.total - b.held, "month")} had a budget go over`}</Ctx>
+          <Tiles><Tile label="Held" value={plural(b.held, "month")} /><Tile label="Over" value={plural(b.total - b.held, "month")} /></Tiles>
+        </Vis>
+        <Foot><span>No income was recorded this year</span></Foot>
+      </CardFrame>
+    );
+  }
   return (
     <CardFrame kind="budgets">
       <Vis>
@@ -401,12 +477,13 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
   const nav = useNavigate();
   const { fmt } = useApp();
   const s = card.summary;
+  const year = card.scope === "year";
   const [copied, setCopied] = useState(false);
-  const name = longMonth(month);
-  const { y } = parseMonthKey(month);
+  const name = year ? month : longMonth(month);
+  const y = year ? "" : String(parseMonthKey(month).y);
   async function copy() {
     try {
-      await navigator.clipboard.writeText(recapText(s, `${name} ${y}`, fmt));
+      await navigator.clipboard.writeText(year ? recapText(s, month, fmt, "year") : recapText(s, `${name} ${y}`, fmt));
       setCopied(true);
       toast.success("Summary copied");
       setTimeout(() => setCopied(false), 2000);
@@ -415,8 +492,9 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
     }
   }
   const change = s.change !== undefined && s.prevLabel ? pctChange(s.change) : undefined;
+  // on a wide screen the card is 560 px tall, so the poster's rows and title tighten a little to fit without scrolling
   const row = (label: string, value: ReactNode, key: string) => (
-    <div key={key} className="flex items-baseline justify-between gap-3 border-b py-2 text-sm last:border-b-0 lg:py-1.5">
+    <div key={key} className={cn("flex items-baseline justify-between gap-3 border-b py-2 text-sm last:border-b-0", year ? "lg:py-1" : "lg:py-1.5")}>
       <span className="whitespace-nowrap text-muted-foreground">{label}</span><b className="min-w-0 truncate text-right font-medium">{value}</b>
     </div>
   );
@@ -425,10 +503,11 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
       <Label>Keep this one</Label>
       <Vis>
         {/* the poster: the thing to keep (and later share as an image), so the actions stay outside it */}
-        {/* on a wide screen the card is 560 px tall, so the poster's rows and title tighten a little to fit without scrolling */}
         <div className="rounded-[14px] border bg-card px-4 pt-4 pb-3 shadow-card lg:pt-3">
           <div className="mb-3 flex items-start justify-between lg:mb-2">
-            <div className="text-[30px] font-semibold leading-none tracking-[-0.03em] lg:text-[26px]">{name}<br /><span className="font-medium text-muted-foreground">{y}</span></div>
+            {year
+              ? <div className="text-[40px] font-semibold leading-none tracking-[-0.03em] lg:text-[32px]">{name}</div>
+              : <div className="text-[30px] font-semibold leading-none tracking-[-0.03em] lg:text-[26px]">{name}<br /><span className="font-medium text-muted-foreground">{y}</span></div>}
             <span className="mt-1 text-xs font-semibold tracking-[-0.01em]">UnMoney</span>
           </div>
           <Strip strip={s.strip} className="mb-1.5" />
@@ -436,17 +515,234 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
           {change ? row(`vs ${s.prevLabel}`, <span className={change.less ? "text-income" : "text-expense"}>{change.pct === 0 ? "the same" : `${change.less ? "↓" : "↑"} ${change.pct}% ${change.less ? "less" : "more"}`}</span>, "vs") : null}
           {row("Top category", s.top ? `${s.top.name} · ${pct(s.top.pct)}` : "—", "top")}
           {row("Biggest spend", s.biggest ? `${s.biggest.note} · ${fmt(s.biggest.amount)}` : "—", "big")}
+          {year ? row("Most logged", s.repeat ? `“${s.repeat.text}” ×${s.repeat.count}` : "—", "repeat") : null}
           {row("Kept", s.keptPct !== undefined ? `${s.keptPct}% of income` : "no income logged", "kept")}
           {row("No-spend days", s.noSpend, "nospend")}
-          {row("On repeat", s.repeat ? `“${s.repeat.text}” ×${s.repeat.count}` : "—", "repeat")}
-          <div className="mt-2 flex justify-between text-[11px] text-muted-foreground"><span>{rangeLabel(s.range)} · {plural(s.entries, "entry", "entries")}</span><span>unmoney.vercel.app</span></div>
+          {year ? row("Personality", s.personality ?? "—", "personality") : row("On repeat", s.repeat ? `“${s.repeat.text}” ×${s.repeat.count}` : "—", "repeat")}
+          <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
+            <span>{year ? `${plural(s.entries, "entry", "entries")} · ${plural(diffDays(s.range.from, s.range.to) + 1, "day")}` : `${rangeLabel(s.range)} · ${plural(s.entries, "entry", "entries")}`}</span>
+            <span>unmoney.vercel.app</span>
+          </div>
         </div>
         <div className="pointer-events-auto mt-3.5 flex gap-2 lg:mt-3">
-          <Button size="lg" className="h-10 flex-1 lg:h-9" onClick={() => nav(`/stats?month=${month}`)}>Open in Stats</Button>
+          <Button size="lg" className="h-10 flex-1 lg:h-9" onClick={() => nav(statsPath(month))}>{year ? `Open ${month} in Stats` : "Open in Stats"}</Button>
           <Button size="lg" variant="outline" className="h-10 flex-1 lg:h-9" onClick={copy}>{copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy summary"}</Button>
         </div>
       </Vis>
-      <Foot><span>Every month's recap stays on Stats</span><FootLink onClick={onClose}>Done</FootLink></Foot>
+      <Foot><span>Every {year ? "year's recap stays on Recaps" : "month's recap stays on Stats"}</span><FootLink onClick={onClose}>Done</FootLink></Foot>
+    </CardFrame>
+  );
+}
+
+// ---- the year's own cards (yearly spec §4.2) ----
+
+export function MonthsCard({ card }: Props<"months">) {
+  const { fmt } = useApp();
+  const max = Math.max(1, ...card.perMonth.map((m) => m.amount));
+  const priciest = card.perMonth.find((m) => m.month === card.priciest)!;
+  return (
+    <CardFrame kind="months">
+      <Label>Month by month</Label>
+      <H>{longMonth(card.priciest)} cost the most</H>
+      <Ctx className="truncate"><B><Money amount={priciest.amount} /></B>{card.ratio > 0 && card.lightest !== card.priciest ? <> · {card.ratio.toFixed(1)}× {longMonth(card.lightest)}, your lightest</> : null}</Ctx>
+      <Vis>
+        {/* the priciest bar is solid expense, the lightest the income colour; both carry their amount above */}
+        <div className="my-2.5 mb-1 flex h-[140px] items-end gap-[5px] pt-4">
+          {card.perMonth.map((m) => {
+            const hi = m.month === card.priciest, lo = m.month === card.lightest;
+            const h = m.amount ? Math.max(2, Math.round((m.amount / max) * 100)) : 0;
+            return (
+              <div key={m.month} className="relative h-full flex-1">
+                <i className={cn("absolute inset-x-0 bottom-0 block rounded-t-[3px]", hi ? "bg-expense" : lo ? "bg-income opacity-90" : "bg-expense opacity-40")} style={{ height: `${h}%` }} />
+                {(hi || lo) && m.amount ? <span className="absolute left-1/2 -translate-x-1/2 text-[10px] whitespace-nowrap text-foreground" style={{ bottom: `calc(${h}% + 3px)` }}>{fmt(m.amount)}</span> : null}
+              </div>
+            );
+          })}
+        </div>
+        <div className="grid grid-cols-12 text-center text-[10px] text-muted-foreground">{card.perMonth.map((m) => <span key={m.month}>{MONTH_SHORT[parseMonthKey(m.month).m - 1][0]}</span>)}</div>
+        <Tiles three>
+          <Tile label="Above average" value={plural(card.aboveAvg, "month")} />
+          <Tile label="Quietest" value={longMonth(card.lightest)} />
+          <Tile label="Swing" value={`±${pct(card.swing)}`} hint="vs the average" />
+        </Tiles>
+      </Vis>
+      <Foot><span>Bars are each month's spend; the two extremes are labelled</span></Foot>
+    </CardFrame>
+  );
+}
+
+export function Top5Card({ card }: Props<"top5">) {
+  const { fmt } = useApp();
+  const first = card.notes[0];
+  const every = card.everyDays === undefined ? "" : card.everyDays < 1.05 ? "about one a day" : `one every ${card.everyDays.toFixed(1)} days`;
+  return (
+    <CardFrame kind="top5">
+      <Label>Your top five</Label>
+      <H>The things you logged most</H>
+      <Vis>
+        <div className="mt-2.5">
+          {card.notes.map((n, i) => (
+            <div key={n.text} className="flex items-center gap-3.5 border-b py-2 last:border-b-0">
+              <span className={cn("w-[30px] shrink-0 text-[28px] font-semibold leading-none tracking-[-0.03em]", i === 0 ? "text-foreground" : "text-muted-foreground")}>{i + 1}</span>
+              <div className="min-w-0 flex-1 text-[17px] font-semibold tracking-[-0.01em]">
+                <span className="block truncate">{n.text}</span>
+                <small className="block truncate text-xs font-normal text-muted-foreground">{fmt(n.amount)} · {fmt(Math.round(n.amount / n.count))} each</small>
+              </div>
+              <span className="text-sm font-medium tabular">{n.count}×</span>
+            </div>
+          ))}
+        </div>
+      </Vis>
+      <Foot><span className="truncate">{first && every ? `${first.text}: ${every}` : "Notes matched ignoring case"}</span></Foot>
+    </CardFrame>
+  );
+}
+
+export function CalendarCard({ card }: Props<"calendar">) {
+  const days = card.perDay;
+  const max = Math.max(1, ...days.map((d) => d.amount));
+  const busiest = days.find((d) => d.date === card.busiest) ?? days[0];
+  return (
+    <CardFrame kind="calendar">
+      <Label>Your year, day by day</Label>
+      <H>Busiest: {dayLabel(card.busiest)}</H>
+      <Ctx className="truncate"><B><Money amount={busiest.amount} /></B> in {plural(busiest.count, "entry", "entries")}{card.busiestNotes.length ? ` · ${joinAnd(card.busiestNotes)}` : ""}</Ctx>
+      <Vis>
+        {/* one row per logical month, a cell per day: expense colour by share of the busiest day, grey when nothing was spent */}
+        <div className="my-3 mb-1.5 grid grid-cols-[26px_1fr] items-center gap-y-0.5">
+          {card.rows.map((row) => {
+            const start = diffDays(days[0].date, row.from);
+            return (
+              <Fragment key={row.month}>
+                <span className="text-[10px] leading-none text-muted-foreground">{MONTH_SHORT[parseMonthKey(row.month).m - 1]}</span>
+                <span className="grid gap-0.5" style={{ gridTemplateColumns: "repeat(31, minmax(0, 1fr))" }}>
+                  {Array.from({ length: 31 }, (_, i) => {
+                    const d = i < row.days ? days[start + i] : undefined;
+                    if (!d) return <i key={i} className="invisible block aspect-square" />;
+                    const zero = d.amount === 0;
+                    return (
+                      <i
+                        key={d.date}
+                        className={cn("block aspect-square rounded-[2px]", zero ? "bg-foreground opacity-[0.07]" : "bg-expense", d.date === card.busiest && "outline-2 outline-offset-1 outline-foreground")}
+                        style={zero ? undefined : { opacity: 0.18 + 0.82 * (d.amount / max) }}
+                      />
+                    );
+                  })}
+                </span>
+              </Fragment>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
+          <span>less</span>{[0.2, 0.45, 0.7, 1].map((o) => <i key={o} className="block size-2 rounded-[2px] bg-expense" style={{ opacity: o }} />)}<span>more</span>
+        </div>
+        <Tiles three>
+          <Tile label="No-spend" value={plural(card.noSpend, "day")} />
+          <Tile label="Longest streak" value={plural(card.streak, "day")} hint="logging daily" />
+          <Tile label="Spend day" value={WEEKDAY_LONG[card.spendDay.weekday]} hint={`${pct(card.spendDay.share)} of the year`} />
+        </Tiles>
+      </Vis>
+      <Foot><span>Darker days cost more; grey days cost nothing</span></Foot>
+    </CardFrame>
+  );
+}
+
+export function ClockCard({ card }: Props<"clock">) {
+  const max = Math.max(1, ...card.perHour);
+  return (
+    <CardFrame kind="clock">
+      <Vis>
+        <Label>On the clock</Label>
+        <H xl>{hourRange(card.peakHour)}</H>
+        <Ctx className="mt-1.5">Your spending hour · <B>{pct(card.eveningShare)}</B> of entries after 7 pm</Ctx>
+        <div className="my-2.5 mb-1 flex h-[110px] items-end gap-0.5">
+          {card.perHour.map((v, h) => <i key={h} className={cn("block flex-1 rounded-t-[2px]", h === card.peakHour ? "opacity-100" : "opacity-35")} style={{ height: `${Math.max(2, Math.round((v / max) * 100))}%`, background: "var(--tint)" }} />)}
+        </div>
+        <div className="flex justify-between text-[11px] text-muted-foreground"><span>12 am</span><span>6 am</span><span>12 pm</span><span>6 pm</span><span>11 pm</span></div>
+        <Tiles>
+          <Tile label="Mornings" value={pct(card.morningShare)} hint="before noon" />
+          {card.first ? <Tile label="First entry" value={timeLabel(card.first.time)} hint={`${card.first.note}, ${shortDay(card.first.date)}`} /> : null}
+        </Tiles>
+      </Vis>
+      <Foot><span>Only entries with a time ({card.timed.toLocaleString()} of {card.total.toLocaleString()})</span></Foot>
+    </CardFrame>
+  );
+}
+
+export function MethodsCard({ card }: Props<"methods">) {
+  const { fmt } = useApp();
+  const lead = card.top[0];
+  const max = Math.max(1, ...card.top.map((m) => m.amount));
+  const most = card.mostEntries;
+  const foot = !most ? "" : most.id !== lead.id ? `${most.name}: ${plural(most.count, "entry", "entries")}, ${fmt(most.avg)} each on average` : `${lead.name}: ${plural(most.count, "entry", "entries")}`;
+  return (
+    <CardFrame kind="methods">
+      <Vis>
+        <Label>Paid with</Label>
+        <H xl className="line-clamp-2">{lead.name}</H>
+        <Ctx className="mt-1.5"><B>{pct(card.share)}</B> of the year went through one method</Ctx>
+        <div className="mt-2.5 grid grid-cols-[1fr_auto] items-center gap-x-2.5 gap-y-1.5 text-[13px]">
+          {card.top.map((m) => (
+            <Fragment key={m.id}>
+              <div className="flex min-w-0 items-center gap-2">
+                <i className="block h-2 shrink-0 rounded-[2px]" style={{ width: Math.max(4, Math.round((m.amount / max) * 150)), background: "var(--tint)" }} />
+                <span className="truncate">{m.name}</span>
+              </div>
+              <span className="tabular">{fmt(m.amount)}</span>
+            </Fragment>
+          ))}
+        </div>
+      </Vis>
+      <Foot><span className="truncate">{foot}</span></Foot>
+    </CardFrame>
+  );
+}
+
+export function NewCard({ card, month }: Props<"new">) {
+  const { fmt } = useApp();
+  const first = card.items[0];
+  const verb = first.kind === "account" ? "paying with" : "logging";
+  return (
+    <CardFrame kind="new">
+      <Vis>
+        <Label>New this year</Label>
+        <H className="line-clamp-2">You started {verb} {first.name} in {MONTH_LONG[parts(first.first).m - 1]}</H>
+        <Ctx><B>{plural(first.count, "entry", "entries")}</B> since · {fmt(first.amount)}</Ctx>
+        <div className="mt-5 overflow-hidden rounded-lg border bg-card">
+          {card.items.map((it) => (
+            <div key={`${it.kind}-${it.name}`} className="flex items-center gap-3 border-b px-3 py-2.5 last:border-b-0">
+              <div className="min-w-0 flex-1 text-sm">
+                <span className="block truncate">{it.name}</span>
+                <small className="block truncate text-xs text-muted-foreground">{it.kind === "account" ? "new method · " : ""}first on {shortDay(it.first)} · {plural(it.count, "entry", "entries")}</small>
+              </div>
+              <span className="text-sm tabular">{fmt(it.amount)}</span>
+            </div>
+          ))}
+        </div>
+      </Vis>
+      <Foot><span>Categories and methods with no entries before {month}</span></Foot>
+    </CardFrame>
+  );
+}
+
+export function PersonalityCard({ card }: Props<"personality">) {
+  return (
+    <CardFrame kind="personality">
+      <Vis>
+        <Label>Your spending personality</Label>
+        <H xl>{card.archetype}</H>
+        <Ctx className="mt-2">{card.why}</Ctx>
+        <div className="mt-[22px]">
+          {card.traits.map((t) => (
+            <div key={t.label} className="flex items-center gap-2.5 border-b py-[7px] text-[13px] last:border-b-0">
+              <i className="block size-2 shrink-0 rounded-[2px]" style={{ background: "var(--tint)", opacity: t.matched ? 1 : 0.3 }} />
+              <span className={cn("min-w-0 flex-1 truncate", t.matched ? "text-foreground" : "text-muted-foreground")}>{t.label}</span>
+              <b className="font-medium whitespace-nowrap">{t.value}</b>
+            </div>
+          ))}
+        </div>
+      </Vis>
+      <Foot><span>Picked by fixed rules from these figures</span></Foot>
     </CardFrame>
   );
 }
@@ -464,5 +760,12 @@ export function RecapCardView({ card, month, onClose }: { card: RecapCard; month
     case "inout": return <InOutCard card={card} month={month} />;
     case "budgets": return <BudgetsCard card={card} month={month} />;
     case "closer": return <CloserCard card={card} month={month} onClose={onClose} />;
+    case "months": return <MonthsCard card={card} month={month} />;
+    case "top5": return <Top5Card card={card} month={month} />;
+    case "calendar": return <CalendarCard card={card} month={month} />;
+    case "clock": return <ClockCard card={card} month={month} />;
+    case "methods": return <MethodsCard card={card} month={month} />;
+    case "new": return <NewCard card={card} month={month} />;
+    case "personality": return <PersonalityCard card={card} month={month} />;
   }
 }
