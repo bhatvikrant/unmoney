@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { DeleteSeriesEntryDialog } from "@/components/tx/DeleteSeriesEntryDialog";
 import { cn } from "@/lib/utils";
 
 type TxType = "income" | "expense" | "transfer";
@@ -459,19 +460,7 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
         <button type="button" className="text-xs text-muted-foreground underline mt-3 px-2" onClick={() => { setSheet(null); nav("/settings/sub-currencies"); }}>Manage sub-currencies and rates</button>
       </BottomSheet>
 
-      <AlertDialog open={confirm === "delete"} onOpenChange={(o) => !o && setConfirm(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
-            <AlertDialogDescription>This entry belongs to a repeat or installment series.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-col sm:flex-row">
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => undoable.entry(id!, "future").then(() => closeEntry())}>This and future</AlertDialogAction>
-            <AlertDialogAction onClick={() => undoable.entry(id!, "one").then(() => closeEntry())}>Only this one</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteSeriesEntryDialog open={confirm === "delete"} onOpenChange={(o) => !o && setConfirm(null)} onPick={(scope) => void undoable.entry(id!, scope).then(() => closeEntry())} />
       <AlertDialog open={confirm === "copy"} onOpenChange={(o) => !o && setConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>Copy this entry</AlertDialogTitle><AlertDialogDescription>Which date should the copy use?</AlertDialogDescription></AlertDialogHeader>
