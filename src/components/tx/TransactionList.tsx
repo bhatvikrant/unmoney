@@ -11,7 +11,7 @@ import { Money } from "@/components/shell/Money";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
+import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useUndoableDelete } from "@/lib/undo";
 import { DeleteSeriesEntryDialog } from "./DeleteSeriesEntryDialog";
@@ -91,22 +91,24 @@ export function DayHeader({ date, income, expense }: { date: string; income: num
   );
 }
 
-export function TransactionList({ txs, selectable, selected, onToggle, onLongPress, swipeToDelete, emptyText = "No transactions", className }: {
+/**
+ * Entries grouped by day. Every row slides left to uncover Delete (off while selecting), wherever
+ * the list is shown: the month, a day, a search, a payment method, a category.
+ */
+export function TransactionList({ txs, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className }: {
   txs: Tx[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void;
-  /** Rows slide left to uncover Delete (off while selecting). */
-  swipeToDelete?: boolean;
   emptyText?: string; className?: string;
 }) {
   const undoable = useUndoableDelete();
   const confirm = useConfirm();
   /** The row swiped open, and an entry of a series waiting on "only this one / this and future". */
-  const [swiped, setSwiped] = useState<string | null>(null);
+  const swipe = useSwipedRow();
   const [series, setSeries] = useState<Tx | null>(null);
   // Deletes like the editor does: at once with Undo in the toast, or asking first for an entry in a series.
   const remove = (t: Tx) => {
     if (t.repeatId) setSeries(t);
     else void confirm({ title: "Delete this entry?", description: "You can undo this for a few seconds afterwards." })
-      .then((ok) => (ok ? undoable.entry(t._id) : undefined)).finally(() => setSwiped(null));
+      .then((ok) => (ok ? undoable.entry(t._id) : undefined)).finally(swipe.close);
   };
   const openEntry = useOpenEntry();
   // From the path (/t/:id, /search/t/:id): a list in a parent route does not get its child route's params.
@@ -130,10 +132,9 @@ export function TransactionList({ txs, selectable, selected, onToggle, onLongPre
         return (
           <Fragment key={date}>
             <DayHeader date={date} income={k.income} expense={k.expense} />
-            {list.map((t) => {
-              const row = (
+            {list.map((t) => (
+              <SwipeToDelete key={t._id} className="border-b last:border-b-0" disabled={selectable} {...swipe.row(t._id)} onDelete={() => remove(t)}>
                 <TransactionRow
-                  key={t._id}
                   tx={t}
                   onClick={selectable ? () => onToggle?.(t._id, !selected?.has(t._id)) : () => openEntry(t._id)}
                   open={t._id === openId}
@@ -141,23 +142,15 @@ export function TransactionList({ txs, selectable, selected, onToggle, onLongPre
                   selected={selected?.has(t._id)}
                   bookmarked={bookmarked.has(t._id)}
                   onSelect={selectable ? (v) => onToggle?.(t._id, v) : undefined}
-                  className={swipeToDelete ? "border-b-0" : undefined}
+                  className="border-b-0"
                 />
-              );
-              return swipeToDelete ? (
-                <SwipeToDelete key={t._id} className="border-b last:border-b-0" disabled={selectable}
-                  open={swiped === t._id} onOpenChange={(o) => setSwiped(o ? t._id : null)} onDelete={() => remove(t)}>
-                  {row}
-                </SwipeToDelete>
-              ) : row;
-            })}
+              </SwipeToDelete>
+            ))}
           </Fragment>
         );
       })}
-      {swipeToDelete ? (
-        <DeleteSeriesEntryDialog open={!!series} onOpenChange={(o) => { if (!o) { setSeries(null); setSwiped(null); } }}
-          onPick={(scope) => { if (series) void undoable.entry(series._id, scope); }} />
-      ) : null}
+      <DeleteSeriesEntryDialog open={!!series} onOpenChange={(o) => { if (!o) { setSeries(null); swipe.close(); } }}
+        onPick={(scope) => { if (series) void undoable.entry(series._id, scope); }} />
     </div>
   );
 }
