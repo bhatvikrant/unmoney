@@ -10,7 +10,7 @@ export default function TransferExpenseSettings() {
   const setHidden = useOp("accounts.setHidden");
   return (
     <>
-      <PageHeader back="/settings" title="Payment method settings" />
+      <PageHeader back="/settings/payment-methods" title="Payment method settings" />
       <Page className="pb-8">
         <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 px-4 py-2 text-[10px] text-muted-foreground uppercase tracking-wide"><span>Payment method</span><span className="text-center w-16">In totals</span><span className="text-center w-16">Visible</span><span className="text-center w-16">Transfer = expense</span></div>
         {sections.map((g) => (
