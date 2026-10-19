@@ -60,9 +60,9 @@ export default function AccountsPage() {
           const open = selecting || !collapsed.has(g.id);
           return (
             <div key={g.id} className="mt-3">
-              <button type="button" onClick={() => toggle(g.id)} disabled={selecting} className={cn("w-full flex items-center px-4 py-1.5 text-sm text-muted-foreground", !g.group && "italic")}>
+              <button type="button" onClick={() => toggle(g.id)} disabled={selecting} className="w-full flex items-center px-4 py-1.5 text-sm text-muted-foreground">
                 <ChevronDown className={cn("size-4 mr-1 transition-transform", !open && "-rotate-90")} />
-                <span className="flex-1 text-left">{g.name}</span>
+                <span className={cn("flex-1 text-left", !g.group && "italic")}>{g.name}</span>
                 {allCards ? (
                   <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><div className="text-[10px]">Balance payable</div><Money amount={g.payable} kind="expense" /></span><span><div className="text-[10px]">Outst. balance</div><Money amount={g.outstanding} kind="expense" /></span></span>
                 ) : <Money amount={g.total} kind={g.total < 0 ? "expense" : "income"} />}
