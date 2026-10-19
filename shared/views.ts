@@ -327,10 +327,29 @@ export function backupExport(snap: Snapshot) {
 
 export type CategoryStat = { id: string; name: string; amount: number; children: { id: string; name: string; amount: number }[]; pct: number };
 
+/**
+ * Every entry the Stats tab counts for a period, with the amount it counts and its bucket: a main
+ * category id, "none" (uncategorised), "transfer:<account>" or "fees". The category screen lists
+ * a bucket's entries from this, so its list always adds up to the figure on the Stats tab.
+ */
+export function statsEntries(snap: Snapshot, from: string, to: string, type: "income" | "expense") {
+  const ledger = ledgerOf(snap);
+  const catIds = new Set(snap.categories.filter((c) => c.type === type).map((c) => c._id as string));
+  const out: { t: Doc<"transactions">; amount: number; bucket: string }[] = [];
+  for (const t of snap.transactions) {
+    if (t.date < from || t.date > to) continue;
+    const k = kindsOf(t, ledger);
+    const amount = type === "income" ? k.income : k.expense;
+    if (!amount) continue;
+    const bucket = t.type === "transfer" ? `transfer:${t.toAccountId ?? ""}` : t.type !== type ? "fees" : t.categoryId && catIds.has(t.categoryId) ? t.categoryId : "none";
+    out.push({ t, amount, bucket });
+  }
+  return out;
+}
+
 /** Totals per main category for a period, with subcategory breakdown. Transfer-as-expense rows show as "Transfer to X". */
 export function statsByCategory(snap: Snapshot, from: string, to: string, type: "income" | "expense"): { total: number; items: CategoryStat[] } {
-  const ledger = ledgerOf(snap);
-  const catById = new Map(snap.categories.filter((c) => c.type === type).map((c) => [c._id, c]));
+  const catById = new Map<string, Doc<"categories">>(snap.categories.filter((c) => c.type === type).map((c) => [c._id, c]));
   const accName = new Map(snap.accounts.map((a) => [a._id, a.name]));
   const main = new Map<string, { id: string; name: string; amount: number; children: Map<string, { id: string; name: string; amount: number }> }>();
   const ensure = (id: string, name: string) => {
@@ -342,21 +361,15 @@ export function statsByCategory(snap: Snapshot, from: string, to: string, type: 
     return m;
   };
   let total = 0;
-  let other = 0;
-  for (const t of snap.transactions) {
-    if (t.date < from || t.date > to) continue;
-    const k = kindsOf(t, ledger);
-    const amount = type === "income" ? k.income : k.expense;
-    if (!amount) continue;
+  for (const { t, amount, bucket } of statsEntries(snap, from, to, type)) {
     total += amount;
-    if (t.type === "transfer") {
-      const name = `Transfer to ${t.toAccountId ? accName.get(t.toAccountId) ?? "account" : "account"}`;
-      ensure(`transfer:${t.toAccountId ?? ""}`, name).amount += amount;
+    if (bucket.startsWith("transfer:")) {
+      ensure(bucket, `Transfer to ${t.toAccountId ? accName.get(t.toAccountId) ?? "account" : "account"}`).amount += amount;
       continue;
     }
-    if (t.type !== type) { other += amount; continue; }
-    const cat = t.categoryId ? catById.get(t.categoryId) : undefined;
-    const m = ensure(cat?._id ?? "none", cat?.name ?? "Uncategorised");
+    if (bucket === "fees") { ensure("fees", "Fees").amount += amount; continue; }
+    const cat = catById.get(bucket);
+    const m = ensure(bucket, cat?.name ?? "Uncategorised");
     m.amount += amount;
     const sub = t.subcategoryId ? catById.get(t.subcategoryId) : undefined;
     const childKey = sub?._id ?? "none";
@@ -364,7 +377,6 @@ export function statsByCategory(snap: Snapshot, from: string, to: string, type: 
     child.amount += amount;
     m.children.set(childKey, child);
   }
-  if (other) ensure("fees", "Fees").amount += other;
   const items = [...main.values()]
     .map((m) => ({ ...m, children: [...m.children.values()].sort((a, b) => b.amount - a.amount), pct: total ? m.amount / total : 0 }))
     .sort((a, b) => b.amount - a.amount);

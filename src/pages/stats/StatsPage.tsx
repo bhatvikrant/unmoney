@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { useView } from "@/lib/store";
 import { statsByCategory, statsTrend } from "../../../shared/views";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -8,12 +8,18 @@ import { useStatPeriod } from "./period";
 import { CategoryPie, TrendBars, colorAt } from "./charts";
 import { Money } from "@/components/shell/Money";
 import { cn } from "@/lib/utils";
+import { monthLabel } from "@/lib/format";
 
 export default function StatsPage() {
   const nav = useNavigate();
   const p = useStatPeriod();
-  const [type, setType] = useState<"income" | "expense">("expense");
-  const [mode, setMode] = useState<"list" | "trend">("list");
+  // in the URL, so coming back from a category keeps Income / Trend as they were
+  const [sp, setSp] = useSearchParams();
+  const type = sp.get("type") === "income" ? "income" : "expense";
+  const mode = sp.get("mode") === "trend" ? "trend" : "list";
+  const setParam = (k: string, v: string, fallback: string) => setSp((prev) => { const n = new URLSearchParams(prev); if (v === fallback) n.delete(k); else n.set(k, v); return n; }, { replace: true });
+  const setType = (t: "income" | "expense") => setParam("type", t, "expense");
+  const setMode = (m: "list" | "trend") => setParam("mode", m, "list");
   const view = useView();
   const expense = useMemo(() => statsByCategory(view, p.range.from, p.range.to, "expense"), [view, p.range.from, p.range.to]);
   const income = useMemo(() => statsByCategory(view, p.range.from, p.range.to, "income"), [view, p.range.from, p.range.to]);
@@ -57,7 +63,7 @@ export default function StatsPage() {
           <div className="px-2 py-3">
             {trend ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} color={type === "income" ? "var(--income)" : "var(--expense)"} /> : <div className="h-48" />}
             <div className="bg-card border-y mt-3">
-              {ranges.slice().reverse().map((r, i) => <div key={r.key} className="flex justify-between px-4 py-2 border-b last:border-b-0 text-sm"><span>{r.key}</span><Money amount={trend?.[ranges.length - 1 - i]?.amount ?? 0} kind={type} /></div>)}
+              {ranges.slice().reverse().map((r, i) => <div key={r.key} className="flex justify-between px-4 py-2 border-b last:border-b-0 text-sm"><span>{/^\d{4}-\d{2}$/.test(r.key) ? monthLabel(r.key) : r.label}</span><Money amount={trend?.[ranges.length - 1 - i]?.amount ?? 0} kind={type} /></div>)}
             </div>
           </div>
         )}
