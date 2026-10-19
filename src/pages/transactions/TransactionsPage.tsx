@@ -106,7 +106,7 @@ export default function TransactionsPage() {
         }
         sub={
           <div className="mx-auto max-w-3xl">
-            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} month={month} onPick={setMonth} withData={monthsWithData} />
+            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} month={month} onPick={setMonth} withData={monthsWithData.months} spent={monthsWithData.spent} />
             <SegmentedTabs value={view} onChange={setView} items={[
               { value: "daily", label: "Daily" }, { value: "calendar", label: "Calendar" }, { value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }, { value: "summary", label: "Summary" },
             ]} />

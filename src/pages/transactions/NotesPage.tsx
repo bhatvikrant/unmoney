@@ -39,7 +39,7 @@ export default function NotesPage() {
 
   return (
     <>
-      <PageHeader back="/" title="Notes" sub={<div className="mx-auto max-w-3xl"><MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} month={month} onPick={setMonth} withData={monthsWithData} /></div>} />
+      <PageHeader back="/" title="Notes" sub={<div className="mx-auto max-w-3xl"><MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} month={month} onPick={setMonth} withData={monthsWithData.months} spent={monthsWithData.spent} /></div>} />
       <Page>
         {notes && !notes.length ? <EmptyState title="No notes this month" hint="Notes are daily memos. They show as coloured dots on the calendar." /> : null}
         <div className="bg-card border-y">
