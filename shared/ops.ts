@@ -109,7 +109,8 @@ export type NewImportAccount = { name: string; groupKind: Doc<"accountGroups">["
 export interface Ops {
   "settings.completeOnboarding": { args: { currency: string; symbolPosition?: "before" | "after" }; result: void };
   "settings.update": { args: { patch: SettingsPatch }; result: void };
-  "settings.changeMainCurrency": { args: { code: string; keepData: boolean }; result: void };
+  /** entries: false leaves the entries alone; the app rescales or removes them itself, in chunks (see src/lib/bulk.ts). */
+  "settings.changeMainCurrency": { args: { code: string; keepData: boolean; entries?: boolean }; result: void };
   "settings.setPasscode": { args: { hash?: string; salt?: string }; result: void };
   "settings.setDefaultAccount": { args: { id?: Id<"accounts"> }; result: void };
 
@@ -148,6 +149,10 @@ export interface Ops {
     result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
   };
   "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean }; result: Id<"transactions"> };
+  /** Multiply amounts by `factor` (a change of main currency's decimals), a chunk of entries at a time. */
+  "transactions.rescale": { args: { ids: Id<"transactions">[]; factor: number }; result: void };
+  /** Entries from a backup, with ids already pointing at the restored accounts, categories and schedules (restoreRows). */
+  "transactions.restoreRows": { args: { rows: Record<string, unknown>[] }; result: number };
 
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
   "repeats.remove": { args: { id: Id<"repeats"> }; result: void };
@@ -171,8 +176,9 @@ export interface Ops {
   "currencies.reorder": { args: { ids: Id<"currencies">[] }; result: void };
   "currencies.setRates": { args: { rates: { id: Id<"currencies">; rate: number }[] }; result: void };
 
-  "backup.restore": { args: { data: BackupData }; result: void };
-  "backup.wipeAll": { args: { confirm: "DELETE" }; result: void };
+  /** entries: false restores everything but the entries and returns the new id of each backup id, for restoreRows. */
+  "backup.restore": { args: { data: BackupData; entries?: boolean }; result: RestoreIds };
+  "backup.wipeAll": { args: { confirm: "DELETE"; entries?: boolean }; result: void };
 
   /** Not a snapshot change: the browser uploads the queued file itself. Listed so queues can hold it. */
   "files.upload": { args: { name: string; type: string; size: number }; result: Id<"_storage"> };
@@ -180,6 +186,8 @@ export interface Ops {
 export type OpKind = keyof Ops;
 export type OpArgs<K extends OpKind> = Ops[K]["args"];
 export type OpResult<K extends OpKind> = Ops[K]["result"];
+
+export type RestoreIds = { accounts: Record<string, string>; categories: Record<string, string>; repeats: Record<string, string> };
 
 export type BackupData = {
   version: number;
@@ -227,6 +235,8 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.bulkRemove": ["transactions"],
   "transactions.importRows": ["settings", "accountGroups", "accounts", "categories", "currencies", "transactions"],
   "transactions.copy": ["transactions"],
+  "transactions.rescale": ["transactions"],
+  "transactions.restoreRows": ["accounts", "categories", "repeats", "transactions"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions"],
@@ -287,9 +297,10 @@ export function txScope(op: Op): TxScope {
       const dates = (a.rows as ImportRow[]).map((r) => parseImportDate(r.date ?? "", order)).filter((d): d is string => d !== null);
       return { dates: [...new Set(dates)] };
     }
+    case "transactions.rescale": return { ids: a.ids as string[] };
     case "settings.changeMainCurrency":
     case "backup.restore":
-    case "backup.wipeAll": return { all: true };
+    case "backup.wipeAll": return a.entries === false ? {} : { all: true };
     default: return {};
   }
 }
@@ -500,6 +511,31 @@ const strip = (d: Record<string, unknown>) => {
   return rest;
 };
 
+function rescale(w: Work, ids: Id<"transactions">[], factor: number) {
+  const scale = (n: number | undefined) => (n === undefined ? undefined : Math.round(n * factor));
+  for (const id of ids) {
+    const t = w.must("transactions", id);
+    w.patch("transactions", id, { amount: scale(t.amount)!, feeAmount: scale(t.feeAmount), installmentTotal: scale(t.installmentTotal) });
+  }
+}
+
+/** A backup's entries with their account, category and schedule ids moved to the restored copies, for restoreRows. */
+export function restoreRowsFrom(data: BackupData, ids: RestoreIds): Record<string, unknown>[] {
+  const map = (table: Record<string, string>, v: unknown) => (typeof v === "string" ? table[v] : undefined);
+  return (data.transactions ?? []).flatMap((t) => {
+    const accountId = map(ids.accounts, t.accountId);
+    if (!accountId) return [];
+    const s = strip(t);
+    return [{
+      ...s, accountId,
+      toAccountId: t.toAccountId ? map(ids.accounts, t.toAccountId) : undefined,
+      categoryId: t.categoryId ? map(ids.categories, t.categoryId) : undefined,
+      subcategoryId: t.subcategoryId ? map(ids.categories, t.subcategoryId) : undefined,
+      repeatId: t.repeatId ? map(ids.repeats, t.repeatId) : undefined,
+    }];
+  });
+}
+
 const handlers: Handlers = {
   "settings.completeOnboarding": (w, { currency, symbolPosition }) => {
     if (w.settings()) return;
@@ -530,20 +566,14 @@ const handlers: Handlers = {
     w.patch("settings", s._id, clean(patch));
   },
 
-  "settings.changeMainCurrency": (w, { code, keepData }) => {
+  "settings.changeMainCurrency": (w, { code, keepData, entries = true }) => {
     const s = w.requireSettings();
     const info = currencyInfo(code) ?? { code, symbol: code, decimals: 2, name: code };
     const factor = 10 ** (info.decimals - s.decimals);
     if (!keepData) {
-      w.clear("transactions");
+      if (entries) w.clear("transactions");
     } else if (factor !== 1) {
-      for (const t of [...w.snap.transactions]) {
-        w.patch("transactions", t._id, {
-          amount: Math.round(t.amount * factor),
-          feeAmount: t.feeAmount === undefined ? undefined : Math.round(t.feeAmount * factor),
-          installmentTotal: t.installmentTotal === undefined ? undefined : Math.round(t.installmentTotal * factor),
-        });
-      }
+      if (entries) rescale(w, w.snap.transactions.map((t) => t._id), factor);
       for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: Math.round(a.initialBalance * factor) });
       for (const b of [...w.snap.budgets]) {
         const overrides: Record<string, number> = {};
@@ -937,6 +967,25 @@ const handlers: Handlers = {
     return { inserted, errors, createdAccounts, duplicates };
   },
 
+  "transactions.rescale": (w, { ids, factor }) => {
+    if (!(factor > 0)) throw new Error("Bad factor");
+    rescale(w, ids, factor);
+  },
+
+  "transactions.restoreRows": (w, { rows }) => {
+    let inserted = 0;
+    for (const r of rows) {
+      const s = strip(r);
+      if (!w.get("accounts", s.accountId as string)) continue;
+      if (s.type === "transfer" ? !w.get("accounts", s.toAccountId as string) : s.toAccountId !== undefined) continue;
+      for (const k of ["categoryId", "subcategoryId"] as const) if (s[k] && !w.get("categories", s[k] as string)) s[k] = undefined;
+      if (s.repeatId && !w.get("repeats", s.repeatId as string)) s.repeatId = undefined;
+      w.insert("transactions", clean({ ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [] }) as never);
+      inserted++;
+    }
+    return inserted;
+  },
+
   "transactions.copy": (w, { id, useToday }) => {
     const t = w.must("transactions", id);
     const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, ...rest } = t;
@@ -1070,9 +1119,10 @@ const handlers: Handlers = {
     }
   },
 
-  "backup.restore": (w, { data }) => {
+  "backup.restore": (w, { data, entries = true }) => {
     if (!data || data.version !== 1) throw new Error("Not an UnMoney backup file");
-    for (const t of ["transactions", "notes", "categories", "repeats", "bookmarks", "budgets", "accounts", "accountGroups", "currencies"] as const) w.clear(t);
+    for (const t of ["notes", "categories", "repeats", "bookmarks", "budgets", "accounts", "accountGroups", "currencies"] as const) w.clear(t);
+    if (entries) w.clear("transactions");
     const groupIds = new Map<string, Id<"accountGroups">>();
     for (const g of data.accountGroups ?? []) groupIds.set(g._id as string, w.insert("accountGroups", strip(g) as never));
     const accountIds = new Map<string, Id<"accounts">>();
@@ -1114,10 +1164,12 @@ const handlers: Handlers = {
       repeatIds.set(r._id as string, w.insert("repeats", { ...s, template } as never));
     }
     const txIds = new Map<string, Id<"transactions">>();
-    for (const t of data.transactions ?? []) {
-      const s = mapTemplate(strip(t));
-      if (!s.accountId) continue;
-      txIds.set(t._id as string, w.insert("transactions", { ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [], repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined } as never));
+    if (entries) {
+      for (const t of data.transactions ?? []) {
+        const s = mapTemplate(strip(t));
+        if (!s.accountId) continue;
+        txIds.set(t._id as string, w.insert("transactions", { ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [], repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined } as never));
+      }
     }
     for (const b of data.bookmarks ?? []) {
       const s = strip(b);
@@ -1139,11 +1191,13 @@ const handlers: Handlers = {
       if (existing) w.patch("settings", existing._id, s as never);
       else w.insert("settings", s as never);
     }
+    return { accounts: Object.fromEntries(accountIds), categories: Object.fromEntries(catIds), repeats: Object.fromEntries(repeatIds) };
   },
 
-  "backup.wipeAll": (w, { confirm }) => {
+  "backup.wipeAll": (w, { confirm, entries = true }) => {
     if (confirm !== "DELETE") throw new Error("Not confirmed");
-    for (const t of ["transactions", "notes", "repeats", "bookmarks", "budgets"] as const) w.clear(t);
+    for (const t of ["notes", "repeats", "bookmarks", "budgets"] as const) w.clear(t);
+    if (entries) w.clear("transactions");
   },
 
   "files.upload": () => {

@@ -32,6 +32,10 @@ type Store = {
   view: Snapshot;
   status: SyncStatus;
   dispatch: <K extends OpKind>(kind: K, args: OpArgs<K>) => Promise<OpResult<K>>;
+  /** Like dispatch, and also returns the op's id, for whenSynced. */
+  dispatchTracked: <K extends OpKind>(kind: K, args: OpArgs<K>) => Promise<{ id: string; result: OpResult<K> }>;
+  /** Resolves once the server has applied or rejected every one of these ops; lists the rejected ones. */
+  whenSynced: (opIds: string[]) => Promise<{ rejected: { id: string; error: string }[] }>;
   enqueueUpload: (file: File) => Promise<Id<"_storage">>;
   photoUrl: (id: string) => string | undefined;
   rememberPhotoUrls: (urls: Record<string, string | null>) => void;
@@ -45,6 +49,9 @@ const BATCH = 25;
 /** Entries per page of the transactions subscription; each page is one bounded server read. */
 const TX_PAGE = 2000;
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
+/** An op that writes many documents is sent on its own, so one server transaction stays within Convex's limits. */
+const isHeavy = (op: QueuedOp) =>
+  op.kind === "transactions.importRows" || op.kind === "transactions.restoreRows" || ((op.args as { ids?: unknown[] }).ids?.length ?? 0) > 100;
 const isAuthError = (e: unknown) => /not signed in|unauthenticated|authentication/i.test(e instanceof Error ? e.message : String(e));
 
 type Live = { [T in Table]: Doc<T>[] | null | undefined };
@@ -192,15 +199,36 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const effectiveBaseRef = useRef<Snapshot | null>(null);
   effectiveBaseRef.current = effectiveBase;
 
-  const dispatch = useCallback(async <K extends OpKind>(kind: K, args: OpArgs<K>): Promise<OpResult<K>> => {
+  // ---- outcomes, for callers that wait for the server (imports, restores) ----
+  const settled = useRef(new Map<string, string | null>()); // op id -> null when applied, else the error
+  const waiters = useRef(new Set<() => void>());
+  const settle = useCallback((id: string, error: string | null) => {
+    settled.current.set(id, error);
+    for (const w of [...waiters.current]) w();
+  }, []);
+  const whenSynced = useCallback((opIds: string[]) => new Promise<{ rejected: { id: string; error: string }[] }>((resolve) => {
+    const check = () => {
+      if (!opIds.every((id) => settled.current.has(id))) return;
+      waiters.current.delete(check);
+      const rejected = opIds.flatMap((id) => { const error = settled.current.get(id); return error ? [{ id, error }] : []; });
+      for (const id of opIds) settled.current.delete(id);
+      resolve({ rejected });
+    };
+    waiters.current.add(check);
+    check();
+  }), []);
+
+  const dispatchTracked = useCallback(async <K extends OpKind>(kind: K, args: OpArgs<K>): Promise<{ id: string; result: OpResult<K> }> => {
     const op: Op = { id: uuid(), kind, args, at: Date.now() };
     const userId = metaRef.current.userId ?? "";
     const current = replay(effectiveBaseRef.current ?? emptySnapshot(), opsRef.current, metaRef.current.idMap, userId);
     const { result } = applyOp(current, { ...op, args: rewriteIds(args, metaRef.current.idMap) }, { userId: userId as Id<"users"> });
     const seq = await local.addOp(op);
     setQueue([...opsRef.current, { ...op, seq }]);
-    return result as OpResult<K>;
+    return { id: op.id, result: result as OpResult<K> };
   }, [setQueue]);
+
+  const dispatch = useCallback(async <K extends OpKind>(kind: K, args: OpArgs<K>): Promise<OpResult<K>> => (await dispatchTracked(kind, args)).result, [dispatchTracked]);
 
   const enqueueUpload = useCallback(async (file: File): Promise<Id<"_storage">> => {
     const op: Op = { id: uuid(), kind: "files.upload", args: { name: file.name, type: file.type, size: file.size }, at: Date.now() };
@@ -225,6 +253,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         const drop = async (op: QueuedOp, error?: string) => {
           await local.removeOps([op.seq]);
           setQueue(opsRef.current.filter((o) => o.seq !== op.seq));
+          settle(op.id, error ?? null);
           if (error) {
             setLastError(error);
             toast.error(`A change could not be synced and was undone: ${error}`);
@@ -258,10 +287,9 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         const batch: QueuedOp[] = [];
         for (const op of queue) {
           if (op.kind === "files.upload" || batch.length >= limit) break;
-          // An import writes hundreds of documents; send it alone so one server transaction stays small
-          if (op.kind === "transactions.importRows" && batch.length) break;
+          if (isHeavy(op) && batch.length) break;
           batch.push(op);
-          if (op.kind === "transactions.importRows") break;
+          if (isHeavy(op)) break;
         }
         const sent: Op[] = [];
         let skipped = false;
@@ -297,6 +325,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
           done.push(op.seq);
           if (r.status === "applied") Object.assign(idMap, r.idMap);
           else errors.push(r.error);
+          settle(op.id, r.status === "applied" ? null : r.error);
         }
         await mergeIdMap(idMap);
         await local.removeOps(done);
@@ -312,7 +341,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       pumping.current = false;
       setSyncing(false);
     }
-  }, [convex, mergeIdMap, setQueue]);
+  }, [convex, mergeIdMap, setQueue, settle]);
 
   useEffect(() => {
     if (allLive && conn.isWebSocketConnected && ops.length) void pump();
@@ -347,12 +376,14 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     view,
     status: { connected: conn.isWebSocketConnected, live: allLive, pending: ops.length, syncing, lastError },
     dispatch,
+    dispatchTracked,
+    whenSynced,
     enqueueUpload,
     photoUrl: (id) => blobUrls[id] ?? blobUrls[meta.idMap[id] ?? ""] ?? meta.photoUrls[id],
     rememberPhotoUrls,
     resolveId: (id) => (meta.idMap[id] ?? id) as typeof id,
     clearLocal,
-  }), [ready, effectiveBase, me, meta, view, conn.isWebSocketConnected, allLive, ops.length, syncing, lastError, dispatch, enqueueUpload, blobUrls, rememberPhotoUrls, clearLocal]);
+  }), [ready, effectiveBase, me, meta, view, conn.isWebSocketConnected, allLive, ops.length, syncing, lastError, dispatch, dispatchTracked, whenSynced, enqueueUpload, blobUrls, rememberPhotoUrls, clearLocal]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
