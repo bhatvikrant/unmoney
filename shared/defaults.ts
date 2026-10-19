@@ -22,6 +22,26 @@ export function kindLabel(kind: string | undefined): string {
   return ACCOUNT_KINDS.find((k) => k.kind === kind)?.label ?? "Other";
 }
 
+/** Colours a card can have in the app, deep enough to read white on, plus two light metals read in dark ink. */
+export const CARD_COLORS: { name: string; value: string }[] = [
+  { name: "Midnight", value: "#1e293b" },
+  { name: "Graphite", value: "#3f3f46" },
+  { name: "Sapphire", value: "#1d4ed8" },
+  { name: "Ocean", value: "#0e7490" },
+  { name: "Emerald", value: "#047857" },
+  { name: "Plum", value: "#6d28d9" },
+  { name: "Ruby", value: "#be123c" },
+  { name: "Copper", value: "#c2410c" },
+  { name: "Gold", value: "#b8860b" },
+  { name: "Silver", value: "#cbd5e1" },
+  { name: "Pearl", value: "#f1efe9" },
+];
+
+/** A card with no colour chosen: credit cards midnight, debit cards sapphire. */
+export function cardColorOf(a: { kind?: string; color?: string }): string {
+  return a.color ?? (a.kind === "debitCard" ? "#1d4ed8" : "#1e293b");
+}
+
 /** Groups a new user starts with. Only names: a group is a folder and has no type. */
 export const DEFAULT_GROUPS = ["Cash", "Credit cards", "Debit cards", "Bank accounts", "UPIs"];
 
