@@ -240,6 +240,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
             const res = await fetch(url, { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
             if (!res.ok) throw new Error(`Upload failed (${res.status})`);
             storageId = (await res.json()).storageId;
+            // the server serves and deletes a file only for the user who claimed it
+            await convex.mutation(api.files.claim, { storageId: storageId as Id<"_storage"> });
           } catch (e) {
             if (e instanceof TypeError || isAuthError(e)) break; // network: try again later
             await drop(first, e instanceof Error ? e.message : "Upload failed");
