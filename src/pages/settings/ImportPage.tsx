@@ -24,6 +24,7 @@ import { SHARE_CACHE, SHARE_KEY } from "@/lib/share";
 import { isIOS, promptInstall, useInstallState } from "@/lib/pwa";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
+import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -46,6 +47,10 @@ export default function ImportPage() {
   const pending = useQuery(api.imports.pending);
   const discard = useMutation(api.imports.discardPending);
   const confirm = useConfirm();
+  const swipe = useSwipedRow();
+  const discardPending = (p: { _id: Id<"pendingImports">; name: string }) =>
+    confirm({ title: `Discard ${p.name}?`, description: "The file is removed and nothing from it is imported.", action: "Discard" })
+      .then(async (ok) => { if (ok) await discard({ id: p._id }); }).finally(swipe.close);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [reading, setReading] = useState(false);
   const pickRef = useRef<HTMLInputElement>(null);
@@ -120,17 +125,18 @@ export default function ImportPage() {
             {pending?.length ? (
               <Section title="Waiting to import">
                 {pending.map((p) => (
-                  <Row
-                    key={p._id}
-                    label={p.name}
-                    hint={`${kb(p.size)} · sent ${new Date(p.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`}
-                    right={
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="ghost" onClick={async () => { if (await confirm({ title: `Discard ${p.name}?`, description: "The file is removed and nothing from it is imported.", action: "Discard" })) await discard({ id: p._id }); }}>Discard</Button>
-                        <Button size="sm" disabled={reading} onClick={() => setSp({ pending: p._id })}>Review</Button>
-                      </div>
-                    }
-                  />
+                  <SwipeToDelete key={p._id} className="border-b last:border-b-0" label="Discard" {...swipe.row(p._id)} onDelete={() => void discardPending(p)}>
+                    <Row
+                      label={p.name}
+                      hint={`${kb(p.size)} · sent ${new Date(p.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`}
+                      right={
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="ghost" onClick={() => void discardPending(p)}>Discard</Button>
+                          <Button size="sm" disabled={reading} onClick={() => setSp({ pending: p._id })}>Review</Button>
+                        </div>
+                      }
+                    />
+                  </SwipeToDelete>
                 ))}
               </Section>
             ) : null}

@@ -10,6 +10,7 @@ import { NOTE_COLORS } from "../../../shared/defaults";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { MonthNav } from "@/components/shell/MonthNav";
 import { Fab, EmptyState } from "@/components/shell/misc";
+import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -28,6 +29,14 @@ export default function NotesPage() {
   const undoable = useUndoableDelete();
   const confirm = useConfirm();
   const [editing, setEditing] = useState<{ id?: Id<"notes">; date: string; text: string; color: string } | null>(null);
+  const swipe = useSwipedRow();
+  // From a swiped row or the editor's Delete button: asks first, then Undo in the toast.
+  const remove = (id: Id<"notes">) => {
+    const n = view.notes.find((x) => x._id === id);
+    if (!n) return Promise.resolve(false);
+    return confirm({ title: "Delete this note?", description: "You can undo this for a few seconds afterwards." })
+      .then((ok) => { if (ok) void undoable.note(n); return ok; }).finally(swipe.close);
+  };
 
   useEffect(() => {
     const d = sp.get("date");
@@ -44,13 +53,15 @@ export default function NotesPage() {
         {notes && !notes.length ? <EmptyState title="No notes this month" hint="Notes are daily memos. They show as coloured dots on the calendar." /> : null}
         <div className="bg-card border-y">
           {notes?.slice().sort((a, b) => b.date.localeCompare(a.date)).map((n) => (
-            <button key={n._id} type="button" onClick={() => setEditing({ id: n._id, date: n.date, text: n.text, color: n.color })} className="w-full flex items-start gap-3 px-4 py-3 border-b last:border-b-0 text-left hover:bg-accent/40">
-              <span className="mt-1.5 size-2.5 rounded-full shrink-0" style={{ background: n.color }} />
-              <div className="min-w-0">
-                <div className="text-xs text-muted-foreground">{dateLabel(n.date, { weekday: true })}</div>
-                <div className="text-sm whitespace-pre-wrap">{n.text}</div>
-              </div>
-            </button>
+            <SwipeToDelete key={n._id} className="border-b last:border-b-0" {...swipe.row(n._id)} onDelete={() => void remove(n._id)}>
+              <button type="button" onClick={() => setEditing({ id: n._id, date: n.date, text: n.text, color: n.color })} className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-accent/40">
+                <span className="mt-1.5 size-2.5 rounded-full shrink-0" style={{ background: n.color }} />
+                <div className="min-w-0">
+                  <div className="text-xs text-muted-foreground">{dateLabel(n.date, { weekday: true })}</div>
+                  <div className="text-sm whitespace-pre-wrap">{n.text}</div>
+                </div>
+              </button>
+            </SwipeToDelete>
           ))}
         </div>
       </Page>
@@ -70,7 +81,7 @@ export default function NotesPage() {
             </div>
           ) : null}
           <DialogFooter>
-            {editing?.id ? <Button variant="destructive" onClick={async () => { const n = view.notes.find((x) => x._id === editing.id); if (!n || !(await confirm({ title: "Delete this note?", description: "You can undo this for a few seconds afterwards." }))) return; void undoable.note(n); setEditing(null); }}>Delete</Button> : null}
+            {editing?.id ? <Button variant="destructive" onClick={async () => { if (await remove(editing.id!)) setEditing(null); }}>Delete</Button> : null}
             <Button disabled={!editing?.text.trim()} onClick={async () => { if (!editing) return; await upsert({ id: editing.id, date: editing.date, text: editing.text.trim(), color: editing.color }); setEditing(null); }}>Save</Button>
           </DialogFooter>
         </DialogContent>
