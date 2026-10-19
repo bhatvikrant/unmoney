@@ -85,3 +85,56 @@ test("changing currency rescales what repeats and bookmarks will enter", () => {
   expect(after.repeats.find((r) => r.kind === "repeat")!.template.amount).toBe(16);
   expect(after.bookmarks.find((b) => b.template.note === "Coffee")!.template.amount).toBe(5);
 });
+
+test("fewer decimal places rounds amounts instead of multiplying what they show", () => {
+  const s = ledger();
+  const before = s.transactions.map((t) => t.amount / 100);
+  const chunked = run(run(s, "transactions.rescale", { ids: s.transactions.map((t) => t._id), factor: 0.01 }).snap, "settings.changeDecimals", { decimals: 0, entries: false }).snap;
+  const oneShot = run(s, "settings.changeDecimals", { decimals: 0 }).snap;
+  expect(chunked.transactions.map((t) => t.amount)).toEqual(before.map(Math.round));
+  expect(chunked.settings[0].decimals).toBe(0);
+  expect(describe(chunked)).toEqual(describe(oneShot));
+});
+
+test("nothing new lands on a deleted account; a schedule on one stops", () => {
+  let s = ledger();
+  const food = s.categories.find((c) => c.name === "Food")!._id;
+  const card = s.accounts[2]._id;
+  s = run(s, "transactions.create", { type: "expense", accountId: card, categoryId: food, amount: 999, note: "sub", tags: [], photoIds: [], date: "2026-01-05", repeat: { frequency: "monthly" } }).snap;
+  const entry = s.transactions.find((t) => t.note === "sub")!;
+  s = run(s, "accounts.remove", { id: card }).snap;
+  expect(() => run(s, "transactions.create", { type: "expense", accountId: card, categoryId: food, amount: 1, note: "", tags: [], photoIds: [], date: "2026-02-01" })).toThrow(/deleted/);
+  // the entry already there can still be edited
+  expect(() => run(s, "transactions.update", { ...entry, id: entry._id, note: "fixed" })).not.toThrow();
+  const after = run(s, "repeats.catchUp", { today: "2026-06-01" }).snap;
+  expect(after.transactions.filter((t) => t.note === "sub").length).toBe(1);
+  expect(after.repeats.find((r) => r.kind === "repeat")!.active).toBe(false);
+  // restoring the account starts the schedule again from its next date, without filling the gap
+  const restored = applyOp(after, { id: "restore", kind: "accounts.restore", args: { id: card }, at: Date.parse("2026-06-10T12:00:00Z") }, ctx).snap;
+  const rep = restored.repeats.find((r) => r.kind === "repeat")!;
+  expect([rep.active, rep.nextDate, rep.pausedForDeleted]).toEqual([true, "2026-07-05", undefined]);
+  expect(restored.transactions.filter((t) => t.note === "sub").length).toBe(1);
+});
+
+test("scaling down by 10^4 rounds halves up, and scaling up past the limit is refused", async () => {
+  const { scaleAmount, MAX_AMOUNT } = await import("./ops");
+  expect(scaleAmount(5000, 10 ** -4)).toBe(1);
+  expect(scaleAmount(15000, 10 ** -4)).toBe(2);
+  expect(scaleAmount(123456, 10 ** -2)).toBe(1235);
+  expect(() => scaleAmount(MAX_AMOUNT, 10)).toThrow(/too large/);
+});
+
+test("a tidy-up undone after a change of decimals puts budgets back at the new scale", () => {
+  let s = ledger();
+  const food = s.categories.find((c) => c.name === "Food")!._id;
+  const snacks = s.categories.find((c) => c.name === "Groceries")!._id;
+  s = run(s, "budgets.upsert", { categoryId: food, period: "monthly", amount: 50000 }).snap;
+  void snacks;
+  const social = s.categories.find((c) => c.name === "Social Life")!._id;
+  s = run(s, "budgets.upsert", { categoryId: social, period: "monthly", amount: 20000 }).snap;
+  s = run(s, "categories.applyCleanup", { steps: [{ kind: "merge", sourceIds: [social], target: { id: food } }] }).snap;
+  s = run(s, "settings.changeDecimals", { decimals: 0 }).snap;
+  const record = s.categoryCleanups[0];
+  s = run(s, "categories.undoCleanup", { id: record._id }).snap;
+  expect(s.budgets.find((b) => b.categoryId === social)!.amount).toBe(200);
+});

@@ -1,3 +1,4 @@
+import { useSearchParams } from "react-router";
 import { useMemo, useState } from "react";
 import { SlidersHorizontal, CheckSquare } from "lucide-react";
 import { useView } from "@/lib/store";
@@ -18,14 +19,24 @@ const PAGE = 300;
 
 export default function SearchPage() {
   const { accounts, categories, ledger } = useApp();
-  const [q, setQ] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [type, setType] = useState<"any" | "income" | "expense" | "transfer">("any");
-  const [account, setAccount] = useState<string>("any");
-  const [category, setCategory] = useState<string>("any");
-  const [tag, setTag] = useState<string>("any");
+  // Kept in the URL, so opening a result and coming back finds the same search.
+  const [sp, setSp] = useSearchParams();
+  const param = <T extends string>(key: string, fallback: T) => [
+    (sp.get(key) ?? fallback) as T,
+    (v: string) => setSp((p) => { const n = new URLSearchParams(p); if (v && v !== fallback) n.set(key, v); else n.delete(key); return n; }, { replace: true }),
+  ] as const;
+  // The box keeps its own state: the router updates the URL inside a transition, and an input
+  // driven from there would lose keystrokes and its caret. The URL just mirrors it.
+  const [urlQ, setUrlQ] = param("q", "");
+  const [q, setQState] = useState<string>(urlQ);
+  const setQ = (v: string) => { setQState(v); setUrlQ(v); };
+  const [showFilters, setShowFilters] = useState(() => ["from", "to", "type", "account", "category", "tag"].some((k) => sp.has(k)));
+  const [from, setFrom] = param("from", "");
+  const [to, setTo] = param("to", "");
+  const [type, setType] = param<"any" | "income" | "expense" | "transfer">("type", "any");
+  const [account, setAccount] = param("account", "any");
+  const [category, setCategory] = param("category", "any");
+  const [tag, setTag] = param("tag", "any");
   const view = useView();
   const tags = useMemo(() => txTags(view), [view]);
   const active = !!(q.trim() || from || to || type !== "any" || account !== "any" || category !== "any" || tag !== "any");

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useOp, useView } from "@/lib/store";
+import { useUndoableDelete } from "@/lib/undo";
 import { notesRange } from "../../../shared/views";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useMonthParam } from "@/lib/period-hooks";
@@ -22,7 +23,7 @@ export default function NotesPage() {
   const view = useView();
   const notes = useMemo(() => notesRange(view, range.from, range.to), [view, range.from, range.to]);
   const upsert = useOp("notes.upsert");
-  const remove = useOp("notes.remove");
+  const undoable = useUndoableDelete();
   const [editing, setEditing] = useState<{ id?: Id<"notes">; date: string; text: string; color: string } | null>(null);
 
   useEffect(() => {
@@ -66,7 +67,7 @@ export default function NotesPage() {
             </div>
           ) : null}
           <DialogFooter>
-            {editing?.id ? <Button variant="destructive" onClick={() => { remove({ id: editing.id! }); setEditing(null); }}>Delete</Button> : null}
+            {editing?.id ? <Button variant="destructive" onClick={() => { const n = view.notes.find((x) => x._id === editing.id); if (n) void undoable.note(n); setEditing(null); }}>Delete</Button> : null}
             <Button disabled={!editing?.text.trim()} onClick={async () => { if (!editing) return; await upsert({ id: editing.id, date: editing.date, text: editing.text.trim(), color: editing.color }); setEditing(null); }}>Save</Button>
           </DialogFooter>
         </DialogContent>

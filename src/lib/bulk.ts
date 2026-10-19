@@ -8,7 +8,7 @@
 import { toast } from "sonner";
 import { useStore } from "@/lib/store";
 import { currencyInfo } from "../../shared/currencies";
-import { restoreRowsFrom, type BackupData } from "../../shared/ops";
+import { restoreRowsFrom, scaleAmount, type BackupData } from "../../shared/ops";
 import type { Id } from "../../convex/_generated/dataModel";
 
 const CHUNK = 500;
@@ -34,6 +34,18 @@ export function useBulkOps() {
     const ids: string[] = [];
     for (const part of chunks(view.transactions.map((t) => t._id))) ids.push((await dispatchTracked("transactions.bulkRemove", { ids: part })).id);
     return ids;
+  }
+
+  /** Refuses up front (with a message) a change of scale that would push an amount past the limit. */
+  function assertFits(factor: number) {
+    try {
+      for (const t of view.transactions) for (const n of [t.amount, t.feeAmount, t.installmentTotal]) if (n !== undefined) scaleAmount(n, factor);
+      for (const a of view.accounts) scaleAmount(a.initialBalance, factor);
+      for (const b of view.budgets) scaleAmount(b.amount, factor);
+    } catch (e) {
+      toast.error("Some amounts would be too large with that many decimal places.");
+      throw e;
+    }
   }
 
   /** Waits for the server, with a toast that stays up until it has confirmed (or refused) every op. */
@@ -68,7 +80,23 @@ export function useBulkOps() {
       return track(ids, { loading: "Restoring… keep UnMoney open until it is saved", success: "Restored" });
     },
 
+    async changeDecimals(decimals: number) {
+      const current = view.settings[0]?.decimals ?? 2;
+      const factor = 10 ** (decimals - current);
+      assertFits(factor);
+      const success = `Amounts now have ${decimals} decimal ${decimals === 1 ? "place" : "places"}`;
+      if (view.transactions.length <= ONE_OP) {
+        const { id } = await dispatchTracked("settings.changeDecimals", { decimals });
+        return track([id], { loading: "Updating amounts…", success });
+      }
+      const ids: string[] = [];
+      for (const part of chunks(view.transactions.map((t) => t._id as Id<"transactions">))) ids.push((await dispatchTracked("transactions.rescale", { ids: part, factor })).id);
+      ids.push((await dispatchTracked("settings.changeDecimals", { decimals, entries: false })).id);
+      return track(ids, { loading: "Updating amounts…", success });
+    },
+
     async changeMainCurrency(code: string, keepData: boolean) {
+      if (keepData) assertFits(10 ** ((currencyInfo(code)?.decimals ?? 2) - (view.settings[0]?.decimals ?? 2)));
       if (view.transactions.length <= ONE_OP) {
         const { id } = await dispatchTracked("settings.changeMainCurrency", { code, keepData });
         return track([id], { loading: `Switching to ${code}…`, success: `Main currency is now ${code}` });
