@@ -11,6 +11,7 @@ import { Row, Section } from "@/components/shell/misc";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { clearUnlock } from "@/lib/passcode";
 import { Avatar } from "@/components/shell/Avatar";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -24,8 +25,9 @@ export default function SettingsPage() {
   const defaultAccount = visibleAccounts.some((a) => a._id === s.defaultAccountId) ? s.defaultAccountId! : "first";
   const { status, clearLocal } = useStore();
   const { signOut } = useAuthActions();
+  const confirm = useConfirm();
   async function onSignOut() {
-    if (status.pending > 0 && !window.confirm(`${status.pending} change${status.pending === 1 ? " has" : "s have"} not reached the server yet and will be lost if you sign out now. Sign out anyway?`)) return;
+    if (status.pending > 0 && !(await confirm({ title: "Sign out anyway?", description: `${status.pending} change${status.pending === 1 ? " has" : "s have"} not reached the server yet and will be lost if you sign out now.`, action: "Sign out" }))) return;
     clearUnlock();
     await clearLocal();
     await signOut();

@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { useUndoableDelete } from "@/lib/undo";
 import { DeleteSeriesEntryDialog } from "./DeleteSeriesEntryDialog";
 
@@ -97,13 +98,15 @@ export function TransactionList({ txs, selectable, selected, onToggle, onLongPre
   emptyText?: string; className?: string;
 }) {
   const undoable = useUndoableDelete();
+  const confirm = useConfirm();
   /** The row swiped open, and an entry of a series waiting on "only this one / this and future". */
   const [swiped, setSwiped] = useState<string | null>(null);
   const [series, setSeries] = useState<Tx | null>(null);
   // Deletes like the editor does: at once with Undo in the toast, or asking first for an entry in a series.
   const remove = (t: Tx) => {
     if (t.repeatId) setSeries(t);
-    else void undoable.entry(t._id).finally(() => setSwiped(null));
+    else void confirm({ title: "Delete this entry?", description: "You can undo this for a few seconds afterwards." })
+      .then((ok) => (ok ? undoable.entry(t._id) : undefined)).finally(() => setSwiped(null));
   };
   const openEntry = useOpenEntry();
   const { id: openId } = useParams();

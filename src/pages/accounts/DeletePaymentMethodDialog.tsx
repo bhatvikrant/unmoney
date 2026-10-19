@@ -14,7 +14,7 @@ export function DeletePaymentMethodDialog({ method, onOpenChange, onDeleted }: {
         <AlertDialogHeader><AlertDialogTitle>Delete {method?.name}?</AlertDialogTitle><AlertDialogDescription>Its transactions are kept. You can restore it from Settings › Deleted payment methods.</AlertDialogDescription></AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={async () => {
+          <AlertDialogAction variant="destructive" onClick={async () => {
             try { await remove({ id: method!._id }); onDeleted?.(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not delete it"); }
           }}>Delete</AlertDialogAction>
         </AlertDialogFooter>

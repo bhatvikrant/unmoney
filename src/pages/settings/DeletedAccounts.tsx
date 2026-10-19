@@ -4,12 +4,14 @@ import { accountsListDeleted } from "../../../shared/views";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section, EmptyState } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 export default function DeletedAccounts() {
   const view = useView();
   const data = useMemo(() => accountsListDeleted(view), [view]);
   const restore = useOp("accounts.restore");
   const purge = useOp("accounts.permanentlyDelete");
+  const confirm = useConfirm();
   const restoreGroup = useOp("accountGroups.restore");
   return (
     <>
@@ -19,7 +21,7 @@ export default function DeletedAccounts() {
         {data?.accounts.length ? (
           <Section title="Payment methods">
             {data.accounts.map((a) => (
-              <Row key={a._id} label={a.name} hint={a.groupName} right={<div className="flex gap-1"><Button size="sm" variant="outline" onClick={() => restore({ id: a._id })}>Restore</Button><Button size="sm" variant="destructive" onClick={async () => { if (window.confirm(`Permanently delete ${a.name} and all its transactions?`)) { await purge({ id: a._id }); } }}>Delete</Button></div>} />
+              <Row key={a._id} label={a.name} hint={a.groupName} right={<div className="flex gap-1"><Button size="sm" variant="outline" onClick={() => restore({ id: a._id })}>Restore</Button><Button size="sm" variant="destructive" onClick={async () => { if (await confirm({ title: `Permanently delete ${a.name}?`, description: "This also deletes all its transactions. This cannot be undone." })) await purge({ id: a._id }); }}>Delete</Button></div>} />
             ))}
           </Section>
         ) : null}
