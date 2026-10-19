@@ -264,3 +264,41 @@ export function recapText(s: RecapSummary, monthLabel: string, fmt: (minor: numb
   ].filter(Boolean).join(" · ");
   return `${monthLabel} · UnMoney\n${line2}\n${line3}`;
 }
+
+/** One line of the Recaps index: a logical month and whether its recap can be opened. */
+export type RecapIndexRow = {
+  month: MonthKey;
+  /** Expense entries in the month, counted as Stats counts them. */
+  entries: number;
+  spent: number;
+  /** "ready": open it; "thin": below RECAP_MIN_ENTRIES; "current": the month is not over yet (`readyOn` is the day after it ends). */
+  state: "ready" | "thin" | "current";
+  cards?: number;
+  readyOn?: ISODate;
+};
+
+/**
+ * Every logical month with an expense entry, newest first, plus the current month, so the Recaps
+ * page can list what is there to open. Built on demand from the local data, like the recaps.
+ */
+export function recapIndex(snap: Snapshot, today: ISODate): RecapIndexRow[] {
+  const settings = settingsOf(snap);
+  if (!settings) return [];
+  const current = monthKeyForDate(today, settings.monthStartDay);
+  const byMonth = new Map<MonthKey, { entries: number; spent: number }>();
+  byMonth.set(current, { entries: 0, spent: 0 });
+  for (const e of statsEntries(snap, "0000-00-00", "9999-99-99", "expense")) {
+    const k = monthKeyForDate(e.t.date, settings.monthStartDay);
+    const m = byMonth.get(k) ?? { entries: 0, spent: 0 };
+    m.entries += 1;
+    m.spent += e.amount;
+    byMonth.set(k, m);
+  }
+  return [...byMonth.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([month, m]) => {
+      if (month >= current) return { month, ...m, state: "current" as const, readyOn: addDays(monthRange(month, settings.monthStartDay).to, 1) };
+      if (m.entries < RECAP_MIN_ENTRIES) return { month, ...m, state: "thin" as const };
+      return { month, ...m, state: "ready" as const, cards: monthRecap(snap, month)?.cards.length };
+    });
+}
