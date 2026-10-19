@@ -59,7 +59,8 @@ export function CategoryPicker({ open, onOpenChange, type, onPick }: {
   const [desc, setDesc] = useState(readSortDesc);
   const sorted = useMemo(() => {
     const dir = desc ? -1 : 1;
-    return categories.filter((c) => !c.deletedAt).sort((a, b) => dir * a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
+    // Archived categories are not offered (a main one takes its subcategories with it); entries already on them keep them.
+    return categories.filter((c) => !c.deletedAt && !c.archivedAt).sort((a, b) => dir * a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
   }, [categories, desc]);
   const mains = sorted.filter((c) => c.type === type && !c.parentId);
   const subs = main ? sorted.filter((c) => c.parentId === main) : [];
