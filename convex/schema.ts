@@ -273,6 +273,26 @@ export default defineSchema({
     text: v.string(),
   }).index("by_user", ["userId"]),
 
+  /**
+   * A user's last AI run for Tidy up: when (runs are limited to one a month), a fingerprint of the
+   * summary it saw (an unchanged summary reuses the answer), and the checked suggestions.
+   */
+  aiUsage: defineTable({
+    userId: v.id("users"),
+    lastRunAt: v.number(),
+    summaryHash: v.string(),
+    result: v.array(v.object({
+      kind: v.union(v.literal("merge"), v.literal("rename"), v.literal("nest")),
+      type: v.union(v.literal("income"), v.literal("expense")),
+      ids: v.array(v.id("categories")),
+      targetId: v.optional(v.id("categories")),
+      newName: v.optional(v.string()),
+      parentId: v.optional(v.id("categories")),
+      reason: v.string(),
+      confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+    })),
+  }).index("by_user", ["userId"]),
+
   /** Ops the client has synced, for idempotent retries. */
   syncOps: defineTable({
     userId: v.id("users"),
