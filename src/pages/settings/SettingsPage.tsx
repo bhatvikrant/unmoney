@@ -54,14 +54,14 @@ export default function SettingsPage() {
           {link("Repeat settings", "/settings/repeats", undefined, "Entries that recur on a schedule (rent, salary, subscriptions). They are added to your transactions automatically when their date comes.")}
           {link("Bookmarks", "/bookmarks")}
         </Section>
-        <Section title="Accounts">
-          {link("Account settings", "/settings/transfer-expense", undefined, "Per account: whether it counts in your totals, whether it is shown, and whether money moved into it (savings, loans, investments) counts as spending.")}
-          <Row label="Default account" info="The account a new entry starts on. You can still pick another one on the entry itself. With no default, new entries start on the first visible account." right={
+        <Section title="Payment methods">
+          {link("Payment method settings", "/settings/transfer-expense", undefined, "Per payment method: whether it counts in your totals, whether it is shown, and whether money moved into it (savings, loans, investments) counts as spending.")}
+          <Row label="Default payment method" info="The payment method a new entry starts on. You can still pick another one on the entry itself. With no default, new entries start on the first visible one." right={
             <Select value={defaultAccount} onValueChange={(v) => setDefaultAccount({ id: v === "first" ? undefined : (v as Id<"accounts">) })}><SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="first">First in list</SelectItem>{visibleAccounts.map((a) => <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>)}</SelectContent></Select>
           } />
-          {link("Account groups", "/settings/account-groups")}
-          {link("Order & visibility", "/accounts/order")}
-          {link("Deleted accounts", "/settings/deleted-accounts", undefined, "Accounts you have deleted, with their transactions kept. Restore one to bring it back, or delete it permanently.")}
+          {link("Groups", "/settings/groups", undefined, "Folders for your payment methods. Deleting one moves its methods to No group.")}
+          {link("Order & visibility", "/payment-methods/order")}
+          {link("Deleted payment methods", "/settings/deleted-payment-methods", undefined, "Payment methods you have deleted, with their transactions kept. Restore one to bring it back, or delete it permanently.")}
           <Row label="Card expenses display" hint="At the time, or as a lump sum on the payment date" info="At the time: a credit-card purchase counts as an expense on the day you make it. Lump sum: card purchases count as transfers until you pay the card off, and the payment to the card is what counts as the expense." right={
             <Select value={s.cardExpenseDisplay} onValueChange={(v) => update({ patch: { cardExpenseDisplay: v as "atTime" | "lumpSum" } })}><SelectTrigger className="h-8 w-32"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="atTime">At the time</SelectItem><SelectItem value="lumpSum">Lump sum</SelectItem></SelectContent></Select>
           } />
@@ -73,7 +73,7 @@ export default function SettingsPage() {
             <Select value={s.startScreen} onValueChange={(v) => update({ patch: { startScreen: v as "daily" | "calendar" } })}><SelectTrigger className="h-8 w-32"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">Daily</SelectItem><SelectItem value="calendar">Calendar</SelectItem></SelectContent></Select>
           } />
           <Row label="Subcategories" info="Lets categories have subcategories, for example Food › Groceries. When off, you only pick the main category." right={<Switch checked={s.subcategoryEnabled} onCheckedChange={(v) => update({ patch: { subcategoryEnabled: v } })} />} />
-          <Row label="Autocomplete notes" info="While you type a note, suggests notes you have used before. Picking one also fills in the category and account you used with it." right={<Switch checked={s.autocompleteEnabled} onCheckedChange={(v) => update({ patch: { autocompleteEnabled: v } })} />} />
+          <Row label="Autocomplete notes" info="While you type a note, suggests notes you have used before. Picking one also fills in the category and payment method you used with it." right={<Switch checked={s.autocompleteEnabled} onCheckedChange={(v) => update({ patch: { autocompleteEnabled: v } })} />} />
           <Row label="Time input" hint="Record the time of each entry" info="Adds a time field next to the date when you enter a transaction. Turn it off if you only care about the day." right={<Switch checked={s.timeInputEnabled} onCheckedChange={(v) => update({ patch: { timeInputEnabled: v } })} />} />
           <Row label="Repeat display" hint="When scheduled entries appear" info="On the date: a scheduled entry is added to your transactions when its date arrives. First of month: all of the month's scheduled entries are added at the start of the month, so you can see what is coming." right={
             <Select value={s.repeatDisplay} onValueChange={(v) => update({ patch: { repeatDisplay: v as "onDate" | "firstOfMonth" } })}><SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="onDate">On the date</SelectItem><SelectItem value="firstOfMonth">First of month</SelectItem></SelectContent></Select>
@@ -82,7 +82,7 @@ export default function SettingsPage() {
           {link("Passcode", "/settings/passcode", s.passcodeHash ? "On" : "Off", "Asks for a 4-digit code when you open UnMoney, on every device you are signed in on. It locks the screen only; your data is still tied to your Google sign-in.")}
         </Section>
         <Section title="Data">
-          {link("Import from Money Manager", "/import", undefined, "Bring over your accounts, categories and history from Money Manager's Excel export.")}
+          {link("Import from Money Manager", "/import", undefined, "Bring over your payment methods, categories and history from Money Manager's Excel export.")}
           {link("Backup, restore, import & export", "/settings/backup")}
         </Section>
         <p className="px-4 pt-6 text-xs text-muted-foreground">UnMoney · works offline and syncs across your devices.</p>
