@@ -25,6 +25,7 @@ import { BottomSheet } from "@/components/shell/BottomSheet";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BudgetBar } from "@/components/BudgetBars";
+import { RecapNudge } from "@/pages/recap/RecapNudge";
 import { downloadText, toCSV } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 import { kindLabel } from "../../../shared/defaults";
@@ -129,6 +130,8 @@ export default function TransactionsPage() {
       {/* swipe sideways to change month, like Money Manager */}
       <div {...swipe} className="min-h-[70dvh]">
       <Page className={cn(bulk.active && view === "daily" && "pb-40")}>
+        {/* first week of the month: last month's recap, under the summary bar */}
+        <RecapNudge month={month} />
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
         {raw && view === "daily" ? <TransactionList txs={txs} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}

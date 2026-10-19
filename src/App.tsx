@@ -12,6 +12,7 @@ import SignIn from "@/pages/auth/SignIn";
 import Onboarding from "@/pages/auth/Onboarding";
 import Lock from "@/pages/auth/Lock";
 import AppShell from "@/components/shell/AppShell";
+import RecapPage from "@/pages/recap/RecapPage";
 import LedgerRoute from "@/pages/transactions/LedgerRoute";
 import { useMediaQuery, WIDE } from "@/lib/media";
 import SearchPage from "@/pages/transactions/SearchPage";
@@ -117,6 +118,8 @@ function Gate() {
     <AppDataProvider settings={s} user={user}>
       <ScrollToTop />
       <Routes>
+        {/* full screen, beside the shell: no sidebar or tab bar behind the story cards */}
+        <Route path="recap/:month" element={<RecapPage />} />
         <Route element={<AppShell />}>
           <Route index element={<LedgerRoute />} />
           <Route path="t/new" element={<LedgerRoute />} />

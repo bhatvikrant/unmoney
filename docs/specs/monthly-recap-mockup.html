@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Monthly recap mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  /* ---- UnMoney tokens, copied from src/index.css ---- */
+  :root {
+    --background: oklch(1 0 0); --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0); --card-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0); --primary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.97 0 0); --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0); --border: oklch(0.922 0 0);
+    --chart-1: #2a78d6; --chart-2: #eb6834; --chart-3: #1baf7a; --chart-4: #eda100;
+    --chart-5: #e87ba4; --chart-6: #008300; --chart-7: #6250d6; --chart-8: #e34948; --chart-rest: oklch(0.75 0 0);
+    --income: oklch(0.62 0.19 255); --expense: oklch(0.66 0.2 28); --transfer: oklch(0.6 0 0);
+    --radius: 0.625rem;
+    --shadow-card: 0 0 0 1px oklch(0.145 0 0 / 6%), 0 1px 2px oklch(0.145 0 0 / 5%), 0 8px 24px -8px oklch(0.145 0 0 / 10%);
+    --tint-strength: 9%;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0);
+      --card: oklch(0.205 0 0); --card-foreground: oklch(0.985 0 0);
+      --primary: oklch(0.922 0 0); --primary-foreground: oklch(0.205 0 0);
+      --muted: oklch(0.269 0 0); --muted-foreground: oklch(0.708 0 0);
+      --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%);
+      --chart-1: #3987e5; --chart-2: #d95926; --chart-3: #199e70; --chart-4: #c98500;
+      --chart-5: #d55181; --chart-6: #008300; --chart-7: #9085e9; --chart-8: #e66767; --chart-rest: oklch(0.45 0 0);
+      --transfer: oklch(0.7 0 0);
+      --shadow-card: 0 0 0 1px oklch(1 0 0 / 7%), 0 1px 2px oklch(0 0 0 / 40%), 0 8px 24px -8px oklch(0 0 0 / 50%);
+      --tint-strength: 14%;
+    }
+  }
+  :root[data-theme="dark"] {
+    --background: oklch(0.145 0 0); --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0); --card-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0); --primary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.269 0 0); --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0); --border: oklch(1 0 0 / 10%);
+    --chart-1: #3987e5; --chart-2: #d95926; --chart-3: #199e70; --chart-4: #c98500;
+    --chart-5: #d55181; --chart-6: #008300; --chart-7: #9085e9; --chart-8: #e66767; --chart-rest: oklch(0.45 0 0);
+    --transfer: oklch(0.7 0 0);
+    --shadow-card: 0 0 0 1px oklch(1 0 0 / 7%), 0 1px 2px oklch(0 0 0 / 40%), 0 8px 24px -8px oklch(0 0 0 / 50%);
+    --tint-strength: 14%;
+  }
+  :root[data-tint="plain"] { --tint-strength: 0%; }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--background); color: var(--foreground); font-family: "Geist", system-ui, sans-serif; font-size: 14px; line-height: 1.4; -webkit-font-smoothing: antialiased; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted-foreground); }
+  .income { color: var(--income); } .expense { color: var(--expense); }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-foreground); font-weight: 500; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 22px; letter-spacing: -0.01em; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 40px 0 12px; }
+  p.lead { color: var(--muted-foreground); margin: 0 0 20px; max-width: 70ch; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0 0; }
+  .seg { display: inline-flex; background: var(--muted); padding: 2px; border-radius: 6px; font-size: 12px; }
+  .seg button { border: 0; background: transparent; color: var(--muted-foreground); padding: 4px 10px; border-radius: 5px; font: inherit; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--background); color: var(--foreground); font-weight: 500; box-shadow: 0 1px 2px rgb(0 0 0 / 8%); }
+  .row-wrap { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  .row-wrap > div { width: 390px; max-width: 100%; flex: 0 0 auto; }
+  .row-wrap > div.copy { width: 420px; }
+
+  /* phone frame */
+  .phone { width: 390px; max-width: 100%; height: 780px; border-radius: 28px; background: var(--background); box-shadow: var(--shadow-card); border: 1px solid var(--border); overflow: hidden; position: relative; display: flex; flex-direction: column; }
+  .phone .hdr { height: 48px; display: flex; align-items: center; justify-content: center; font-weight: 600; border-bottom: 1px solid var(--border); position: relative; }
+  .phone .hdr .r { position: absolute; right: 8px; top: 6px; display: flex; gap: 2px; }
+  .ghost { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--foreground); }
+  .monthnav { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; }
+  .monthnav b { font-weight: 500; padding: 4px 12px; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .tabs span { padding: 8px 16px; color: var(--muted-foreground); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabs span.on { color: var(--foreground); font-weight: 500; border-color: var(--primary); }
+  .summary { display: grid; grid-template-columns: 1fr 1fr 1fr; text-align: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .summary .label { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 400; }
+  .summary b { font-weight: 500; }
+  .day { display: flex; justify-content: space-between; padding: 6px 16px; border-bottom: 1px solid var(--border); background: var(--card); }
+  .entry { display: flex; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  .entry .sub { font-size: 12px; color: var(--muted-foreground); }
+  .tabbar { margin-top: auto; height: 56px; border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(4, 1fr); font-size: 11px; color: var(--muted-foreground); }
+  .tabbar div { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+  .tabbar .on { color: var(--foreground); }
+  svg.i { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  svg.i.lg { width: 20px; height: 20px; }
+
+  /* nudge card on the ledger */
+  .nudge { margin: 10px 12px; border: 1px solid var(--border); background: var(--card); border-radius: var(--radius); padding: 12px 12px 12px 14px; display: flex; gap: 12px; align-items: flex-start; }
+  .nudge .ic { width: 32px; height: 32px; border-radius: 6px; background: var(--muted); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .nudge .t { font-weight: 500; }
+  .nudge .d { font-size: 12px; color: var(--muted-foreground); margin-top: 2px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 6px; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid transparent; }
+  .btn.primary { background: var(--primary); color: var(--primary-foreground); }
+  .btn.outline { background: var(--background); border-color: var(--border); color: var(--foreground); }
+  .btn.sm { height: 28px; padding: 0 10px; font-size: 12px; }
+  .nudge .x { margin-left: auto; color: var(--muted-foreground); }
+
+  /* stats row */
+  .srow { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--card); }
+  .srow .ic { width: 32px; height: 32px; border-radius: 6px; background: var(--muted); display: flex; align-items: center; justify-content: center; }
+  .srow .hint { font-size: 12px; color: var(--muted-foreground); }
+  .srow.off { color: var(--muted-foreground); }
+  .seg2 { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .seg2 div { padding: 10px; text-align: center; display: flex; gap: 8px; justify-content: center; border-bottom: 2px solid transparent; color: var(--muted-foreground); }
+  .seg2 div.on { border-color: var(--primary); color: var(--foreground); font-weight: 500; }
+  .donut { width: 150px; height: 150px; border-radius: 50%; margin: 18px auto; background: conic-gradient(var(--chart-1) 0 31%, var(--chart-2) 31% 55%, var(--chart-3) 55% 67%, var(--chart-4) 67% 76%, var(--chart-5) 76% 83%, var(--chart-rest) 83% 100%); position: relative; }
+  .donut::after { content: ""; position: absolute; inset: 26px; border-radius: 50%; background: var(--background); }
+
+  /* ---- the recap story ---- */
+  .story { position: relative; height: 100%; display: flex; flex-direction: column; user-select: none; }
+  .story .top { position: absolute; top: 0; left: 0; right: 0; z-index: 3; padding: 12px 12px 0; display: flex; gap: 4px; align-items: center; }
+  .story .top .segs { display: flex; gap: 3px; flex: 1; }
+  .story .top .segs i { flex: 1; height: 3px; border-radius: 2px; background: color-mix(in oklch, var(--foreground) 15%, transparent); overflow: hidden; display: block; }
+  .story .top .segs i.done { background: var(--foreground); }
+  .story .top .segs i.now { background: linear-gradient(to right, var(--foreground) 50%, color-mix(in oklch, var(--foreground) 15%, transparent) 50%); }
+  .story .top .close { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; margin-left: 6px; color: var(--foreground); cursor: pointer; }
+  .card { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 56px 28px 36px; background: color-mix(in srgb, var(--tint, var(--chart-rest)) var(--tint-strength), var(--background)); opacity: 0; transform: translateX(16px); transition: opacity .22s ease, transform .22s ease; pointer-events: none; }
+  .card.on { opacity: 1; transform: none; pointer-events: auto; }
+  .card.back { transform: translateX(-16px); }
+  @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+  .card { padding: 56px 24px 28px; }
+  .card .label { margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .card .label::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--tint, var(--chart-rest)); }
+  .card .num { font-size: 60px; font-weight: 600; letter-spacing: -0.04em; line-height: 1; margin: 4px 0 10px; }
+  .card .h { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 6px; }
+  .card .h.xl { font-size: 44px; letter-spacing: -0.035em; line-height: 1; }
+  .card .ctx { font-size: 15px; color: var(--muted-foreground); margin: 2px 0; }
+  .card .ctx b { color: var(--foreground); font-weight: 500; }
+  .card .vis { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
+  .card .foot { margin-top: 14px; font-size: 12px; color: var(--muted-foreground); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .card .foot a { color: var(--foreground); font-weight: 500; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .delta { display: inline-flex; align-items: center; gap: 4px; font-weight: 500; }
+  /* thin category strip, the month's colour signature */
+  .stack { display: flex; height: 10px; border-radius: 3px; overflow: hidden; gap: 2px; }
+  .stack i { display: block; height: 100%; }
+  /* two bars to compare months (card 2), or notes by count (card 6) */
+  .cbar { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
+  .cbar .l { color: var(--muted-foreground); }
+  .cbar i { height: 26px; border-radius: 4px; background: var(--chart-rest); opacity: .45; display: block; }
+  .cbar.now i { background: var(--expense); opacity: 1; }
+  .cbar.now .l { color: var(--foreground); font-weight: 500; }
+  .cbar .v { font-weight: 500; }
+  .cbar.cnt i { background: var(--tint); opacity: .35; height: 22px; }
+  .cbar.cnt.top i { opacity: 1; }
+  .cbar.cnt .l { width: auto; }
+  .cbar.cnt { grid-template-columns: 72px 1fr 28px; }
+  /* tall stacked column (card 3): heights by share, labels inside */
+  .col { display: flex; flex-direction: column; gap: 3px; flex: 1; min-height: 190px; max-height: 280px; border-radius: 8px; overflow: hidden; margin: 14px 0 12px; }
+  .col > div { display: flex; align-items: center; justify-content: space-between; padding: 0 12px; color: oklch(0.145 0 0); font-size: 14px; font-weight: 500; min-height: 24px; }
+  .col > div.rest { color: var(--foreground); }
+  .col > div .pc { font-weight: 400; opacity: .8; }
+  .legend { display: grid; grid-template-columns: auto 1fr auto; column-gap: 10px; row-gap: 5px; font-size: 13px; align-items: center; }
+  .legend .sw { width: 10px; height: 10px; border-radius: 3px; }
+  /* a bordered list in the ledger's own row style (card 4) */
+  .list { border: 1px solid var(--border); background: var(--card); border-radius: var(--radius); overflow: hidden; }
+  .rowx { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .rowx:last-child { border-bottom: 0; }
+  .rowx .rk { width: 16px; color: var(--muted-foreground); font-size: 12px; text-align: center; }
+  .rowx .n { flex: 1; min-width: 0; font-size: 14px; }
+  .rowx .n small { display: block; color: var(--muted-foreground); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rowx.top .n { font-weight: 500; }
+  /* 30-day strip (card 5) */
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 150px; margin: 6px 0 6px; position: relative; }
+  .bars i { flex: 1; background: var(--expense); opacity: .4; border-radius: 2px 2px 0 0; display: block; }
+  .bars i.hi { opacity: 1; }
+  .bars i.zero { background: var(--chart-rest); opacity: .4; height: 3px !important; }
+  .bars i.wk { opacity: .55; }
+  .callout { position: absolute; top: 0; font-size: 11px; color: var(--muted-foreground); white-space: nowrap; }
+  .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted-foreground); }
+  /* small stat tiles */
+  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+  .kv.three { grid-template-columns: 1fr 1fr 1fr; }
+  .kv div { border: 1px solid var(--border); background: var(--card); border-radius: var(--radius); padding: 9px 11px; min-width: 0; }
+  .kv .label { margin-bottom: 1px; font-size: 10px; }
+  .kv .label::before { display: none; }
+  .kv b { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kv small { color: var(--muted-foreground); font-size: 12px; }
+  /* tornado rows (card 7) */
+  .tor { display: grid; grid-template-columns: 1fr 96px auto; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .tor:last-child { border-bottom: 0; }
+  .tor .n { font-size: 15px; min-width: 0; }
+  .tor .n small { display: block; color: var(--muted-foreground); font-size: 12px; }
+  .tor .ax { position: relative; height: 18px; }
+  .tor .ax::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--muted-foreground); opacity: .5; }
+  .tor .ax i { position: absolute; top: 3px; height: 12px; border-radius: 3px; display: block; }
+  .tor .ax i.up { left: 50%; background: var(--expense); }
+  .tor .ax i.down { right: 50%; background: var(--income); }
+  .tor .d { font-weight: 500; font-size: 14px; white-space: nowrap; text-align: right; }
+  /* in vs out bar (card 8) */
+  .inout { display: flex; gap: 4px; height: 48px; border-radius: 6px; overflow: hidden; margin: 14px 0 10px; }
+  .inout i { display: flex; align-items: center; padding: 0 10px; height: 100%; color: oklch(0.985 0 0); font-size: 13px; font-weight: 500; white-space: nowrap; }
+  .inout i.kept { background: var(--income); }
+  .inout i.spent { background: var(--expense); }
+  /* the closer: a poster to keep, actions beneath it */
+  .poster { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-card); padding: 16px 16px 12px; }
+  .poster .ph { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+  .poster .pt { font-size: 30px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+  .poster .pt span { color: var(--muted-foreground); font-weight: 500; }
+  .poster .logo { font-size: 12px; font-weight: 600; letter-spacing: -0.01em; margin-top: 4px; }
+  .poster .stack { margin: 0 0 6px; }
+  .prow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .prow:last-of-type { border-bottom: 0; }
+  .prow span { color: var(--muted-foreground); white-space: nowrap; }
+  .prow b { font-weight: 500; text-align: right; min-width: 0; }
+  .poster .pf { font-size: 11px; color: var(--muted-foreground); margin-top: 8px; display: flex; justify-content: space-between; }
+  .actions { display: flex; gap: 8px; margin-top: 14px; }
+  .actions .btn { flex: 1; height: 40px; justify-content: center; }
+  .taphint { position: absolute; bottom: 10px; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--muted-foreground); pointer-events: none; }
+  .zone { position: absolute; top: 48px; bottom: 90px; z-index: 2; cursor: pointer; }
+  .zone.l { left: 0; width: 35%; } .zone.r { right: 0; width: 65%; }
+
+  /* grid of all cards */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .grid .mini { height: 700px; border-radius: 20px; overflow: hidden; border: 1px solid var(--border); position: relative; box-shadow: var(--shadow-card); }
+  .grid .mini .card { position: absolute; inset: 0; opacity: 1; transform: none; pointer-events: auto; padding: 40px 24px 28px; }
+  .grid .mini .card .num { font-size: 52px; }
+  .grid .cap { font-size: 12px; color: var(--muted-foreground); margin: 6px 2px 0; }
+  .desk { width: 100%; max-width: 900px; height: 620px; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow-card); background: var(--background); position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .desk .card { position: relative; width: 420px; height: 560px; border-radius: 20px; border: 1px solid var(--border); opacity: 1; transform: none; pointer-events: auto; }
+  .desk .edge { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; align-items: center; }
+  .desk .edge .segs { display: flex; gap: 3px; width: 140px; }
+  .desk .edge .segs i { flex: 1; height: 3px; border-radius: 2px; background: color-mix(in oklch, var(--foreground) 15%, transparent); display: block; }
+  .desk .edge .segs i.done { background: var(--foreground); }
+  .desk .nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: var(--card); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); }
+  .desk .nav.l { left: 120px; } .desk .nav.r { right: 120px; color: var(--foreground); }
+  .desk .kbd { position: absolute; bottom: 12px; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--muted-foreground); }
+  kbd { font: inherit; border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Monthly recap</h1>
+  <p class="lead">Spotify-Wrapped-style story of last month's spending. Built in the app's own tokens: neutral shadcn surfaces, Geist, the income/expense colours and the eight chart hues. Tap the phone below to step through it.</p>
+  <div class="toolbar">
+    <span class="seg" role="group" aria-label="Theme"><button data-theme="light" aria-pressed="true">Light</button><button data-theme="dark" aria-pressed="false">Dark</button></span>
+    <span class="seg" role="group" aria-label="Card background"><button data-tint="tint" aria-pressed="true">Tinted cards</button><button data-tint="plain" aria-pressed="false">Plain cards</button></span>
+    <span class="muted" style="font-size:12px">Tint = the card's chart hue at 9% over the page background. Plain = no tint.</span>
+  </div>
+
+  <h2>1 · Where it appears</h2>
+  <div class="row-wrap">
+    <div>
+      <div class="phone">
+        <div class="hdr">Transactions<div class="r"><span class="ghost"><svg class="i lg" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span><span class="ghost"><svg class="i lg" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg></span></div></div>
+        <div class="monthnav"><span class="ghost"><svg class="i lg" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></span><b>Oct 2026</b><span class="ghost"><svg class="i lg" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span></div>
+        <div class="tabs"><span class="on">Daily</span><span>Calendar</span><span>Weekly</span><span>Monthly</span><span>Summary</span></div>
+        <div class="summary"><div><div class="label">Income</div><b class="income tabular">₹0.00</b></div><div><div class="label">Expenses</div><b class="expense tabular">₹1,240.00</b></div><div><div class="label">Total</div><b class="tabular">-₹1,240.00</b></div></div>
+        <div class="nudge">
+          <div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg></div>
+          <div style="min-width:0;flex:1">
+            <div class="t">Your September recap is ready</div>
+            <div class="d">What you spent, where it went and what changed. About 30 seconds.</div>
+            <div style="margin-top:10px"><button class="btn primary sm">See recap</button></div>
+          </div>
+          <span class="x"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span>
+        </div>
+        <div class="day"><span><b>2</b> <span class="muted" style="font-size:12px">Fri</span></span><span class="expense tabular">₹620.00</span></div>
+        <div class="entry"><div>Groceries<div class="sub">Food · HDFC Debit</div></div><span class="expense tabular">₹620.00</span></div>
+        <div class="day"><span><b>1</b> <span class="muted" style="font-size:12px">Thu</span></span><span class="expense tabular">₹620.00</span></div>
+        <div class="entry"><div>Rent<div class="sub">Household · HDFC Bank</div></div><span class="expense tabular">₹620.00</span></div>
+        <div class="tabbar"><div class="on">2 Oct</div><div>Stats</div><div>Payment methods</div><div>More</div></div>
+      </div>
+      <div class="grid cap">Ledger, Oct 1–7: one card under the summary bar. "See recap" opens it; × hides it for this month. It never covers the entry form.</div>
+    </div>
+    <div>
+      <div class="phone">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 12px"><span class="seg"><button aria-pressed="true">Stats</button><button>Budget</button><button>Note</button></span><span style="flex:1"></span><span class="btn outline sm">Monthly ▾</span></div>
+        <div class="monthnav"><span class="ghost"><svg class="i lg" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></span><b>Sep 2026</b><span class="ghost"><svg class="i lg" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span></div>
+        <div class="seg2"><div>Income <b class="income tabular">₹1,20,000</b></div><div class="on">Expenses <b class="expense tabular">₹84,310</b></div></div>
+        <div class="srow">
+          <div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg></div>
+          <div style="flex:1"><div>September recap</div><div class="hint">9 cards · what you spent, where, what changed</div></div>
+          <svg class="i muted" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+        </div>
+        <div class="donut"></div>
+        <div class="cat" style="padding:10px 16px;border-top:1px solid var(--border)"><span class="pc">31%</span><span class="sw" style="background:var(--chart-1)"></span><span class="n">Food</span><span class="expense tabular">₹26,140</span></div>
+        <div class="cat" style="padding:10px 16px"><span class="pc">24%</span><span class="sw" style="background:var(--chart-2)"></span><span class="n">Household</span><span class="expense tabular">₹20,230</span></div>
+        <div class="cat" style="padding:10px 16px"><span class="pc">12%</span><span class="sw" style="background:var(--chart-3)"></span><span class="n">Transport</span><span class="expense tabular">₹10,120</span></div>
+        <div class="srow off" style="margin-top:14px;border-top:1px solid var(--border)">
+          <div class="ic"><svg class="i" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg></div>
+          <div style="flex:1"><div>October recap</div><div class="hint">Ready on 1 Nov</div></div>
+        </div>
+        <div class="tabbar"><div>2 Oct</div><div class="on">Stats</div><div>Payment methods</div><div>More</div></div>
+      </div>
+      <div class="grid cap">Stats, Monthly: a "Recap" row under the Income / Expenses tabs for every finished month that has entries. This is the permanent home. (The greyed row at the bottom shows the current-month state, drawn here only for reference.)</div>
+    </div>
+  </div>
+
+  <h2>2 · The recap (tap to step through)</h2>
+  <div class="row-wrap">
+    <div class="phone" id="phone">
+      <div class="story" id="story">
+        <div class="top"><div class="segs" id="segs"></div><span class="close" title="Close"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div>
+        <div class="zone l" id="zl"></div><div class="zone r" id="zr"></div>
+        <div id="cards"></div>
+        <div class="taphint">Tap right to continue · left to go back · ← → on a keyboard</div>
+      </div>
+    </div>
+    <div class="copy">
+      <p class="lead" style="margin-top:8px">One idea per card: a small uppercase lead-in, one big number, one sentence of context. Nothing scrolls. Cards that don't apply are skipped (no income recorded, no previous month, no budgets), so the recap is 6–9 cards and under 30 seconds.</p>
+      <p class="lead">The numbers come from the same functions as the Stats tab, so the recap total always equals the month's Expenses figure on Stats.</p>
+      <p class="lead">Colour: each card carries one of the chart hues as a faint tint, in the order the categories use on Stats. Switch to "Plain cards" above to see it without.</p>
+    </div>
+  </div>
+
+  <h2>3 · All cards at once</h2>
+  <div class="grid" id="all"></div>
+
+  <h2>4 · On a wide screen</h2>
+  <div class="desk" id="desk">
+    <div class="nav l"><svg class="i" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></div>
+    <div id="deskcard"></div>
+    <div class="nav r"><svg class="i" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></div>
+    <div class="edge"><div class="segs"><i class="done"></i><i class="done"></i><i class="done"></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span class="close ghost" style="width:32px;height:32px"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></div>
+    <div class="kbd">A full-screen route outside the sidebar. <kbd>←</kbd> <kbd>→</kbd> step, <kbd>Esc</kbd> closes.</div>
+  </div>
+</div>
+
+<script>
+  const sparkle = '<svg class="i" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>';
+  const up = '<svg class="i" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>';
+  const down = '<svg class="i" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>';
+  const chev = '<svg class="i" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>';
+  // Sep 2026: 30 days, Tue 1 Sep. Daily spend in ₹ hundreds for the bars.
+  const days = [6,9,0,12,7,4,31,10,0,3,14,184,8,96,5,0,22,11,9,4,30,0,38,7,12,6,0,9,25,41];
+  const max = Math.max(...days);
+  const wk = (i) => [4,5].includes((i) % 7);
+  const bars = days.map((v, i) => `<i class="${v === 0 ? 'zero' : ''} ${i === 11 ? 'hi' : wk(i) ? 'wk' : ''}" style="height:${Math.max(2, Math.round(v / max * 100))}%" title="${i + 1} Sep"></i>`).join('');
+
+  const stackBar = `<div class="stack"><i style="width:31%;background:var(--chart-1)"></i><i style="width:24%;background:var(--chart-2)"></i><i style="width:12%;background:var(--chart-3)"></i><i style="width:9%;background:var(--chart-4)"></i><i style="width:7%;background:var(--chart-5)"></i><i style="flex:1;background:var(--chart-rest)"></i></div>`;
+  const cards = [
+    { tint: 'var(--chart-rest)', html: `
+      <div class="vis">
+        <div class="label">Your recap</div>
+        <div class="h xl">September</div>
+        <div class="h xl muted" style="font-weight:500;margin-top:2px">2026</div>
+        <div class="ctx" style="margin-top:18px"><b>148 entries</b> across 30 days</div>
+        <div class="ctx">1–30 Sep · 9 cards · about 30 seconds</div>
+      </div>
+      ${stackBar}
+      <div class="foot"><span>UnMoney</span><a>Tap to start ${chev}</a></div>` },
+    { tint: 'var(--chart-8)', html: `
+      <div class="vis">
+        <div class="label">You spent</div>
+        <div class="num expense tabular">₹84,310</div>
+        <div class="ctx"><span class="delta income">${down} 8% less</span> than August</div>
+        <div class="ctx">about <b>₹2,810 a day</b></div>
+        <div style="margin-top:28px">
+          <div class="cbar"><span class="l">Aug</span><i style="width:100%"></i><span class="v tabular muted">₹91,600</span></div>
+          <div class="cbar now"><span class="l">Sep</span><i style="width:92%"></i><span class="v tabular">₹84,310</span></div>
+        </div>
+      </div>
+      <div class="foot"><span>The same figure as Expenses on Stats</span></div>` },
+    { tint: 'var(--chart-1)', html: `
+      <div class="label">Where it went</div>
+      <div class="h">Food took the biggest slice</div>
+      <div class="ctx"><b>₹26,140</b> · 46 entries · ₹568 each on average</div>
+      <div class="vis">
+        <div class="col">
+          <div style="flex:31;background:var(--chart-1)"><span>Food</span><span class="pc">31%</span></div>
+          <div style="flex:24;background:var(--chart-2)"><span>Household</span><span class="pc">24%</span></div>
+          <div style="flex:12;background:var(--chart-3)"><span>Transport</span><span class="pc">12%</span></div>
+          <div class="rest" style="flex:33;background:var(--chart-rest)"><span>11 other categories</span><span class="pc">33%</span></div>
+        </div>
+        <div class="legend">
+          <span class="sw" style="background:var(--chart-1)"></span><span>Food</span><span class="tabular">₹26,140</span>
+          <span class="sw" style="background:var(--chart-2)"></span><span>Household</span><span class="tabular">₹20,230</span>
+          <span class="sw" style="background:var(--chart-3)"></span><span>Transport</span><span class="tabular">₹10,120</span>
+          <span class="sw" style="background:var(--chart-rest)"></span><span class="muted">Everything else</span><span class="tabular muted">₹27,820</span>
+        </div>
+      </div>
+      <div class="foot"><span>14 categories in all</span><a>Open Stats ${chev}</a></div>` },
+    { tint: 'var(--chart-2)', html: `
+      <div class="vis">
+        <div class="label">Biggest single spend</div>
+        <div class="num expense tabular">₹18,400</div>
+        <div class="h">Flight to Goa</div>
+        <div class="ctx"><b>22%</b> of the month in one entry</div>
+        <div class="list" style="margin-top:22px">
+          <div class="rowx top"><span class="rk">1</span><div class="n">Flight to Goa<small>Travel · HDFC Credit Card · Fri 12 Sep</small></div><span class="expense tabular">₹18,400</span></div>
+          <div class="rowx"><span class="rk">2</span><div class="n">Rent<small>Household · HDFC Bank · Tue 1 Sep</small></div><span class="expense tabular">₹18,000</span></div>
+          <div class="rowx"><span class="rk">3</span><div class="n">Laptop repair<small>Other · Cash · Thu 24 Sep</small></div><span class="expense tabular">₹6,500</span></div>
+        </div>
+      </div>
+      <div class="foot"><span>Top three together: half the month</span><a>Open entry ${chev}</a></div>` },
+    { tint: 'var(--chart-4)', html: `
+      <div class="label">Your days</div>
+      <div class="h">Busiest: Sat 12 Sep</div>
+      <div class="ctx"><b>₹19,860</b> in 9 entries · the flight and dinner out</div>
+      <div class="vis">
+        <div class="bars"><span class="callout" style="left:40%">← Sat 12</span>${bars}</div>
+        <div class="axis"><span>1 Sep</span><span>8</span><span>15</span><span>22</span><span>30 Sep</span></div>
+        <div class="kv three">
+          <div><div class="label">No-spend</div><b>5 days</b></div>
+          <div><div class="label">Weekends</div><b>41%</b><small>of spend</small></div>
+          <div><div class="label">Per day</div><b>4.9</b><small>entries</small></div>
+        </div>
+      </div>
+      <div class="foot"><span>Lighter bars are weekends</span></div>` },
+    { tint: 'var(--chart-7)', html: `
+      <div class="vis">
+        <div class="label">On repeat</div>
+        <div class="h xl">"Coffee"</div>
+        <div class="ctx" style="margin-top:6px"><b>22 times</b> · ₹4,180 altogether · ₹190 each</div>
+        <div style="margin-top:22px">
+          <div class="cbar cnt top"><span class="l">Coffee</span><i style="width:100%"></i><span class="v tabular">22</span></div>
+          <div class="cbar cnt"><span class="l">Lunch</span><i style="width:64%"></i><span class="v tabular">14</span></div>
+          <div class="cbar cnt"><span class="l">Uber</span><i style="width:50%"></i><span class="v tabular">11</span></div>
+          <div class="cbar cnt"><span class="l">Groceries</span><i style="width:36%"></i><span class="v tabular">8</span></div>
+        </div>
+        <div class="kv">
+          <div><div class="label">Most used method</div><b>HDFC Credit</b><small>61% of spend</small></div>
+          <div><div class="label">Scheduled</div><b class="tabular">₹21,097</b><small>6 repeats</small></div>
+        </div>
+      </div>
+      <div class="foot"><span>Notes matched ignoring case</span></div>` },
+    { tint: 'var(--chart-5)', html: `
+      <div class="label">What changed since August</div>
+      <div class="h">Shopping doubled</div>
+      <div class="ctx">Transport and eating out fell</div>
+      <div class="vis">
+        <div class="tor"><div class="n">Shopping<small>₹4,100 → ₹8,900</small></div><div class="ax"><i class="up" style="width:50%"></i></div><div class="d expense">+₹4,800</div></div>
+        <div class="tor"><div class="n">Travel<small>₹0 → ₹18,400</small></div><div class="ax"><i class="up" style="width:50%"></i></div><div class="d expense">new</div></div>
+        <div class="tor"><div class="n">Transport<small>₹16,900 → ₹10,120</small></div><div class="ax"><i class="down" style="width:50%"></i></div><div class="d income">−40%</div></div>
+        <div class="tor"><div class="n">Eating out<small>₹9,300 → ₹6,900</small></div><div class="ax"><i class="down" style="width:30%"></i></div><div class="d income">−26%</div></div>
+      </div>
+      <div class="foot"><span>Only moves above 5% of the month's total</span></div>` },
+    { tint: 'var(--chart-3)', html: `
+      <div class="vis">
+        <div class="label">In vs out</div>
+        <div class="num tabular">30%</div>
+        <div class="h" style="margin-top:-4px">of what came in, kept</div>
+        <div class="inout"><i class="spent" style="width:70%">Spent ₹84,310</i><i class="kept" style="flex:1">Kept</i></div>
+        <div class="legend" style="margin-bottom:6px">
+          <span class="sw" style="background:var(--income)"></span><span>Income</span><span class="income tabular">₹1,20,000</span>
+          <span class="sw" style="background:var(--expense)"></span><span>Spent</span><span class="expense tabular">₹84,310</span>
+          <span class="sw" style="background:var(--chart-rest)"></span><span>Kept</span><span class="tabular">₹35,690</span>
+        </div>
+        <div class="kv"><div style="grid-column:1/-1"><div class="label">Budgets</div><b>4 of 5 held</b><small>Food went over by ₹1,140</small></div></div>
+      </div>
+      <div class="foot"><span>August: 24% kept</span></div>` },
+    { tint: 'var(--chart-rest)', html: `
+      <div class="label">Keep this one</div>
+      <div class="vis">
+        <div class="poster">
+          <div class="ph"><div><div class="pt">September<br><span>2026</span></div></div><span class="logo">UnMoney</span></div>
+          ${stackBar}
+          <div class="prow"><span>Spent</span><b class="expense tabular">₹84,310</b></div>
+          <div class="prow"><span>vs August</span><b class="income">↓ 8% less</b></div>
+          <div class="prow"><span>Top category</span><b>Food · 31%</b></div>
+          <div class="prow"><span>Biggest spend</span><b>Flight to Goa · ₹18,400</b></div>
+          <div class="prow"><span>Kept</span><b>30% of income</b></div>
+          <div class="prow"><span>No-spend days</span><b>5</b></div>
+          <div class="prow"><span>On repeat</span><b>"Coffee" ×22</b></div>
+          <div class="pf"><span>1–30 Sep · 148 entries</span><span>unmoney.vercel.app</span></div>
+        </div>
+        <div class="actions"><button class="btn primary">Open in Stats</button><button class="btn outline">Copy summary</button></div>
+      </div>
+      <div class="foot"><span>Every month's recap stays on Stats</span><a>Done</a></div>` },
+  ];
+  const names = ['Cover', 'Total spent', 'Where it went', 'Biggest single spend', 'Your days', 'On repeat', 'What changed (needs a previous month)', 'In vs out (needs income; budget line needs budgets)', 'Closer'];
+  const cardEl = (c, i) => `<section class="card" data-i="${i}" style="--tint:${c.tint}">${c.html}</section>`;
+  document.getElementById('cards').innerHTML = cards.map(cardEl).join('');
+  document.getElementById('all').innerHTML = cards.map((c, i) => `<div><div class="mini">${cardEl(c, i)}</div><div class="cap">${i + 1} · ${names[i]}</div></div>`).join('');
+  document.getElementById('deskcard').innerHTML = cardEl(cards[3], 3);
+  const segs = document.getElementById('segs');
+  segs.innerHTML = cards.map(() => '<i></i>').join('');
+  const els = [...document.querySelectorAll('#cards .card')];
+  let cur = 0;
+  function show(n) {
+    const prev = cur; cur = Math.max(0, Math.min(cards.length - 1, n));
+    els.forEach((el, i) => { el.classList.toggle('on', i === cur); el.classList.toggle('back', i < cur); });
+    [...segs.children].forEach((s, i) => { s.className = i < cur ? 'done' : i === cur ? 'now' : ''; });
+  }
+  show(0);
+  document.getElementById('zr').onclick = () => show(cur + 1);
+  document.getElementById('zl').onclick = () => show(cur - 1);
+  document.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') show(cur + 1); if (e.key === 'ArrowLeft') show(cur - 1); });
+  let sx = null;
+  const story = document.getElementById('story');
+  story.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; }, { passive: true });
+  story.addEventListener('touchend', (e) => { if (sx === null) return; const dx = e.changedTouches[0].clientX - sx; if (dx < -40) show(cur + 1); else if (dx > 40) show(cur - 1); sx = null; });
+  for (const b of document.querySelectorAll('[data-theme]')) b.onclick = () => { document.documentElement.dataset.theme = b.dataset.theme; for (const o of document.querySelectorAll('[data-theme]')) o.setAttribute('aria-pressed', o === b); };
+  for (const b of document.querySelectorAll('[data-tint]')) b.onclick = () => { document.documentElement.dataset.tint = b.dataset.tint; for (const o of document.querySelectorAll('[data-tint]')) o.setAttribute('aria-pressed', o === b); };
+</script>
+</body>
+</html>

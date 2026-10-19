@@ -1,7 +1,14 @@
 import { useMemo } from "react";
+import { ChevronRight, Sparkles } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useView } from "@/lib/store";
 import { statsByCategory, statsTrend } from "../../../shared/views";
+import { monthRecap } from "../../../shared/recap";
+import { monthKeyForDate } from "../../../shared/period";
+import { todayISO } from "../../../shared/dates";
+import { longMonth } from "@/pages/recap/cards";
+import { Row } from "@/components/shell/misc";
+import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { StatsHeaderBar } from "./PeriodBar";
 import { useStatPeriod } from "./period";
@@ -29,6 +36,10 @@ export default function StatsPage() {
   const rangeKey = ranges.map((r) => r.key).join(",");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const trend = useMemo(() => (mode === "trend" ? statsTrend(view, type, undefined, ranges) : undefined), [view, type, mode, rangeKey]);
+  // every finished logical month with enough entries keeps its recap here
+  const { settings } = useApp();
+  const finished = p.period === "monthly" && p.month < monthKeyForDate(todayISO(), settings.monthStartDay);
+  const recap = useMemo(() => (finished ? monthRecap(view, p.month) : null), [view, finished, p.month]);
   return (
     <>
       <PageHeader title={null} className="border-b-0" sub={<StatsHeaderBar />} />
@@ -41,6 +52,11 @@ export default function StatsPage() {
             </button>
           ))}
         </div>
+        {recap ? (
+          <div className="border-b bg-card">
+            <Row icon={<Sparkles />} label={`${longMonth(p.month)} recap`} hint={`${recap.cards.length} cards · what you spent, where, what changed`} right={<ChevronRight className="size-4 text-muted-foreground" />} onClick={() => nav(`/recap/${p.month}`)} />
+          </div>
+        ) : null}
         <div className="flex justify-end px-3 pt-2">
           <div className="flex rounded-md bg-muted p-0.5 text-xs">
             {(["list", "trend"] as const).map((m) => <button key={m} type="button" onClick={() => setMode(m)} className={cn("px-3 py-1 rounded-[5px] capitalize", mode === m ? "bg-background shadow-sm font-medium" : "text-muted-foreground")}>{m}</button>)}
