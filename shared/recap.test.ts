@@ -130,6 +130,11 @@ test("notes are grouped case-insensitively and trimmed; empty notes are skipped"
   const rep = card(monthRecap(f.snap, "2026-09")!.cards, "repeat")!;
   expect(rep.note).toEqual({ text: "coffee", count: 3, amount: 5800 });
   expect(rep.nextNotes).toEqual([]);
+  // up to three more notes, only ones seen at least twice
+  const g = fresh();
+  september(g);
+  for (const n of ["Lunch", "Uber", "Uber", "Gym", "Gym", "Tea"]) g.expense("2026-09-15", 100, "Food", n);
+  expect(card(monthRecap(g.snap, "2026-09")!.cards, "repeat")!.nextNotes).toEqual([{ text: "Uber", count: 3 }, { text: "Lunch", count: 2 }, { text: "Gym", count: 2 }]);
   expect(rep.scheduled).toBeUndefined();
   expect(rep.account).toEqual({ name: f.cash.name, share: 1 });
   expect(card(monthRecap(f.snap, "2026-09")!.cards, "closer")!.summary.repeat).toEqual({ text: "coffee", count: 3 });
@@ -151,18 +156,22 @@ test("biggest spend, days and the closer come from the same entries", () => {
   const big = card(r.cards, "biggest")!;
   expect(big.tx.note).toBe("Flight to Goa");
   expect(big.share).toBeCloseTo(184000 / 269100);
-  // an empty note falls back to the category name
-  expect(big.runnersUp).toEqual([{ note: "Rent", amount: 62000 }, { note: "Lunch", amount: 9800 }]);
+  expect(big.runnersUp.map((r) => [r.note, r.amount, r.tx.date])).toEqual([["Rent", 62000, "2026-09-01"], ["Lunch", 9800, "2026-09-13"]]);
+  expect(big.topShare).toBeCloseTo((184000 + 62000 + 9800) / 269100);
   const days = card(r.cards, "days")!;
   expect(days.perDay).toHaveLength(30);
   expect(days.busiest).toBe("2026-09-12");
+  expect(days.busiestNotes).toEqual(["Flight to Goa", "COFFEE"]);
   expect(days.perDay[11]).toEqual({ date: "2026-09-12", amount: 186100, count: 2 });
   expect(days.noSpend).toBe(30 - 7);
   // 1 Sep 2026 is a Tuesday, so the weekends are 5–6, 12–13, 19–20 and 26–27 Sep
   expect(days.weekendShare).toBeCloseTo((1900 + 186100 + 9800 + 4500 + 3000) / 269100);
   expect(days.entriesPerDay).toBeCloseTo(8 / 30);
   const closer = card(r.cards, "closer")!.summary;
-  expect(closer).toMatchObject({ spent: 269100, top: { name: "Transport" }, biggest: { note: "Flight to Goa", amount: 184000 }, noSpend: 23 });
+  expect(closer).toMatchObject({ spent: 269100, top: { name: "Transport" }, biggest: { note: "Flight to Goa", amount: 184000 }, noSpend: 23, entries: 8, range: r.range });
+  // the colour signature: the top three categories in Stats order, shared by the cover and the closer
+  expect(closer.strip.map((c) => c.name)).toEqual(["Transport", "Household", "Food"]);
+  expect(card(r.cards, "cover")!.strip).toEqual(closer.strip);
   expect(closer.keptPct).toBeUndefined();
 });
 
@@ -223,8 +232,9 @@ test("recapNudge with monthStartDay 25 counts the week from the 25th", () => {
 test("recapText writes the three-line summary", () => {
   const fmt = (n: number) => `₹${(n / 100).toLocaleString("en-IN")}`;
   expect(recapText({
+    range: { from: "2026-09-01", to: "2026-09-30" }, entries: 148, strip: [],
     spent: 8431000, change: -0.08, prevLabel: "August", top: { name: "Food", pct: 0.31 }, biggest: { note: "Flight to Goa", amount: 1840000 },
     keptPct: 30, noSpend: 5, repeat: { text: "Coffee", count: 22 },
   }, "September 2026", fmt)).toBe("September 2026 · UnMoney\nSpent ₹84,310 (8% less than Aug) · Top: Food 31% · Biggest: Flight to Goa ₹18,400\nKept 30% of income · 5 no-spend days · \"Coffee\" ×22");
-  expect(recapText({ spent: 100, noSpend: 1 }, "May 2026", fmt)).toBe("May 2026 · UnMoney\nSpent ₹1\n1 no-spend day");
+  expect(recapText({ range: { from: "2026-05-01", to: "2026-05-31" }, entries: 5, strip: [], spent: 100, noSpend: 1 }, "May 2026", fmt)).toBe("May 2026 · UnMoney\nSpent ₹1\n1 no-spend day");
 });

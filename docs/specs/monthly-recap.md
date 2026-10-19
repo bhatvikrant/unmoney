@@ -1,6 +1,6 @@
 # Spec: Monthly recap
 
-Status: draft · 2026-10-19 · mockup: [monthly-recap-mockup.html](monthly-recap-mockup.html) (open it in a browser; tap the phone to step through)
+Status: draft · 2026-10-19 (cards redesigned the same day) · mockup: [monthly-recap-mockup.html](monthly-recap-mockup.html) (open it in a browser; tap the phone to step through)
 
 ## 1. The idea, refined
 
@@ -78,36 +78,39 @@ Chrome:
 
 Every card has the same bones, top to bottom:
 
-1. `label`: xs uppercase tracked muted text, the app's section-label style.
-2. The one thing: either a **big number** (48 px, semibold, tabular, tight tracking; the expense colour when it is money spent) or a **headline sentence** (22 px semibold).
+1. `label`: xs uppercase tracked muted text, the app's section-label style, with a 6 px square in the card's tint colour before it.
+2. The one thing: either a **big number** (60 px, semibold, tabular, tracking −0.04em; the expense colour when it is money spent) or a **headline** (24 px semibold; 44 px for the cover month and the "On repeat" note).
 3. One or two **context lines**, 15 px muted, with the key figure in `foreground` medium weight.
-4. An optional small visual: a stacked bar, a 30-bar strip, two or three stat tiles.
-5. A **footnote** pinned to the bottom, xs muted: a second fact, and sometimes a link ("Open ›").
+4. A **visual that fills the middle** of the card (`flex: 1`, vertically centred). Every card has one; this is what keeps the cards from reading as a number sitting over empty space.
+5. A **footnote** pinned to the bottom, xs muted: a second fact, and sometimes a link ("Open entry ›").
 
-Type sizes above the app's usual 14 px are the only new scale; everything else is the existing tokens.
+Padding 56 px top (under the progress segments), 24 px sides, 28 px bottom. Type sizes above the app's usual 14 px are the only new scale; everything else is the existing tokens. Visual elements reuse the app's own shapes: bordered `bg-card` lists and tiles at the app's radius, rows with hairline dividers, 3 px-radius colour swatches.
 
 ### 4.2 Colour
 
 Each card gets a faint **tint**: one of the eight `--chart-N` hues mixed into the page background at 9% (14% in dark mode). That is what gives the run its Wrapped-like rhythm while staying inside the app's palette.
 
 - Mix with `color-mix(in srgb, …)`, not `oklch`: the app's greys are written as `oklch(… 0 0)` with an explicit hue of 0, and an oklch mix drags every tint toward red (found while building the mockup).
+- Text drawn on a solid chart colour (the stacked column on card 3) is a fixed near-black, `oklch(0.145 0 0)`, in both themes: it clears contrast on all three hues used there, white does not on the green.
 - The mockup has a "Plain cards" toggle. If the tint feels like too much, the plain variant is the same screens on `bg-background`, and nothing else changes.
 
 ### 4.3 The cards
 
 In order. "Skip when" lists the condition under which a card is left out.
 
-| # | Card | Lead-in | The one thing | Context | Skip when |
-|---|---|---|---|---|---|
-| 1 | Cover | `SEPTEMBER 2026 · 1–30 SEP` | "Your September recap" | entries and days tracked; card count; "Tap to start" | never |
-| 2 | Total spent | `YOU SPENT` | total expenses, expense colour | ↑/↓ % vs previous month (a drop is drawn in the income colour, a rise in the expense colour); daily average | never |
-| 3 | Where it went | `WHERE IT WENT` | "Food took the biggest slice" | stacked bar + top 3 categories with % and amount, then "N other categories"; footnote: top category's entry count and average | fewer than 2 categories |
-| 4 | Biggest single spend | `BIGGEST SINGLE SPEND` | the amount | note, category, payment method, date; "22% of the month in one go"; footnote: 2nd and 3rd; "Open ›" opens the entry | never (there is at least one entry) |
-| 5 | Your days | `YOUR DAYS` | "Busiest: Sat 12 Sep" | amount and entry count that day; 30-bar strip with the busiest bar solid and no-spend days as stubs; tiles: no-spend days, weekend share | never |
-| 6 | On repeat | `ON REPEAT` | most frequent note, e.g. "\"Coffee\" · 22 times" | total and average; tiles: most used payment method with its share, scheduled (repeat) entries' total and count; footnote: next two notes | no note appears 3+ times and no repeats (then the payment-method tile alone would be thin) |
-| 7 | What changed | `WHAT CHANGED SINCE AUGUST` | the biggest mover, e.g. "Shopping doubled" | up to 4 rows: risers (expense-tinted ↑) and fallers (income-tinted ↓), with before → after and the delta; footnote: the threshold | no previous month with entries, or no category moved by more than 5% of the month's total |
-| 8 | In vs out | `IN VS OUT` | "30%" + "of what came in, kept" | income / spent / kept rows and bar; a budgets tile ("4 of 5 held · Food went over by ₹1,140") when budgets exist; footnote: last month's kept % | no income that month (then budgets, if any, become their own small card) |
-| 9 | Closer | `SEPTEMBER IN ONE CARD` | six tiles: spent (with vs last month), top category, biggest spend, kept %, no-spend days, on repeat | buttons: **Open September in Stats** (primary), **Copy summary**; "Done" | never |
+| # | Card | Lead-in | The one thing | Visual in the middle | Footnote | Skip when |
+|---|---|---|---|---|---|---|
+| 1 | Cover | `YOUR RECAP` | "September" at 44 px, "2026" under it in muted | entry and day count, range, card count; a thin **category strip** (the month's colour signature, same order and colours as card 3) just above the footer | "UnMoney" · "Tap to start ›" | never |
+| 2 | Total spent | `YOU SPENT` | total expenses, 60 px, expense colour | ↓/↑ % vs previous month (a drop in the income colour, a rise in the expense colour) and the daily average; then **two horizontal bars**, Aug in muted grey at full width and Sep in the expense colour at its share, with the amounts at the end | "The same figure as Expenses on Stats" | never |
+| 3 | Where it went | `WHERE IT WENT` | "Food took the biggest slice" | top category's amount, entry count, average; a **tall stacked column** (190–280 px) with one block per top-3 category sized by share and the rest as a grey block, name left and % right inside each block; a four-row legend with amounts | "14 categories in all" · "Open Stats ›" | fewer than 2 categories |
+| 4 | Biggest single spend | `BIGGEST SINGLE SPEND` | the amount, 60 px, expense colour; the note as a 24 px headline | "22% of the month in one entry"; a **ranked bordered list** of the top three entries in the ledger's row style (rank, note, category · method · date, amount) | "Top three together: half the month" · "Open entry ›" | never |
+| 5 | Your days | `YOUR DAYS` | "Busiest: Sat 12 Sep" | amount and entry count that day; a **150 px bar strip**, one bar per day of the range, busiest solid, weekends slightly lighter, no-spend days as 3 px stubs, with a small "← Sat 12" callout; axis labels; three tiles: no-spend days, weekend share, entries per day | "Lighter bars are weekends" | never |
+| 6 | On repeat | `ON REPEAT` | the most frequent note in quotes, 44 px | count, total, average; **count bars** for the top four notes in the card's tint (top one solid, others at 35%); two tiles: most used payment method with its share, scheduled (repeat) entries' total and count | "Notes matched ignoring case" | no note appears 3+ times and no repeats |
+| 7 | What changed | `WHAT CHANGED SINCE AUGUST` | the biggest mover, e.g. "Shopping doubled" | one line naming the fallers; up to four **tornado rows**: name with before → after, a centred axis with a bar to the right (expense colour) for a rise or to the left (income colour) for a fall, bar length by the move's size relative to the biggest, and the delta | "Only moves above 5% of the month's total" | no previous month with entries, or no category moved by more than 5% of the month's total |
+| 8 | In vs out | `IN VS OUT` | "30%" at 60 px, "of what came in, kept" | a **48 px bar** split Spent (expense colour, labelled with the amount) / Kept (income colour); legend rows for income, spent, kept; a budgets tile ("4 of 5 held · Food went over by ₹1,140") when budgets exist | "August: 24% kept" | no income that month (then budgets, if any, become their own small card) |
+| 9 | Closer | `KEEP THIS ONE` | a **poster**: a `bg-card` card with the app's shadow and a 14 px radius, carrying "September / 2026" at 30 px, the UnMoney wordmark top right, the category strip, then seven hairline rows (Spent, vs August, Top category, Biggest spend, Kept, No-spend days, On repeat) and a small footer line (range · entry count · unmoney.vercel.app) | under the poster, two buttons side by side: **Open in Stats** (primary) and **Copy summary** (outline) | "Every month's recap stays on Stats" · "Done" | never |
+
+The closer is the only card whose content sits in an inset card rather than on the tint: the poster is the thing to keep (and, later, to share as an image), and the actions stay outside it so a screenshot of the poster is clean. Its tint is the neutral `--chart-rest`.
 
 Wording rules:
 
@@ -125,7 +128,7 @@ Spent ₹84,310 (8% less than Aug) · Top: Food 31% · Biggest: Flight to Goa �
 Kept 30% of income · 5 no-spend days · "Coffee" ×22
 ```
 
-Sharing an image of the closer card is a later step (needs an html-to-image dependency); the text copy is enough for v1.
+Sharing an image of the poster is a later step (needs an html-to-image dependency); the text copy is enough for v1.
 
 ### 4.4 Edge cases
 

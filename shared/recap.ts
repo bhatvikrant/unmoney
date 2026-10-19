@@ -20,8 +20,14 @@ export const RECAP_REPEAT_MIN = 3;
 
 export type RecapBudgets = { held: number; total: number; worst?: { name: string; over: number } };
 
+/** The month's colour signature: the top three categories by share, in Stats order; everything else is the grey rest. */
+export type RecapStrip = { id: string; name: string; pct: number }[];
+
 /** The six tiles of the closer card and the lines of the text summary. */
 export type RecapSummary = {
+  range: Range;
+  entries: number;
+  strip: RecapStrip;
   spent: number;
   /** Change vs the previous month as a signed fraction (-0.08 is 8% less). */
   change?: number;
@@ -34,11 +40,11 @@ export type RecapSummary = {
 };
 
 export type RecapCard =
-  | { kind: "cover"; range: Range; entries: number; days: number; count: number }
+  | { kind: "cover"; range: Range; entries: number; days: number; count: number; strip: RecapStrip }
   | { kind: "total"; amount: number; prev?: number; change?: number; prevLabel?: string; perDay: number }
   | { kind: "categories"; total: number; top: { id: string; name: string; amount: number; pct: number }[]; rest: { count: number; amount: number; pct: number }; lead: { count: number; avg: number } }
-  | { kind: "biggest"; tx: Tx; share: number; runnersUp: { note: string; amount: number }[] }
-  | { kind: "days"; perDay: { date: ISODate; amount: number; count: number }[]; busiest: ISODate; noSpend: number; weekendShare: number; entriesPerDay: number }
+  | { kind: "biggest"; tx: Tx; share: number; runnersUp: { note: string; amount: number; tx: Tx }[]; topShare: number }
+  | { kind: "days"; perDay: { date: ISODate; amount: number; count: number }[]; busiest: ISODate; busiestNotes: string[]; noSpend: number; weekendShare: number; entriesPerDay: number }
   | { kind: "repeat"; note?: { text: string; count: number; amount: number }; nextNotes: { text: string; count: number }[]; account?: { name: string; share: number }; scheduled?: { amount: number; count: number } }
   | { kind: "changes"; prevLabel: string; movers: { id: string; name: string; before: number; after: number; pct?: number }[]; threshold: number }
   | { kind: "inout"; income: number; spent: number; keptPct: number; prevKeptPct?: number; budgets?: RecapBudgets }
@@ -90,7 +96,8 @@ export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
   const prevLabel = longMonth(prevKey);
 
   const cards: RecapCard[] = [];
-  const cover: RecapCard = { kind: "cover", range, entries: entries.length, days, count: 0 };
+  const strip: RecapStrip = byCat.items.slice(0, 3).map(({ id, name, pct }) => ({ id, name, pct }));
+  const cover: RecapCard = { kind: "cover", range, entries: entries.length, days, count: 0, strip };
   cards.push(cover);
 
   // 2 · total spent
@@ -115,9 +122,11 @@ export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
   const ranked = [...entries].sort((a, b) => b.amount - a.amount || a.t.date.localeCompare(b.t.date));
   const label = (e: (typeof entries)[number]) => e.t.note.trim() || (nameOf.get(e.bucket) ?? "Uncategorised");
   const biggest = ranked[0];
+  const topThree = ranked.slice(0, 3);
   cards.push({
     kind: "biggest", tx: biggest.t, share: total ? biggest.amount / total : 0,
-    runnersUp: ranked.slice(1, 3).map((e) => ({ note: label(e), amount: e.amount })),
+    runnersUp: ranked.slice(1, 3).map((e) => ({ note: label(e), amount: e.amount, tx: e.t })),
+    topShare: total ? topThree.reduce((s, e) => s + e.amount, 0) / total : 0,
   });
 
   // 5 · your days
@@ -136,7 +145,9 @@ export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
   let busiest = perDay[0];
   for (const d of perDay) if (d.amount > busiest.amount) busiest = d;
   const noSpend = perDay.filter((d) => d.amount === 0).length;
-  cards.push({ kind: "days", perDay, busiest: busiest.date, noSpend, weekendShare: total ? weekendAmount / total : 0, entriesPerDay: entries.length / days });
+  // the two largest entries of the busiest day, by note, for "the flight and dinner out"
+  const busiestNotes = entries.filter((e) => e.t.date === busiest.date).sort((a, b) => b.amount - a.amount).slice(0, 2).map(label);
+  cards.push({ kind: "days", perDay, busiest: busiest.date, busiestNotes, noSpend, weekendShare: total ? weekendAmount / total : 0, entriesPerDay: entries.length / days });
 
   // 6 · on repeat: notes grouped case-insensitively and trimmed; empty notes skipped
   const notes = new Map<string, { text: string; count: number; amount: number }>();
@@ -161,7 +172,7 @@ export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
     cards.push({
       kind: "repeat",
       note: topNote,
-      nextNotes: byCount.slice(1, 3).filter((n) => n.count >= 2).map(({ text, count }) => ({ text, count })),
+      nextNotes: byCount.slice(1, 4).filter((n) => n.count >= 2).map(({ text, count }) => ({ text, count })),
       account: { name: accName, share: total ? accAmount / total : 0 },
       scheduled,
     });
@@ -199,6 +210,7 @@ export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
 
   // 9 · closer
   const summary: RecapSummary = {
+    range, entries: entries.length, strip,
     spent: total, change, prevLabel: prevCat ? prevLabel : undefined,
     top: byCat.items[0] ? { name: byCat.items[0].name, pct: byCat.items[0].pct } : undefined,
     biggest: { note: label(biggest), amount: biggest.amount },
