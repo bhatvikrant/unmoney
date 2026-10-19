@@ -148,6 +148,8 @@ export default defineSchema({
     startDate: v.string(),
     endDate: v.optional(v.string()),
     nextDate: v.string(),
+    /** Switched off because its account or category was deleted; restoring that switches it back on. */
+    pausedForDeleted: v.optional(v.boolean()),
     installmentCount: v.optional(v.number()),
     template: template,
     active: v.boolean(),
