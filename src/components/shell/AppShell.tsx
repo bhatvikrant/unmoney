@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useCallback } from "react";
-import { BookOpen, ChartPie, Settings, WalletCards } from "lucide-react";
+import { ChartPie, ReceiptText, Settings, WalletCards } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MONTH_SHORT, parts, todayISO } from "../../../shared/dates";
 import { useAdoptAccountKinds, useApp, useAutoRefreshRates, useCatchUpRepeats } from "@/lib/app";
@@ -10,7 +10,7 @@ import { useIosInstallHint } from "@/lib/pwa";
 import { MoneyManagerPrompt, usePendingImportToasts } from "@/components/MoneyManagerPrompt";
 
 const tabs = [
-  { to: "/", icon: BookOpen, label: "Trans." },
+  { to: "/", icon: ReceiptText, label: "Trans." },
   { to: "/stats", icon: ChartPie, label: "Stats" },
   { to: "/payment-methods", icon: WalletCards, label: "Payment methods" },
   { to: "/settings", icon: Settings, label: "More" },
