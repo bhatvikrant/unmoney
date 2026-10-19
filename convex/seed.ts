@@ -11,23 +11,25 @@ export const demo = internalMutation({
     if (!user) throw new Error("No user with that email");
     const userId = user._id;
     const groups = await ctx.db.query("accountGroups").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
-    const g = (kind: string) => groups.find((x) => x.kind === kind)!._id;
+    /** A default group by name, if the user still has it. */
+    const g = (name: string) => groups.find((x) => x.name === name && !x.deletedAt)?._id;
     const cats = await ctx.db.query("categories").withIndex("by_user_type", (q) => q.eq("userId", userId).eq("type", "expense")).collect();
     const inc = await ctx.db.query("categories").withIndex("by_user_type", (q) => q.eq("userId", userId).eq("type", "income")).collect();
     const c = (name: string) => cats.find((x) => x.name === name && !x.parentId)!._id;
     const i = (name: string) => inc.find((x) => x.name === name)!._id;
     const existing = await ctx.db.query("accounts").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
     const byName = (n: string) => existing.find((a) => a.name === n)?._id;
-    const acc = async (name: string, groupId: Id<"accountGroups">, extra: Record<string, unknown> = {}, initial = 0) =>
-      byName(name) ?? (await ctx.db.insert("accounts", { userId, groupId, name, initialBalance: initial, includeInTotals: true, hidden: false, order: existing.length + 10, transferAsExpense: false, ...extra } as never));
-    const cash = await acc("Cash", g("cash"), {}, 12000);
-    const bank = await acc("Bank", g("bank"), {}, 250000);
-    const hibd = await acc("HIBD", g("bank"), {}, 480000);
-    const card = await acc("Card", g("card"), { billingAccountId: bank, settlementDay: 1, paymentDay: 15 });
-    const travel = await acc("HIBD Travel", g("card"), { billingAccountId: hibd, settlementDay: 15, paymentDay: 28 });
-    const debit = await acc("RBO Debit Card", g("debitCard"), { linkedAccountId: hibd });
-    const saving = await acc("RBO Saving", g("savings"), { transferAsExpense: true }, 10000);
-    const loan = await acc("Car loan", g("loan"), {}, -1200000);
+    const acc = async (name: string, kind: string, groupId: Id<"accountGroups"> | undefined, extra: Record<string, unknown> = {}, initial = 0) =>
+      byName(name) ?? (await ctx.db.insert("accounts", { userId, groupId, kind, name, initialBalance: initial, includeInTotals: true, hidden: false, order: existing.length + 10, transferAsExpense: false, ...extra } as never));
+    const cash = await acc("Cash", "cash", g("Cash"), {}, 12000);
+    const bank = await acc("Bank", "bank", g("Bank accounts"), {}, 250000);
+    const hibd = await acc("HIBD", "bank", g("Bank accounts"), {}, 480000);
+    const card = await acc("Card", "card", g("Credit cards"), { billingAccountId: bank, settlementDay: 1, paymentDay: 15 });
+    const travel = await acc("HIBD Travel", "card", g("Credit cards"), { billingAccountId: hibd, settlementDay: 15, paymentDay: 28 });
+    const debit = await acc("RBO Debit Card", "debitCard", g("Debit cards"), { linkedAccountId: hibd });
+    const saving = await acc("RBO Saving", "savings", undefined, { transferAsExpense: true }, 10000);
+    const loan = await acc("Car loan", "loan", undefined, {}, -1200000);
+    await acc("GPay", "upi", g("UPIs"), { linkedAccountId: hibd });
     // subcategories
     const eating = await ctx.db.insert("categories", { userId, type: "expense", name: "Eating out", parentId: c("Food"), order: 100 });
     await ctx.db.insert("categories", { userId, type: "expense", name: "Groceries", parentId: c("Food"), order: 101 });

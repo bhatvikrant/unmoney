@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bookmark, CalendarDays, Landmark, StickyNote, Tag, Trash2, X } from "lucide-react";
+import { Bookmark, CalendarDays, StickyNote, Tag, Trash2, WalletCards, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useOp, useView } from "@/lib/store";
@@ -65,7 +65,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   const pickAccount = (accountId: Id<"accounts">) => run(async () => {
     await bulkUpdate({ ids: ids(), accountId });
     const skipped = chosen.filter((t) => t.type === "transfer" && t.toAccountId === accountId).length;
-    return skipped ? `Account set on ${n - skipped}; ${skipped} transfer${skipped === 1 ? "" : "s"} to that account skipped` : undefined;
+    return skipped ? `Payment method set on ${n - skipped}; ${skipped} transfer${skipped === 1 ? "" : "s"} to it skipped` : undefined;
   });
 
   // Bookmark every selected entry; if they are all bookmarked already, this removes those bookmarks instead.
@@ -101,7 +101,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
           <div className="flex items-center gap-2 p-3 pt-1 overflow-x-auto">
             <Button variant="outline" size="sm" disabled={off} onClick={() => setEdit("date")}><CalendarDays className="size-4" />Date</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={() => setSheet("category")}><Tag className="size-4" />Category</Button>
-            <Button variant="outline" size="sm" disabled={off} onClick={() => setSheet("account")}><Landmark className="size-4" />Asset</Button>
+            <Button variant="outline" size="sm" disabled={off} onClick={() => setSheet("account")}><WalletCards className="size-4" />Payment method</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={() => setEdit("note")}><StickyNote className="size-4" />Note</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={toggleBookmarks}><Bookmark className="size-4" />{allMarked ? "Unbookmark" : "Bookmark"}</Button>
             <Button variant="destructive" size="sm" disabled={off} onClick={() => setEdit("delete")}><Trash2 className="size-4" />Delete</Button>
@@ -109,7 +109,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
         </div>
       </div>
       <CategoryPicker open={sheet === "category"} onOpenChange={(o) => !o && setSheet(null)} type={catType} onPick={pickCategory} />
-      <AccountPicker open={sheet === "account"} onOpenChange={(o) => !o && setSheet(null)} onPick={pickAccount} title="Move to account" />
+      <AccountPicker open={sheet === "account"} onOpenChange={(o) => !o && setSheet(null)} onPick={pickAccount} title="Move to payment method" />
       <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
         <DialogContent>
           <DialogHeader>
