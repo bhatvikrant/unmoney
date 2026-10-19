@@ -14,7 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { amountInput, LOCALE_DECIMAL } from "@/lib/format";
 import { toMinor } from "../../../shared/money";
-import { ACCOUNT_KINDS, type AccountKind } from "../../../shared/defaults";
+import { ACCOUNT_KINDS, cardColorOf, type AccountKind } from "../../../shared/defaults";
+import { CardColorPicker, CardFace } from "@/components/CardFace";
 import { NO_GROUP, NO_GROUP_NAME } from "../../../shared/views";
 
 /** Select value for "no linked account" (a Select item cannot have an empty value). */
@@ -40,6 +41,9 @@ export default function AccountEditor() {
     settlementDay: String(existing?.settlementDay ?? 1),
     paymentDay: String(existing?.paymentDay ?? 15),
     linkedAccountId: (existing?.linkedAccountId ?? "") as string,
+    bankName: existing?.bankName ?? "",
+    last4: existing?.last4 ?? "",
+    color: existing?.color ?? "",
   }), [existing, settings.decimals]);
   const [f, setF] = useState(initial);
   const [confirm, setConfirm] = useState(false);
@@ -47,6 +51,7 @@ export default function AccountEditor() {
   const update = useOp("accounts.update");
   const remove = useOp("accounts.remove");
   const kind = f.kind;
+  const isCard = kind === "card" || kind === "debitCard";
   const transferable = !["cash", "bank", "card", "debitCard", "upi"].includes(kind);
   // Something a card can bill or a linked method can draw from: not a card, and not itself drawing from another account.
   const others = accounts.filter((a) => a._id !== id && a.kind !== "card" && !a.linked);
@@ -59,7 +64,11 @@ export default function AccountEditor() {
         billingAccountId: kind === "card" && f.billingAccountId ? (f.billingAccountId as Id<"accounts">) : undefined,
         settlementDay: kind === "card" ? Number(f.settlementDay) : undefined, paymentDay: kind === "card" ? Number(f.paymentDay) : undefined,
         linkedAccountId: (kind === "debitCard" || kind === "upi") && f.linkedAccountId && f.linkedAccountId !== NONE ? (f.linkedAccountId as Id<"accounts">) : undefined,
+        bankName: isCard ? f.bankName.trim() || undefined : undefined,
+        last4: isCard ? f.last4 || undefined : undefined,
+        color: isCard ? f.color || undefined : undefined,
       };
+      if (args.last4 && args.last4.length !== 4) throw new Error("Enter all 4 last digits, or leave them empty");
       if (id) await update({ id: id as Id<"accounts">, ...args }); else await create(args);
       if (id) goBack("/payment-methods"); else nav("/payment-methods");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
@@ -70,7 +79,6 @@ export default function AccountEditor() {
     <>
       <PageHeader back title={id ? "Edit payment method" : "New payment method"} right={<Button size="sm" onClick={save} disabled={!f.name.trim()}>Save</Button>} />
       <Page className="p-4 space-y-4 pb-10">
-        <div className="space-y-1.5"><Label>Name</Label><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus={!id} /></div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5"><Label>Type</Label>
             <Select value={f.kind} onValueChange={(v) => setF({ ...f, kind: v as AccountKind })}><SelectTrigger className="w-full" aria-label="Type"><SelectValue /></SelectTrigger><SelectContent>{ACCOUNT_KINDS.map((k) => <SelectItem key={k.kind} value={k.kind}>{k.label}</SelectItem>)}</SelectContent></Select>
@@ -79,6 +87,17 @@ export default function AccountEditor() {
             <Select value={f.groupId} onValueChange={(v) => setF({ ...f, groupId: v })}><SelectTrigger className="w-full" aria-label="Group"><SelectValue /></SelectTrigger><SelectContent>{liveGroups.map((g) => <SelectItem key={g._id} value={g._id}>{g.name}</SelectItem>)}<SelectItem value={NO_GROUP}>{NO_GROUP_NAME}</SelectItem></SelectContent></Select>
           </div>
         </div>
+        {isCard ? (
+          // The card is the form: name, bank and last digits are typed onto it.
+          <div className="space-y-3">
+            <CardFace kind={kind} name={f.name} bankName={f.bankName} last4={f.last4} color={f.color || cardColorOf({ kind })} className="mx-auto"
+              edit={{ autoFocus: !id, onChange: (field, value) => setF((p) => ({ ...p, [field]: value })) }} />
+            <p className="text-center text-xs text-muted-foreground">Tap the card to type its name. Bank and last 4 digits are optional, just to tell your cards apart.</p>
+            <div className="flex justify-center"><CardColorPicker value={f.color || cardColorOf({ kind })} onChange={(color) => setF((p) => ({ ...p, color }))} /></div>
+          </div>
+        ) : (
+          <div className="space-y-1.5"><Label htmlFor="pm-name">Name</Label><Input id="pm-name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus={!id} /></div>
+        )}
         <div className="space-y-1.5"><Label>{id ? "Opening balance" : "Current balance"} ({settings.mainCurrency})</Label><Input inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /><p className="text-xs text-muted-foreground">A negative amount records a liability (loan, overdraft, card debt).</p></div>
         {kind === "card" ? (
           <div className="rounded-lg border p-3 space-y-3">

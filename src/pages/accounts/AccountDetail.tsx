@@ -22,6 +22,8 @@ import { parseMonthKey, yearRange } from "../../../shared/period";
 import { todayISO } from "../../../shared/dates";
 import { useToday } from "@/lib/today";
 import { toMinor } from "../../../shared/money";
+import { cardColorOf } from "../../../shared/defaults";
+import { CardFace } from "@/components/CardFace";
 
 export default function AccountDetail() {
   const { id } = useParams();
@@ -46,6 +48,11 @@ export default function AccountDetail() {
         <Select value={gran} onValueChange={(v) => setGran(v as typeof gran)}><SelectTrigger className="h-8 w-16"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">D</SelectItem><SelectItem value="monthly">M</SelectItem><SelectItem value="yearly">Y</SelectItem></SelectContent></Select></>}
         sub={<div className="mx-auto max-w-3xl"><MonthNav label={gran === "yearly" ? String(parseMonthKey(month).y) : monthLabel(month)} onPrev={() => shift(gran === "yearly" ? -12 : -1)} onNext={() => shift(gran === "yearly" ? 12 : 1)} /></div>} />
       <Page className="pb-8">
+        {data.kind === "card" || data.kind === "debitCard" ? (
+          <div className="px-4 pt-4 pb-1">
+            <CardFace kind={data.kind} name={a.name} bankName={a.bankName} last4={a.last4} color={cardColorOf({ kind: data.kind, color: a.color })} className="mx-auto sm:mx-0" />
+          </div>
+        ) : null}
         <div className="flex items-center justify-between px-4 py-2">
           <div>
             <div className="text-xs text-muted-foreground">{data.kind === "card" ? "Card balance today" : "Balance today"}</div>

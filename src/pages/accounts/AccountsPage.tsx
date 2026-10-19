@@ -12,6 +12,8 @@ import { Money } from "@/components/shell/Money";
 import { EmptyState } from "@/components/shell/misc";
 import { cn } from "@/lib/utils";
 import { MoveToGroupSheet } from "./MoveToGroupSheet";
+import { CardThumb } from "@/components/CardFace";
+import { cardColorOf } from "../../../shared/defaults";
 
 export default function AccountsPage() {
   const nav = useNavigate();
@@ -73,7 +75,11 @@ export default function AccountsPage() {
                     const row = cn("w-full flex items-center gap-3 px-4 py-3 border-b last:border-b-0 text-sm hover:bg-accent/40 text-left", selected.has(a._id) && "bg-primary/10");
                     const body = (
                       <>
-                        <span className="flex-1 truncate">{a.name}</span>
+                        {a.kind === "card" || a.kind === "debitCard" ? <CardThumb color={cardColorOf(a)} /> : null}
+                        <span className="flex-1 min-w-0">
+                          <span className="block truncate">{a.name}</span>
+                          {a.bankName || a.last4 ? <span className="block truncate text-xs text-muted-foreground">{[a.bankName, a.last4 && `•• ${a.last4}`].filter(Boolean).join(" · ")}</span> : null}
+                        </span>
                         {a.kind === "card" ? (
                           <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><Money amount={a.payable ?? 0} kind="expense" /><div className="text-[10px] text-muted-foreground"><Money amount={a.balance} muted /></div></span><span><Money amount={a.outstanding ?? 0} kind="expense" />{a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={-a.upcoming} sign muted /> upcoming</div> : null}</span></span>
                         ) : a.linked ? (
