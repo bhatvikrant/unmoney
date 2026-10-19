@@ -1,6 +1,7 @@
 import { useOp } from "@/lib/store";
 import { useMemo, useState } from "react";
 import { useApp } from "@/lib/app";
+import { getRates } from "@/lib/fxRates";
 import { CURRENCIES } from "../../../shared/currencies";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -30,7 +31,7 @@ export default function CurrencySettings() {
         <Section title="Change main currency">
           <div className="p-3"><Input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           <div className="max-h-80 overflow-y-auto">
-            {list.map((c) => <button key={c.code} type="button" onClick={() => setPicking(c.code)} className={cn("w-full flex justify-between px-4 py-2.5 text-sm border-t hover:bg-accent/40")}><span>{c.name}</span><span className="text-muted-foreground">{c.code} · {c.symbol}</span></button>)}
+            {list.map((c) => <button key={c.code} type="button" onClick={() => { setPicking(c.code); void getRates(c.code); }} className={cn("w-full flex justify-between px-4 py-2.5 text-sm border-t hover:bg-accent/40")}><span>{c.name}</span><span className="text-muted-foreground">{c.code} · {c.symbol}</span></button>)}
           </div>
         </Section>
       </Page>
