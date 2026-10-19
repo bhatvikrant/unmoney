@@ -20,6 +20,7 @@ import { RepeatSheet, repeatLabel, type RepeatChoice } from "@/components/tx/Rep
 import { PhotoField, TagInput } from "@/components/tx/fields";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
@@ -139,6 +140,7 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
   const closeEntry = useCloseEntry();
   const openEntry = useOpenEntry();
   const undoable = useUndoableDelete();
+  const ask = useConfirm();
   const { settings, accountName, categoryLabel, currencies, fmt, accounts } = useApp();
   const [f, setF] = useState<Form>(initial);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -426,7 +428,7 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
         <div className="mx-auto max-w-3xl space-y-2 p-3">
           {isEdit ? (
             <div className="grid grid-cols-3 gap-2">
-              <Button variant="outline" className="h-10 text-destructive hover:text-destructive" onClick={() => (inSeries ? setConfirm("delete") : void undoable.entry(id!).then(() => closeEntry()))}><Trash2 className="size-4" />Delete</Button>
+              <Button variant="outline" className="h-10 text-destructive hover:text-destructive" onClick={async () => { if (inSeries) return setConfirm("delete"); if (await ask({ title: "Delete this entry?", description: "You can undo this for a few seconds afterwards." })) void undoable.entry(id!).then(() => closeEntry()); }}><Trash2 className="size-4" />Delete</Button>
               <Button variant="outline" className="h-10" onClick={() => setConfirm("copy")}><Copy className="size-4" />Copy</Button>
               <Button variant="outline" className={cn("h-10", bookmarked && "border-amber-400/60 text-amber-500 hover:text-amber-500")} aria-pressed={!!bookmarked} onClick={toggleBookmark}>
                 <Star key={bookmarked ? "on" : "off"} className={cn("size-4", bookmarked && "fill-current animate-in zoom-in-50 duration-300")} />
