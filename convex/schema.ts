@@ -157,6 +157,8 @@ export default defineSchema({
     installmentIndex: v.optional(v.number()),
     installmentCount: v.optional(v.number()),
     installmentTotal: v.optional(v.number()),
+    /** The shared expense this entry was handed to UnSplit as (src/lib/unsplit.ts). */
+    split: v.optional(v.object({ app: v.literal("unsplit"), expenseId: v.string() })),
     /** The mail this entry was read from (Gmail sync), so its detail screen can link back to it. */
     source: v.optional(v.object({ app: v.literal("gmail"), messageId: v.string() })),
   })
