@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
 import { bookmarksList, noteSuggestions, txGet, txTags, type TxDetail } from "../../../shared/views";
-import { useApp } from "@/lib/app";
+import { useApp, useRefreshRates } from "@/lib/app";
+import { staleLabel, useFxState } from "@/lib/fxRates";
 import { todayISO } from "../../../shared/dates";
 import { evaluateExpression, toMajor, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -41,6 +42,8 @@ type Form = {
   subCurrency: string;
   subAmount: string;
   rate?: number;
+  /** The rate came from the feed when the currency was picked (not saved with the entry, not typed in). */
+  rateFromFeed?: boolean;
   note: string;
   description: string;
   tags: string[];
@@ -147,6 +150,24 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   const suggestions = useMemo(() => (wantSuggestions ? noteSuggestions(view, f.note, f.type) : undefined), [view, wantSuggestions, f.note, f.type]);
 
   const sub = f.subCurrency ? currencies.find((c) => c.code === f.subCurrency) : undefined;
+  const refreshRates = useRefreshRates();
+  const fx = useFxState(settings.mainCurrency);
+  const rateAge = sub && f.rateFromFeed ? staleLabel(fx) : null;
+  const ratesAge = staleLabel(fx, "Rates");
+
+  /** Use the latest rate for a newly picked currency; an entry keeps the rate it was saved with. */
+  function pickCurrency(c: (typeof currencies)[number]) {
+    const keep = existing?.subCurrency === c.code && existing.exchangeRate ? existing.exchangeRate : undefined;
+    const fromFeed = !keep && !c.isCustom;
+    setF((p) => ({ ...p, subCurrency: c.code, rate: keep ?? c.rate, rateFromFeed: fromFeed, subAmount: p.subAmount || p.amount }));
+    setSheet(null);
+    if (!fromFeed) return;
+    void refreshRates().then((r) => {
+      const latest = r && !r.fallback ? r.rates[c.code] : undefined;
+      if (latest) setF((p) => (p.subCurrency === c.code && p.rateFromFeed ? { ...p, rate: latest } : p));
+    });
+  }
+
   const mainMajor = useMemo(() => {
     if (!sub) return evaluateExpression(f.amount);
     const s = evaluateExpression(f.subAmount);
@@ -306,14 +327,17 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
                 </>
               )}
               <Button variant="ghost" size="icon" className="size-8" aria-label="Calculator" onClick={() => setSheet("keypad")}><Calculator className="size-4" /></Button>
-              {currencies.length ? <Button variant="ghost" size="icon" className={cn("size-8", sub && "text-primary")} aria-label="Currency" onClick={() => setSheet("currency")}><Globe className="size-4" /></Button> : null}
+              {currencies.length ? <Button variant="ghost" size="icon" className={cn("size-8", sub && "text-primary")} aria-label="Currency" onClick={() => { setSheet("currency"); void refreshRates(); }}><Globe className="size-4" /></Button> : null}
             </div>
           </Field>
           {sub ? (
             <Field label="Converted">
               <div className="flex-1 flex items-center gap-2 text-sm">
-                <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value); const s = evaluateExpression(f.subAmount); if (m && s) set("rate", s / m); }} />
-                <span className="text-xs text-muted-foreground whitespace-nowrap">1 {settings.mainCurrency} = {f.rate ? (Math.round(f.rate * 10000) / 10000) : "?"} {sub.code}</span>
+                <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value); const s = evaluateExpression(f.subAmount); if (m && s) setF((p) => ({ ...p, rate: s / m, rateFromFeed: false })); }} />
+                <span className="flex flex-col items-end text-xs text-muted-foreground whitespace-nowrap">
+                  <span>1 {settings.mainCurrency} = {f.rate ? (Math.round(f.rate * 10000) / 10000) : "?"} {sub.code}</span>
+                  {rateAge ? <span className="text-[11px] text-muted-foreground/80">{rateAge}</span> : null}
+                </span>
               </div>
             </Field>
           ) : null}
@@ -397,13 +421,14 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
       <RepeatSheet open={sheet === "repeat"} onOpenChange={(o) => !o && setSheet(null)} value={f.repeat} onChange={(r) => set("repeat", r)} />
       <BottomSheet open={sheet === "currency"} onOpenChange={(o) => !o && setSheet(null)} title="Currency">
         <div className="grid grid-cols-2 gap-1.5 px-2">
-          <button type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", !sub && "bg-accent")} onClick={() => { setF((p) => ({ ...p, subCurrency: "", subAmount: "", rate: undefined })); setSheet(null); }}>{settings.mainCurrency} <span className="text-muted-foreground text-xs">main</span></button>
+          <button type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", !sub && "bg-accent")} onClick={() => { setF((p) => ({ ...p, subCurrency: "", subAmount: "", rate: undefined, rateFromFeed: false })); setSheet(null); }}>{settings.mainCurrency} <span className="text-muted-foreground text-xs">main</span></button>
           {currencies.map((c) => (
-            <button key={c._id} type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", sub?.code === c.code && "bg-accent")} onClick={() => { setF((p) => ({ ...p, subCurrency: c.code, rate: c.rate, subAmount: p.subAmount || p.amount })); setSheet(null); }}>
+            <button key={c._id} type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", sub?.code === c.code && "bg-accent")} onClick={() => pickCurrency(c)}>
               {c.code} <span className="text-muted-foreground text-xs">1 {settings.mainCurrency} = {c.rate}</span>
             </button>
           ))}
         </div>
+        {ratesAge ? <p className="text-xs text-muted-foreground mt-3 px-2">{ratesAge}</p> : null}
         <button type="button" className="text-xs text-muted-foreground underline mt-3 px-2" onClick={() => { setSheet(null); nav("/settings/sub-currencies"); }}>Manage sub-currencies and rates</button>
       </BottomSheet>
 
