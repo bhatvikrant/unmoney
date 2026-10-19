@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowLeftRight, Calculator, Globe, Repeat, Star, Copy, Trash2 } from "lucide-react";
+import { ArrowLeftRight, Calculator, Globe, Repeat, Star, Copy, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
@@ -53,7 +53,8 @@ type Form = {
   repeat: RepeatChoice;
 };
 
-export default function TransactionEditor() {
+/** `panel`: shown beside the ledger on a wide screen (EntryRoute) rather than as its own screen. */
+export default function TransactionEditor({ panel = false }: { panel?: boolean }) {
   const { id } = useParams();
   const [sp] = useSearchParams();
   const view = useView();
@@ -121,12 +122,12 @@ export default function TransactionEditor() {
   }, [id, existing, bookmarks, sp]);
 
   if (!initial) return <div className="p-8 text-center text-sm text-muted-foreground">{id ? "Entry not found" : "Loading…"}</div>;
-  return <Editor key={realId ?? "new"} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} />;
+  return <Editor key={realId ?? "new"} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} panel={panel} />;
 }
 
 type Existing = TxDetail;
 
-function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transactions">; existing?: Existing }) {
+function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"transactions">; existing?: Existing; panel: boolean }) {
   const nav = useNavigate();
   const goBack = useGoBack();
   const undoable = useUndoableDelete();
@@ -269,8 +270,8 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
 
   return (
     <>
-      <PageHeader back title={title} />
-      <Page className={isEdit ? "pb-36" : "pb-24"}>
+      <PageHeader back={!panel} title={title} right={panel ? <Button variant="ghost" size="icon" aria-label="Close" title="Close (Esc)" onClick={() => goBack()}><X className="size-4" /></Button> : undefined} />
+      <Page className={panel ? "pb-4" : isEdit ? "pb-36" : "pb-24"}>
         <div className="grid grid-cols-3 gap-2 p-4">
           {(["income", "expense", "transfer"] as const).map((t) => (
             <button
@@ -387,7 +388,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
 
       </Page>
 
-      <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
+      <div className={cn("z-30 bg-background/95 backdrop-blur border-t", panel ? "sticky bottom-0" : "fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 md:safe-bottom")}>
         <div className="mx-auto max-w-3xl space-y-2 p-3">
           {isEdit ? (
             <div className="grid grid-cols-3 gap-2">

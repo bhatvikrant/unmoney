@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { Search, Star, SlidersHorizontal, StickyNote, Download, X, CheckSquare } from "lucide-react";
 import { toast } from "sonner";
 import { useView } from "@/lib/store";
@@ -7,6 +7,7 @@ import { budgetStatus, notesRange, txCarryBefore, txCsvRows, txListRange } from 
 import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
 import { useShortcuts, useSwipe } from "@/lib/shortcuts";
+import { useOpenEntry } from "@/lib/nav";
 import { useMonthParam } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
 import { addDays, parts, todayISO, weekday, MONTH_SHORT } from "../../../shared/dates";
@@ -33,8 +34,10 @@ export default function TransactionsPage() {
   const nav = useNavigate();
   const { settings, ledger } = useApp();
   const { month, range, shift, setMonth } = useMonthParam();
+  const openEntry = useOpenEntry();
+  const entryOpen = useLocation().pathname.startsWith("/t/");
   const goToday = () => setMonth(monthKeyForDate(todayISO(), settings.monthStartDay));
-  useShortcuts({ n: () => nav(`/t/new?date=${addDate()}`), "/": () => nav("/search"), ArrowLeft: () => shift(-1), ArrowRight: () => shift(1), t: goToday });
+  useShortcuts({ n: () => openEntry("new", { date: addDate() }), "/": () => nav("/search"), ArrowLeft: () => shift(-1), ArrowRight: () => shift(1), t: goToday });
   const [sp, setSp] = useSearchParams();
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
@@ -111,7 +114,8 @@ export default function TransactionsPage() {
       </Page>
       </div>
       {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[calc(var(--tabbar-h)+6rem)] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
-      {bulk.active && view === "daily" ? null : <Fab title="New entry (N)" onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${addDate()}`); }} />}
+      {/* beside an open entry (wide screens) the + would sit on the panel */}
+      {(bulk.active && view === "daily") || entryOpen ? null : <Fab title="New entry (N)" onClick={(e) => { primeKeyboard(e.currentTarget); openEntry("new", { date: addDate() }); }} />}
       {view === "daily" ? <BulkBar bulk={bulk} txs={txs} /> : null}
       <FilterSheet key={filterKey} open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>
@@ -120,6 +124,7 @@ export default function TransactionsPage() {
 
 function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: string } }) {
   const nav = useNavigate();
+  const openEntry = useOpenEntry();
   const { settings, ledger } = useApp();
   const snap = useView();
   const notes = useMemo(() => notesRange(snap, range.from, range.to), [snap, range.from, range.to]);
@@ -181,7 +186,7 @@ function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: st
           <>
             <TransactionList txs={byDay.get(day)?.list ?? []} emptyText="Nothing on this day" />
             <div className="flex gap-2 px-2 pt-3">
-              <Button className="flex-1" onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${day}`); }}>Add entry</Button>
+              <Button className="flex-1" onClick={(e) => { primeKeyboard(e.currentTarget); openEntry("new", { date: day }); }}>Add entry</Button>
               <Button variant="outline" className="flex-1" onClick={() => nav(`/notes?date=${day}&month=${monthKeyForDate(day, settings.monthStartDay)}`)}>Add note</Button>
             </div>
           </>
