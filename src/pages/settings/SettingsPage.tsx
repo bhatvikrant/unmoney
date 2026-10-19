@@ -20,7 +20,7 @@ export default function SettingsPage() {
   const { settings: s, user, accounts } = useApp();
   const update = useOp("settings.update");
   const setDefaultAccount = useOp("settings.setDefaultAccount");
-  const visibleAccounts = accounts.filter((a) => !a.hidden);
+  const visibleAccounts = accounts.filter((a) => !a.hidden && !a.archivedAt);
   const defaultAccount = visibleAccounts.some((a) => a._id === s.defaultAccountId) ? s.defaultAccountId! : "first";
   const { status, clearLocal } = useStore();
   const { signOut } = useAuthActions();

@@ -36,7 +36,7 @@ export default function BudgetSettings() {
   const fromPage = sp.get("period") === period ? sp.get("key") ?? sp.get("month") : null;
   const key = fromPage ?? (period === "monthly" ? monthKeyForDate(today, settings.monthStartDay) : period === "weekly" ? weekRange(today, settings.weekStartDay).from : String(parts(today).y));
   const keyLabel = period === "monthly" ? monthLabel(key) : period === "weekly" ? `week of ${key}` : key;
-  const mains = categories.filter((c) => c.type === "expense" && !c.parentId && !c.deletedAt);
+  const mains = categories.filter((c) => c.type === "expense" && !c.parentId && !c.deletedAt && !c.archivedAt);
   const available = mains.filter((c) => !list.some((b) => b.categoryId === c._id));
   const hasTotal = list.some((b) => !b.categoryId);
 

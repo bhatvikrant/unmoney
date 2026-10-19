@@ -14,7 +14,8 @@ export default function AccountOrder() {
   const reorder = useOp("accounts.reorder");
   const setHidden = useOp("accounts.setHidden");
   const live = groups.filter((g) => !g.deletedAt).sort((a, b) => a.order - b.order);
-  const ordered = [...accounts].sort((a, b) => a.order - b.order);
+  // Archived methods keep their place but are left out here (they are listed under Archived on the Payment methods tab).
+  const ordered = accounts.filter((a) => !a.archivedAt).sort((a, b) => a.order - b.order);
   const commit = (list: typeof ordered) => reorder({ items: list.map((a) => ({ id: a._id, groupId: a.groupId })) });
   const move = (id: string, dir: -1 | 1) => {
     const inGroup = ordered.filter((a) => a.groupId === ordered.find((x) => x._id === id)!.groupId);
