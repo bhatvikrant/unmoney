@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { HistorySection } from "@/components/HistorySection";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SegmentedTabs } from "@/components/shell/misc";
+import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
@@ -54,9 +55,12 @@ export default function CategoriesSettings() {
       setDialog(null);
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   }
+  const swipe = useSwipedRow();
   const del = async (id: Id<"categories">, name: string) => {
-    if (!(await confirm({ title: `Delete "${name}"?`, description: "Existing entries keep it as a deleted category." }))) return;
-    await remove({ id });
+    try {
+      if (!(await confirm({ title: `Delete "${name}"?`, description: "Existing entries keep it as a deleted category." }))) return;
+      await remove({ id });
+    } finally { swipe.close(); }
   };
   return (
     <>
@@ -68,22 +72,26 @@ export default function CategoriesSettings() {
         <div className="bg-card border-y">
           {mains.map((c) => (
             <div key={c._id} className="border-b last:border-b-0">
-              <div className="flex items-center gap-1 px-2 py-1.5 text-sm">
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(mains, c._id, -1)}><ArrowUp className="size-4" /></Button>
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(mains, c._id, 1)}><ArrowDown className="size-4" /></Button>
-                <span className="flex-1 px-1 font-medium">{c.name}</span>
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Add subcategory" onClick={() => setDialog({ name: "", parentId: c._id })}><CornerDownRight className="size-4" /></Button>
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Rename" onClick={() => setDialog({ id: c._id, name: c.name, parentId: "main" })}><Pencil className="size-4" /></Button>
-                <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => del(c._id, c.name)}><Trash2 className="size-4" /></Button>
-              </div>
-              {subsOf(c._id).map((s) => (
-                <div key={s._id} className="flex items-center gap-1 pl-8 pr-2 py-1 text-sm text-muted-foreground">
-                  <Button variant="ghost" size="icon" className="size-6" aria-label="Up" onClick={() => move(subsOf(c._id), s._id, -1)}><ArrowUp className="size-3" /></Button>
-                  <Button variant="ghost" size="icon" className="size-6" aria-label="Down" onClick={() => move(subsOf(c._id), s._id, 1)}><ArrowDown className="size-3" /></Button>
-                  <span className="flex-1 px-1">{s.name}</span>
-                  <Button variant="ghost" size="icon" className="size-6" aria-label="Edit" onClick={() => setDialog({ id: s._id, name: s.name, parentId: c._id })}><Pencil className="size-3" /></Button>
-                  <Button variant="ghost" size="icon" className="size-6 text-destructive" aria-label="Delete" onClick={() => del(s._id, s.name)}><Trash2 className="size-3" /></Button>
+              <SwipeToDelete {...swipe.row(c._id)} onDelete={() => del(c._id, c.name)}>
+                <div className="flex items-center gap-1 px-2 py-1.5 text-sm">
+                  <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(mains, c._id, -1)}><ArrowUp className="size-4" /></Button>
+                  <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(mains, c._id, 1)}><ArrowDown className="size-4" /></Button>
+                  <span className="flex-1 px-1 font-medium">{c.name}</span>
+                  <Button variant="ghost" size="icon" className="size-7" aria-label="Add subcategory" onClick={() => setDialog({ name: "", parentId: c._id })}><CornerDownRight className="size-4" /></Button>
+                  <Button variant="ghost" size="icon" className="size-7" aria-label="Rename" onClick={() => setDialog({ id: c._id, name: c.name, parentId: "main" })}><Pencil className="size-4" /></Button>
+                  <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => del(c._id, c.name)}><Trash2 className="size-4" /></Button>
                 </div>
+              </SwipeToDelete>
+              {subsOf(c._id).map((s) => (
+                <SwipeToDelete key={s._id} {...swipe.row(s._id)} onDelete={() => del(s._id, s.name)}>
+                  <div className="flex items-center gap-1 pl-8 pr-2 py-1 text-sm text-muted-foreground">
+                    <Button variant="ghost" size="icon" className="size-6" aria-label="Up" onClick={() => move(subsOf(c._id), s._id, -1)}><ArrowUp className="size-3" /></Button>
+                    <Button variant="ghost" size="icon" className="size-6" aria-label="Down" onClick={() => move(subsOf(c._id), s._id, 1)}><ArrowDown className="size-3" /></Button>
+                    <span className="flex-1 px-1">{s.name}</span>
+                    <Button variant="ghost" size="icon" className="size-6" aria-label="Edit" onClick={() => setDialog({ id: s._id, name: s.name, parentId: c._id })}><Pencil className="size-3" /></Button>
+                    <Button variant="ghost" size="icon" className="size-6 text-destructive" aria-label="Delete" onClick={() => del(s._id, s.name)}><Trash2 className="size-3" /></Button>
+                  </div>
+                </SwipeToDelete>
               ))}
             </div>
           ))}
@@ -101,11 +109,13 @@ export default function CategoriesSettings() {
                 {archived.map((c) => {
                   const subs = ofType.filter((x) => x.parentId === c._id).length;
                   return (
-                    <div key={c._id} className="flex items-center gap-1 border-b last:border-b-0 px-4 py-1.5 text-sm text-muted-foreground">
-                      <span className="flex-1 min-w-0 truncate">{c.parentId ? `${nameOf(c.parentId)} › ` : ""}{c.name}{subs ? <span className="text-xs"> · {subs} {subs === 1 ? "subcategory" : "subcategories"}</span> : null}</span>
-                      <Button variant="ghost" size="sm" className="h-7" onClick={() => archive(c._id, false)}><ArchiveRestore className="size-4" />Unarchive</Button>
-                      <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Delete ${c.name}`} onClick={() => del(c._id, c.name)}><Trash2 className="size-4" /></Button>
-                    </div>
+                    <SwipeToDelete key={c._id} className="border-b last:border-b-0" {...swipe.row(c._id)} onDelete={() => del(c._id, c.name)}>
+                      <div className="flex items-center gap-1 px-4 py-1.5 text-sm text-muted-foreground">
+                        <span className="flex-1 min-w-0 truncate">{c.parentId ? `${nameOf(c.parentId)} › ` : ""}{c.name}{subs ? <span className="text-xs"> · {subs} {subs === 1 ? "subcategory" : "subcategories"}</span> : null}</span>
+                        <Button variant="ghost" size="sm" className="h-7" onClick={() => archive(c._id, false)}><ArchiveRestore className="size-4" />Unarchive</Button>
+                        <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Delete ${c.name}`} onClick={() => del(c._id, c.name)}><Trash2 className="size-4" /></Button>
+                      </div>
+                    </SwipeToDelete>
                   );
                 })}
               </div>

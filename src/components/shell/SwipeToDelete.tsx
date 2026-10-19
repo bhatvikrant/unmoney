@@ -9,6 +9,18 @@ const REVEAL = 88;
 const FULL = 160;
 
 /**
+ * Which row of a list is swiped open, so only one is at a time. `row(id)` gives a row's `open` and
+ * `onOpenChange`; `close()` shuts whichever is open (after a confirmation, whether it was taken or not).
+ */
+export function useSwipedRow() {
+  const [swiped, setSwiped] = useState<string | null>(null);
+  return {
+    row: (id: string) => ({ open: swiped === id, onOpenChange: (o: boolean) => setSwiped(o ? id : null) }),
+    close: () => setSwiped(null),
+  };
+}
+
+/**
  * A list row that slides left to uncover a Delete button, like iOS mail. A short swipe or a flick
  * leaves it open; a long swipe calls onDelete directly. While open, tapping the row closes
  * it instead of opening it. The parent keeps which row is open, so only one is at a time.
