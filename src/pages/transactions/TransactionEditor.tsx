@@ -6,8 +6,9 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
 import { bookmarksList, noteSuggestions, txGet, txTags, type TxDetail } from "../../../shared/views";
 import { useApp } from "@/lib/app";
+import { amountInput, localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { todayISO } from "../../../shared/dates";
-import { evaluateExpression, toMajor, toMinor } from "../../../shared/money";
+import { evaluateExpression, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
@@ -80,15 +81,15 @@ export default function TransactionEditor() {
         toAccountId: existing.toAccountId,
         categoryId: existing.categoryId,
         subcategoryId: existing.subcategoryId,
-        amount: String(toMajor(existing.amount, settings.decimals)),
+        amount: amountInput(existing.amount, settings.decimals),
         subCurrency: existing.subCurrency ?? "",
-        subAmount: existing.subAmount !== undefined && cur ? String(toMajor(existing.subAmount, cur.decimals)) : "",
+        subAmount: existing.subAmount !== undefined && cur ? amountInput(existing.subAmount, cur.decimals) : "",
         rate: existing.exchangeRate,
         note: existing.note,
         description: existing.description ?? "",
         tags: existing.tags,
         feeOn: !!existing.feeAmount,
-        fee: existing.feeAmount ? String(toMajor(existing.feeAmount, settings.decimals)) : "",
+        fee: existing.feeAmount ? amountInput(existing.feeAmount, settings.decimals) : "",
         photoIds: existing.photoIds,
       };
     }
@@ -104,12 +105,12 @@ export default function TransactionEditor() {
           toAccountId: b.template.toAccountId,
           categoryId: b.template.categoryId,
           subcategoryId: b.template.subcategoryId,
-          amount: b.template.amount ? String(toMajor(b.template.amount, settings.decimals)) : "",
+          amount: b.template.amount ? amountInput(b.template.amount, settings.decimals) : "",
           note: b.template.note,
           description: b.template.description ?? "",
           tags: b.template.tags,
           feeOn: !!b.template.feeAmount,
-          fee: b.template.feeAmount ? String(toMajor(b.template.feeAmount, settings.decimals)) : "",
+          fee: b.template.feeAmount ? amountInput(b.template.feeAmount, settings.decimals) : "",
         };
       }
     }
@@ -148,14 +149,14 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
 
   const sub = f.subCurrency ? currencies.find((c) => c.code === f.subCurrency) : undefined;
   const mainMajor = useMemo(() => {
-    if (!sub) return evaluateExpression(f.amount);
-    const s = evaluateExpression(f.subAmount);
+    if (!sub) return evaluateExpression(f.amount, LOCALE_DECIMAL);
+    const s = evaluateExpression(f.subAmount, LOCALE_DECIMAL);
     if (s === null) return null;
     return f.rate ? s / f.rate : null;
   }, [f.amount, f.subAmount, f.rate, sub]);
 
   useEffect(() => {
-    if (sub && mainMajor !== null) set("amount", String(Math.round(mainMajor * 10 ** settings.decimals) / 10 ** settings.decimals));
+    if (sub && mainMajor !== null) set("amount", localNumber(Math.round(mainMajor * 10 ** settings.decimals) / 10 ** settings.decimals));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainMajor, sub]);
 
@@ -175,13 +176,13 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   }, [isEdit]);
 
   function buildArgs() {
-    const amountMajor = evaluateExpression(f.amount);
+    const amountMajor = evaluateExpression(f.amount, LOCALE_DECIMAL);
     if (amountMajor === null) throw new Error("Enter an amount");
     const amount = toMinor(amountMajor, settings.decimals);
     if (!f.accountId) throw new Error("Pick an account");
     if (f.type !== "transfer" && !f.categoryId) throw new Error("Pick a category");
     if (f.type === "transfer" && !f.toAccountId) throw new Error("Pick an account to transfer to");
-    const fee = f.type === "transfer" && f.feeOn ? toMinor(evaluateExpression(f.fee) ?? 0, settings.decimals) : undefined;
+    const fee = f.type === "transfer" && f.feeOn ? toMinor(evaluateExpression(f.fee, LOCALE_DECIMAL) ?? 0, settings.decimals) : undefined;
     return {
       type: f.type,
       date: f.date,
@@ -191,7 +192,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
       categoryId: f.type !== "transfer" ? f.categoryId : undefined,
       subcategoryId: f.type !== "transfer" ? f.subcategoryId : undefined,
       amount,
-      subAmount: sub ? toMinor(evaluateExpression(f.subAmount) ?? 0, sub.decimals) : undefined,
+      subAmount: sub ? toMinor(evaluateExpression(f.subAmount, LOCALE_DECIMAL) ?? 0, sub.decimals) : undefined,
       subCurrency: sub ? sub.code : undefined,
       exchangeRate: sub ? f.rate : undefined,
       note: f.note,
@@ -306,7 +307,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
                 </>
               ) : (
                 <>
-                  <PrefixedInput ref={amountRef} prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", String(v)); }} />
+                  <PrefixedInput ref={amountRef} prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount, LOCALE_DECIMAL); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", localNumber(v)); }} />
                 </>
               )}
               <Button variant="ghost" size="icon" className="size-8" aria-label="Calculator" onClick={() => setSheet("keypad")}><Calculator className="size-4" /></Button>
@@ -316,7 +317,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           {sub ? (
             <Field label="Converted">
               <div className="flex-1 flex items-center gap-2 text-sm">
-                <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value); const s = evaluateExpression(f.subAmount); if (m && s) set("rate", s / m); }} />
+                <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value, LOCALE_DECIMAL); const s = evaluateExpression(f.subAmount, LOCALE_DECIMAL); if (m && s) set("rate", s / m); }} />
                 <span className="text-xs text-muted-foreground whitespace-nowrap">1 {settings.mainCurrency} = {f.rate ? (Math.round(f.rate * 10000) / 10000) : "?"} {sub.code}</span>
               </div>
             </Field>
@@ -346,7 +347,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
                         note: s.note,
                         categoryId: p.categoryId ?? s.categoryId,
                         subcategoryId: p.categoryId ? p.subcategoryId : s.subcategoryId,
-                        amount: p.amount || String(toMajor(s.amount, settings.decimals)),
+                        amount: p.amount || amountInput(s.amount, settings.decimals),
                         accountId: p.accountId ?? s.accountId,
                       })); }}
                       className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex justify-between gap-2"

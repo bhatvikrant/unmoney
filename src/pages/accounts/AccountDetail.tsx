@@ -17,10 +17,10 @@ import { Label } from "@/components/ui/label";
 import { BalanceLine } from "@/pages/stats/charts";
 import { TransactionList } from "@/components/tx/TransactionList";
 import { useMonthParam } from "@/lib/period-hooks";
-import { monthLabel } from "@/lib/format";
+import { amountInput, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
 import { parseMonthKey, yearRange } from "../../../shared/period";
 import { todayISO } from "../../../shared/dates";
-import { toMajor, toMinor } from "../../../shared/money";
+import { toMinor } from "../../../shared/money";
 
 export default function AccountDetail() {
   const { id } = useParams();
@@ -50,7 +50,7 @@ export default function AccountDetail() {
             <div className="text-right text-xs">
               <div>Payable <Money amount={data.card.payable} kind="expense" /></div>
               <div>Outstanding <Money amount={data.card.outstanding} kind="expense" /></div>
-              <Button size="sm" className="mt-1" onClick={() => setPay({ amount: String(toMajor(data.card!.payable || data.card!.owed, settings.decimals)), date: todayISO(), from: a.billingAccountId ?? "" })}>Pay</Button>
+              <Button size="sm" className="mt-1" onClick={() => setPay({ amount: amountInput(data.card!.payable || data.card!.owed, settings.decimals), date: todayISO(), from: a.billingAccountId ?? "" })}>Pay</Button>
             </div>
           ) : null}
         </div>
@@ -78,7 +78,7 @@ export default function AccountDetail() {
               </div>
             </div>
           ) : null}
-          <DialogFooter><Button disabled={!pay?.from || !pay?.amount} onClick={async () => { try { await payCard({ id: a._id, amount: toMinor(pay!.amount, settings.decimals), date: pay!.date, fromAccountId: pay!.from as Id<"accounts"> }); toast.success("Payment recorded"); setPay(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Record payment</Button></DialogFooter>
+          <DialogFooter><Button disabled={!pay?.from || !pay?.amount} onClick={async () => { try { await payCard({ id: a._id, amount: toMinor(pay!.amount, settings.decimals, LOCALE_DECIMAL), date: pay!.date, fromAccountId: pay!.from as Id<"accounts"> }); toast.success("Payment recorded"); setPay(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Record payment</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>

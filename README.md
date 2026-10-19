@@ -106,6 +106,7 @@ Icons in `public/` are generated from `public/icon.svg` with `npm run icons` (`p
 
 More › Import from Money Manager reads Money Manager's Excel export (Settings › Backup › Export to Excel), as well as CSV and TSV. Every file goes through the same review: a dry run shows what will be added, which accounts and categories get created, which rows are skipped and which entries are already there.
 
+- **Dates and amounts**: whether the file writes 31/12 or 12/31, and 1,234.50 or 1.234,50, is read from all of its rows (a day above 12, an amount ending in a comma and two digits), falling back to the browser's locale. The review shows what was picked and lets you change it. Impossible dates are reported as skipped rows, never stored.
 - **Android**: the installed app is a share target, so the exported file can be shared straight to UnMoney. `src/sw.ts` receives it.
 - **iPhone**: iOS gives web apps no share-sheet entry, so a "Send to UnMoney" Shortcut posts the file to the user's import link (`POST /import/<token>` on the Convex site, `convex/imports.ts`). The file waits in the app until the user reviews it.
 - **First launch**: a new account with no entries is asked once whether it is coming from Money Manager.

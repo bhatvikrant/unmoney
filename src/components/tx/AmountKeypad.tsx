@@ -4,6 +4,7 @@ import { BottomSheet } from "@/components/shell/BottomSheet";
 import { Button } from "@/components/ui/button";
 import { evaluateExpression } from "../../../shared/money";
 import { cn } from "@/lib/utils";
+import { localNumber, LOCALE_DECIMAL } from "@/lib/format";
 
 /** Calculator keypad. Returns a major-unit string. */
 export function AmountKeypad({ open, onOpenChange, initial, onDone, currencyLabel }: {
@@ -14,17 +15,18 @@ export function AmountKeypad({ open, onOpenChange, initial, onDone, currencyLabe
     if (k === "⌫") return setExpr((e) => e.slice(0, -1));
     if (k === "C") return setExpr("");
     if (k === "=") {
-      const v = evaluateExpression(expr);
-      return setExpr(v === null ? expr : String(Math.round(v * 1e8) / 1e8));
+      const v = evaluateExpression(expr, LOCALE_DECIMAL);
+      return setExpr(v === null ? expr : localNumber(Math.round(v * 1e8) / 1e8));
     }
     setExpr((e) => e + k);
   };
   const done = () => {
-    const v = evaluateExpression(expr);
-    onDone(v === null ? "" : String(Math.round(v * 1e8) / 1e8));
+    const v = evaluateExpression(expr, LOCALE_DECIMAL);
+    // an unfinished expression ("5+") stays in the field to fix, rather than wiping the amount
+    onDone(v === null ? expr : localNumber(Math.round(v * 1e8) / 1e8));
     onOpenChange(false);
   };
-  const keys = ["7", "8", "9", "÷", "4", "5", "6", "×", "1", "2", "3", "-", ".", "0", "⌫", "+"];
+  const keys = ["7", "8", "9", "÷", "4", "5", "6", "×", "1", "2", "3", "-", LOCALE_DECIMAL, "0", "⌫", "+"];
   return (
     <BottomSheet open={open} onOpenChange={onOpenChange} title={currencyLabel ? `Amount (${currencyLabel})` : "Amount"}>
       <div className="px-2">

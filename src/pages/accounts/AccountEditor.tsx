@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { toMajor, toMinor } from "../../../shared/money";
+import { amountInput, LOCALE_DECIMAL } from "@/lib/format";
+import { toMinor } from "../../../shared/money";
 
 export default function AccountEditor() {
   const { id } = useParams();
@@ -22,7 +23,7 @@ export default function AccountEditor() {
   const initial = useMemo(() => ({
     name: existing?.name ?? "",
     groupId: (existing?.groupId ?? liveGroups[0]?._id ?? "") as string,
-    amount: existing ? String(toMajor(existing.initialBalance, settings.decimals)) : "0",
+    amount: existing ? amountInput(existing.initialBalance, settings.decimals) : "0",
     includeInTotals: existing?.includeInTotals ?? true,
     hidden: existing?.hidden ?? false,
     transferAsExpense: existing?.transferAsExpense ?? false,
@@ -44,7 +45,7 @@ export default function AccountEditor() {
   async function save() {
     try {
       const args = {
-        name: f.name, groupId: f.groupId as Id<"accountGroups">, initialBalance: toMinor(f.amount, settings.decimals), includeInTotals: f.includeInTotals, hidden: f.hidden,
+        name: f.name, groupId: f.groupId as Id<"accountGroups">, initialBalance: toMinor(f.amount, settings.decimals, LOCALE_DECIMAL), includeInTotals: f.includeInTotals, hidden: f.hidden,
         transferAsExpense: !!transferable && f.transferAsExpense, description: f.description || undefined,
         billingAccountId: kind === "card" && f.billingAccountId ? (f.billingAccountId as Id<"accounts">) : undefined,
         settlementDay: kind === "card" ? Number(f.settlementDay) : undefined, paymentDay: kind === "card" ? Number(f.paymentDay) : undefined,
