@@ -51,7 +51,6 @@ export default function SubCurrencySettings() {
       const j = await res.json();
       const rates = currencies.filter((c) => !c.isCustom && typeof j?.rates?.[c.code] === "number").map((c) => ({ id: c._id, rate: j.rates[c.code] as number }));
       await setRates({ rates });
-      toast.success(`Updated ${rates.length} rates`);
     } catch { toast.error("Could not fetch rates"); }
     setBusy(false);
   }

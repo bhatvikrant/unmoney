@@ -44,7 +44,7 @@ export default function BackupSettings() {
     if (!file) return;
     if (!window.confirm("Restore replaces ALL current data with the backup. Continue?")) return;
     setBusy(true);
-    try { await restore({ data: JSON.parse(await file.text()) as BackupData }); toast.success("Restored"); }
+    try { await restore({ data: JSON.parse(await file.text()) as BackupData }); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Restore failed"); }
     setBusy(false);
     if (restoreRef.current) restoreRef.current.value = "";
@@ -68,7 +68,7 @@ export default function BackupSettings() {
           <Row label="Import from Money Manager, Excel, CSV or TSV" hint="Review what will be added before anything is imported" onClick={() => nav("/import")} right={<ChevronRight className="size-4 text-muted-foreground" />} />
         </Section>
         <Section title="Danger zone">
-          <Row label="Delete all entries" hint="Removes transactions, notes, schedules, bookmarks and budgets. Accounts and categories stay." right={<Button size="sm" variant="destructive" onClick={async () => { if (window.confirm("Delete every transaction? This cannot be undone.")) { await wipe({ confirm: "DELETE" }); toast.success("Entries deleted"); } }}>Delete</Button>} />
+          <Row label="Delete all entries" hint="Removes transactions, notes, schedules, bookmarks and budgets. Accounts and categories stay." right={<Button size="sm" variant="destructive" onClick={async () => { if (window.confirm("Delete every transaction? This cannot be undone.")) { await wipe({ confirm: "DELETE" }); } }}>Delete</Button>} />
         </Section>
       </Page>
     </>

@@ -78,7 +78,7 @@ export default function AccountDetail() {
               </div>
             </div>
           ) : null}
-          <DialogFooter><Button disabled={!pay?.from || !pay?.amount} onClick={async () => { try { await payCard({ id: a._id, amount: toMinor(pay!.amount, settings.decimals), date: pay!.date, fromAccountId: pay!.from as Id<"accounts"> }); toast.success("Payment recorded"); setPay(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Record payment</Button></DialogFooter>
+          <DialogFooter><Button disabled={!pay?.from || !pay?.amount} onClick={async () => { try { await payCard({ id: a._id, amount: toMinor(pay!.amount, settings.decimals), date: pay!.date, fromAccountId: pay!.from as Id<"accounts"> }); setPay(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Record payment</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>

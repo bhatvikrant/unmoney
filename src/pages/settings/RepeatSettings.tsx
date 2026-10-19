@@ -62,7 +62,7 @@ export default function RepeatSettings() {
             </div>
           ) : edit ? <p className="text-sm text-muted-foreground">All {edit.r.installmentCount} entries were created when the plan was set. Edit or delete them from the ledger (use "This and future" to change the rest).</p> : null}
           <DialogFooter>
-            <Button variant="destructive" onClick={async () => { await remove({ id: edit!.r._id }); setEdit(null); toast.success("Schedule removed"); }}>Delete schedule</Button>
+            <Button variant="destructive" onClick={async () => { await remove({ id: edit!.r._id }); setEdit(null); }}>Delete schedule</Button>
             {edit?.r.kind === "repeat" ? <Button onClick={async () => { try { await update({ id: edit.r._id, frequency: edit.frequency, endDate: edit.endDate || null, nextDate: edit.nextDate, active: edit.active, template: { ...edit.r.template, amount: toMinor(edit.amount, settings.decimals), note: edit.note } }); setEdit(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Save</Button> : null}
           </DialogFooter>
         </DialogContent>

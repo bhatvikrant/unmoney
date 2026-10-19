@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { toast } from "sonner";
 import { useOp, useView } from "@/lib/store";
 import { accountsListDeleted } from "../../../shared/views";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -20,7 +19,7 @@ export default function DeletedAccounts() {
         {data?.accounts.length ? (
           <Section title="Accounts">
             {data.accounts.map((a) => (
-              <Row key={a._id} label={a.name} hint={a.groupName} right={<div className="flex gap-1"><Button size="sm" variant="outline" onClick={() => restore({ id: a._id })}>Restore</Button><Button size="sm" variant="destructive" onClick={async () => { if (window.confirm(`Permanently delete ${a.name} and all its transactions?`)) { await purge({ id: a._id }); toast.success("Deleted"); } }}>Delete</Button></div>} />
+              <Row key={a._id} label={a.name} hint={a.groupName} right={<div className="flex gap-1"><Button size="sm" variant="outline" onClick={() => restore({ id: a._id })}>Restore</Button><Button size="sm" variant="destructive" onClick={async () => { if (window.confirm(`Permanently delete ${a.name} and all its transactions?`)) { await purge({ id: a._id }); } }}>Delete</Button></div>} />
             ))}
           </Section>
         ) : null}
