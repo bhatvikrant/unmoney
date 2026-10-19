@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import { Search, Star, SlidersHorizontal, StickyNote, Download, X, CheckSquare } from "lucide-react";
 import { toast } from "sonner";
 import { useView } from "@/lib/store";
-import { budgetStatus, notesRange, txCarryBefore, txExportRows, txListRange } from "../../../shared/views";
+import { budgetStatus, notesRange, txCarryBefore, txCsvRows, txListRange } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
 import { useMonthParam } from "@/lib/period-hooks";
@@ -11,7 +11,6 @@ import { monthLabel, dateLabel } from "@/lib/format";
 import { addDays, parts, todayISO, weekday, MONTH_SHORT } from "../../../shared/dates";
 import { monthKey, monthRange, parseMonthKey, weekRange, weeksInRange, yearRange } from "../../../shared/period";
 import { kindsOf, sumKinds } from "../../../shared/ledger";
-import { toMajor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { MonthNav } from "@/components/shell/MonthNav";
 import { Money, SummaryBar } from "@/components/shell/Money";
@@ -242,7 +241,7 @@ function MonthlyView({ month, onPick }: { month: string; onPick: (m: string) => 
 function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: { from: string; to: string } }) {
   const nav = useNavigate();
   const snap = useView();
-  const { ledger, groupById, accountById, categoryById, settings } = useApp();
+  const { ledger, groupById, accountById, categoryById } = useApp();
   const status = useMemo(() => budgetStatus(snap, "monthly", month), [snap, month]);
   const byGroup = useMemo(() => {
     const exp = new Map<string, number>();
@@ -262,12 +261,7 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
 
   async function exportMonth() {
     try {
-      const rows = txExportRows(snap, range.from, range.to);
-      const csv = toCSV(rows.map((r) => ({
-        Date: r.time ? `${r.date} ${r.time}` : r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note,
-        Amount: toMajor(Number(r.amount), settings.decimals), "Income/Expense": r.type, Description: r.description,
-        "Amount Sub": r.subAmount, Currency: r.subCurrency, Fee: r.fee === "" ? "" : toMajor(Number(r.fee), settings.decimals), Tags: r.tags,
-      })));
+      const csv = toCSV(txCsvRows(snap, range.from, range.to));
       downloadText(`UnMoney-${month}.csv`, csv, "text/csv");
     } catch { toast.error("Export failed"); }
   }

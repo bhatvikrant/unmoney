@@ -103,6 +103,10 @@ export type ImportRow = {
   description?: string; subAmount?: string; subCurrency?: string;
   /** HH:MM, when the source has times (Money Manager's Excel export does). */
   time?: string;
+  /** Transfer fee, in major units (UnMoney's own CSV/TSV export). */
+  fee?: string;
+  /** Comma-separated; older UnMoney exports separated them with spaces. */
+  tags?: string;
 };
 export type NewImportAccount = { name: string; groupKind: Doc<"accountGroups">["kind"] };
 
@@ -314,6 +318,12 @@ export function mergeTxScopes(scopes: TxScope[]): TxScope {
     for (const k of keys) if (s[k]?.length) out[k] = [...new Set([...(out[k] ?? []), ...s[k]!])];
   }
   return out;
+}
+
+function splitTags(raw: string | undefined): string[] {
+  const t = (raw ?? "").trim();
+  if (!t) return [];
+  return [...new Set(t.split(t.includes(",") ? "," : /\s+/).map((x) => x.trim().replace(/^#/, "")).filter(Boolean))];
 }
 
 /** How a file writes dates and numbers; decided once for the whole file (`detectImportFormat`). */
@@ -827,6 +837,7 @@ const handlers: Handlers = {
       return w.insert("accountGroups", { name: def?.name ?? kind, kind, order: nextOrder(w.snap.accountGroups) });
     };
     const createdBanks: Doc<"accounts">[] = [];
+    const createdTyped: string[] = [];
     for (const a of wanted) {
       const kind = a.groupKind;
       const bank = createdBanks[0] ?? [...accByName.values()].find((x) => w.get("accountGroups", x.groupId)?.kind === "bank")
@@ -840,6 +851,7 @@ const handlers: Handlers = {
       });
       const created = w.get("accounts", id)!;
       accByName.set(a.name.trim().toLowerCase(), created);
+      createdTyped.push(created.name);
       if (kind === "bank") createdBanks.push(created);
     }
     const catKey = (type: string, name: string, parent?: string) => `${type}:${parent ?? ""}:${name.toLowerCase()}`;
@@ -876,7 +888,7 @@ const handlers: Handlers = {
       const time = r.time?.match(/^(\d{1,2}):(\d{2})/);
       const base: Prepared = {
         _row: rowNo, type, date, _acc: acc, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
-        description: r.description?.trim() || undefined, tags: [], photoIds: [],
+        description: r.description?.trim() || undefined, tags: splitTags(r.tags), photoIds: [],
         time: time ? `${time[1].padStart(2, "0")}:${time[2]}` : undefined,
       };
       if (r.subAmount && r.subCurrency && r.subCurrency.trim().toLowerCase() !== settings.mainCurrency.toLowerCase()) {
@@ -892,6 +904,8 @@ const handlers: Handlers = {
         if (!to) { errors.push({ row: rowNo, reason: `Unknown destination account "${r.category}"` }); continue; }
         if (to.toLowerCase() === acc.toLowerCase()) { errors.push({ row: rowNo, reason: "From and To are the same" }); continue; }
         base._to = to;
+        const fee = r.fee?.trim() ? parseNumber(r.fee, format?.decimal) : null;
+        if (fee) base.feeAmount = toMinor(Math.abs(fee), settings.decimals);
       } else {
         const name = (r.category ?? "").trim();
         if (!name) { errors.push({ row: rowNo, reason: "Category is required" }); continue; }
@@ -934,7 +948,7 @@ const handlers: Handlers = {
     });
     // Only create accounts some imported row still uses.
     const used = new Set(fresh.flatMap((p) => [p._acc.toLowerCase(), ...(p._to ? [p._to.toLowerCase()] : [])]));
-    const createdAccounts: string[] = [];
+    const createdAccounts: string[] = [...createdTyped];
     if ([...toCreateAccs.keys()].some((k) => used.has(k))) {
       let group = w.snap.accountGroups.find((g) => !g.deletedAt && g.kind === "other");
       if (!group) group = w.get("accountGroups", w.insert("accountGroups", { name: "Others", kind: "other", order: nextOrder(w.snap.accountGroups) }))!;
