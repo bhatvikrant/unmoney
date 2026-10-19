@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useRef } from "react";
-import { useNavigate } from "react-router";
+import { useParams } from "react-router";
+import { useOpenEntry } from "@/lib/nav";
 import { ArrowRight, Camera, Repeat, Star } from "lucide-react";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
@@ -19,8 +20,10 @@ function useBookmarkedIds(): Set<string> {
   return useMemo(() => new Set(bookmarks.flatMap((b) => (b.transactionId ? [b.transactionId as string] : []))), [bookmarks]);
 }
 
-export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, showDate, bookmarked }: {
+export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, showDate, bookmarked, open }: {
   tx: Tx; onClick?: () => void; onLongPress?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; showDate?: boolean; bookmarked?: boolean;
+  /** This entry is open in the panel beside the list. */
+  open?: boolean;
 }) {
   // Holding a row down starts selection; the click that follows the release must not also open the entry.
   const press = useRef<{ timer: number; fired: boolean }>({ timer: 0, fired: false });
@@ -40,7 +43,8 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
   const sub = isTransfer ? (tx.note ? route : "") : route;
   const amount = isTransfer ? tx.amount : tx.amount;
   return (
-    <div className={cn("flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm", onClick && "cursor-pointer hover:bg-accent/40 active:bg-accent", onLongPress && "select-none [-webkit-touch-callout:none]", selected && "bg-primary/10")}
+    <div className={cn("flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm", onClick && "cursor-pointer hover:bg-accent/40 active:bg-accent", onLongPress && "select-none [-webkit-touch-callout:none]", selected && "bg-primary/10", open && "bg-accent")}
+      aria-current={open || undefined}
       onClick={() => { if (press.current.fired) { press.current.fired = false; return; } onClick?.(); }} {...pressProps}>
       {onSelect ? <Checkbox checked={!!selected} onCheckedChange={(v) => onSelect(!!v)} onClick={(e) => e.stopPropagation()} /> : null}
       <div className="w-20 shrink-0 text-xs text-muted-foreground leading-tight line-clamp-2">
@@ -86,7 +90,8 @@ export function DayHeader({ date, income, expense }: { date: string; income: num
 export function TransactionList({ txs, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className }: {
   txs: Tx[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void; emptyText?: string; className?: string;
 }) {
-  const nav = useNavigate();
+  const openEntry = useOpenEntry();
+  const { id: openId } = useParams();
   const { ledger } = useApp();
   const bookmarked = useBookmarkedIds();
   const groups = useMemo(() => {
@@ -110,7 +115,8 @@ export function TransactionList({ txs, selectable, selected, onToggle, onLongPre
               <TransactionRow
                 key={t._id}
                 tx={t}
-                onClick={selectable ? () => onToggle?.(t._id, !selected?.has(t._id)) : () => nav(`/t/${t._id}`)}
+                onClick={selectable ? () => onToggle?.(t._id, !selected?.has(t._id)) : () => openEntry(t._id)}
+                open={t._id === openId}
                 onLongPress={!selectable && onLongPress ? () => onLongPress(t._id) : undefined}
                 selected={selected?.has(t._id)}
                 bookmarked={bookmarked.has(t._id)}
