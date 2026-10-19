@@ -47,14 +47,20 @@ export type QuickFix = {
   /**
    * merge: fold `ids` into one of them (`targetId` by default) ·
    * orphan: a deleted category whose entries need a new home the user picks ·
-   * remove: an unused category
+   * remove: an unused category ·
+   * rename: `ids[0]` becomes `newName` (AI only) · nest: `ids[0]` moves under `parentId` (AI only)
    */
-  kind: "merge" | "orphan" | "remove";
+  kind: "merge" | "orphan" | "remove" | "rename" | "nest";
   ids: Id<"categories">[];
   targetId?: Id<"categories">;
-  /** The parent the merged categories share, when they are subcategories. */
+  /** merge: the parent the merged categories share, when they are subcategories · nest: the new parent. */
   parentId?: Id<"categories">;
+  /** A merge into a new category, or a rename. */
+  newName?: string;
   reason: string;
+  /** Rules are exact; AI suggestions say how sure they are. */
+  source?: "rule" | "ai";
+  confidence?: "high" | "medium" | "low";
 };
 
 const NEW_DEFAULT_MS = 30 * 24 * 60 * 60 * 1000;
