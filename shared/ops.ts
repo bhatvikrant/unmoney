@@ -249,6 +249,73 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "files.upload": [],
 };
 
+/**
+ * Which of the user's entries an op reads or writes, so the server loads just those rather than
+ * the whole transactions table (Convex caps what one function may read, and a ledger outgrows
+ * that cap). `all` is for the few ops that really rewrite every entry.
+ */
+export type TxScope = {
+  all?: boolean;
+  /** Entries by id. */
+  ids?: string[];
+  /** Every entry in the repeat or installment series of these entries. */
+  seriesOf?: string[];
+  /** Every entry of these schedules. */
+  repeatIds?: string[];
+  /** Every entry from or to these accounts. */
+  accountIds?: string[];
+  /** Every entry on these dates. */
+  dates?: string[];
+};
+
+export function txScope(op: Op): TxScope {
+  const a = op.args as Record<string, unknown>;
+  const id = a.id as string;
+  switch (op.kind) {
+    case "transactions.update": return a.scope === "future" ? { seriesOf: [id] } : { ids: [id] };
+    case "transactions.remove": return a.scope === "future" || a.scope === "all" ? { seriesOf: [id] } : { ids: [id] };
+    case "transactions.bulkUpdate":
+    case "transactions.bulkRemove": return { ids: a.ids as string[] };
+    case "transactions.copy": return { ids: [id] };
+    case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
+    case "repeats.remove": return { repeatIds: [id] };
+    case "accounts.permanentlyDelete": return { accountIds: [id] };
+    // duplicates can only be entries on the same day
+    case "transactions.importRows": {
+      if (!a.skipDuplicates) return {};
+      const dates = (a.rows as ImportRow[]).map((r) => parseImportDate(r.date ?? "")).filter((d): d is string => d !== null);
+      return { dates: [...new Set(dates)] };
+    }
+    case "settings.changeMainCurrency":
+    case "backup.restore":
+    case "backup.wipeAll": return { all: true };
+    default: return {};
+  }
+}
+
+/** One scope covering several ops. */
+export function mergeTxScopes(scopes: TxScope[]): TxScope {
+  const out: TxScope = {};
+  const keys = ["ids", "seriesOf", "repeatIds", "accountIds", "dates"] as const;
+  for (const s of scopes) {
+    if (s.all) out.all = true;
+    for (const k of keys) if (s[k]?.length) out[k] = [...new Set([...(out[k] ?? []), ...s[k]!])];
+  }
+  return out;
+}
+
+/** A date from an imported row: YYYY-MM-DD, MM/DD/YYYY or DD.MM.YYYY. Null when unreadable. */
+export function parseImportDate(s: string): string | null {
+  const t = s.trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return null;
+}
+
 // ---------- working copy ----------
 
 type Insertable<T extends Table> = Omit<Doc<T>, "_id" | "_creationTime" | "userId">;
@@ -706,16 +773,6 @@ const handlers: Handlers = {
     const prepared: Prepared[] = [];
     const toCreateCats: { type: "income" | "expense"; name: string; parentName?: string }[] = [];
     const toCreateAccs = new Map<string, string>();
-    const parseDate = (s: string): string | null => {
-      const t = s.trim();
-      let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-      if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
-      m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-      if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
-      m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-      if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
-      return null;
-    };
     /** Name of an existing or to-be-created account, or null if unknown and creating is off. */
     const accountName = (raw: string | undefined): string | null => {
       const name = (raw ?? "").trim();
@@ -728,7 +785,7 @@ const handlers: Handlers = {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const rowNo = rowOffset + i + 1;
-      const date = parseDate(r.date ?? "");
+      const date = parseImportDate(r.date ?? "");
       if (!date) { errors.push({ row: rowNo, reason: `Bad date "${r.date}"` }); continue; }
       const tRaw = (r.type ?? "").trim().toLowerCase();
       const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;

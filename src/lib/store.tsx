@@ -4,7 +4,7 @@
  * whenever the connection is up. See shared/ops.ts for the model.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useConvex, useConvexConnectionState, useQuery } from "convex/react";
+import { useConvex, useConvexConnectionState, usePaginatedQuery, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
@@ -42,6 +42,8 @@ type Store = {
 const Ctx = createContext<Store | null>(null);
 
 const BATCH = 25;
+/** Entries per page of the transactions subscription; each page is one bounded server read. */
+const TX_PAGE = 2000;
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
 const isAuthError = (e: unknown) => /not signed in|unauthenticated|authentication/i.test(e instanceof Error ? e.message : String(e));
 
@@ -53,13 +55,22 @@ function useLiveTables(): Live {
   const accountGroups = useQuery(api.sync.table, { table: "accountGroups" });
   const accounts = useQuery(api.sync.table, { table: "accounts" });
   const categories = useQuery(api.sync.table, { table: "categories" });
-  const transactions = useQuery(api.sync.table, { table: "transactions" });
+  const transactions = useAllTransactions();
   const repeats = useQuery(api.sync.table, { table: "repeats" });
   const bookmarks = useQuery(api.sync.table, { table: "bookmarks" });
   const budgets = useQuery(api.sync.table, { table: "budgets" });
   const notes = useQuery(api.sync.table, { table: "notes" });
   const currencies = useQuery(api.sync.table, { table: "currencies" });
   return { settings, accountGroups, accounts, categories, transactions, repeats, bookmarks, budgets, notes, currencies } as Live;
+}
+
+/** Every page of the user's entries, kept live; undefined until the last page has arrived. */
+function useAllTransactions(): Doc<"transactions">[] | undefined {
+  const { results, status, loadMore } = usePaginatedQuery(api.sync.transactionsPage, {}, { initialNumItems: TX_PAGE });
+  useEffect(() => {
+    if (status === "CanLoadMore") loadMore(TX_PAGE);
+  }, [status, loadMore]);
+  return status === "Exhausted" ? results : undefined;
 }
 
 /** The base snapshot with every queued op replayed on top. Ops that no longer apply are skipped. */

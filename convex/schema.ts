@@ -131,6 +131,7 @@ export default defineSchema({
   })
     .index("by_user_date", ["userId", "date"])
     .index("by_user_account", ["userId", "accountId"])
+    .index("by_user_to_account", ["userId", "toAccountId"])
     .index("by_user_category", ["userId", "categoryId"])
     .index("by_repeat", ["repeatId"])
     .searchIndex("search_note", { searchField: "note", filterFields: ["userId"] }),
