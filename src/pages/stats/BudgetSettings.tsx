@@ -32,7 +32,9 @@ export default function BudgetSettings() {
   const list = budgets.filter((b) => b.period === period).sort((a, b) => (a.categoryId ? 1 : 0) - (b.categoryId ? 1 : 0));
   const [dialog, setDialog] = useState<null | { id?: Id<"budgets">; categoryId: string; amount: string; override: string }>(null);
   const today = todayISO();
-  const key = period === "monthly" ? (sp.get("month") ?? monthKeyForDate(today, settings.monthStartDay)) : period === "weekly" ? weekRange(today, settings.weekStartDay).from : String(parts(today).y);
+  // the period the user came from (overrides apply to it), else the current one
+  const fromPage = sp.get("period") === period ? sp.get("key") ?? sp.get("month") : null;
+  const key = fromPage ?? (period === "monthly" ? monthKeyForDate(today, settings.monthStartDay) : period === "weekly" ? weekRange(today, settings.weekStartDay).from : String(parts(today).y));
   const keyLabel = period === "monthly" ? monthLabel(key) : period === "weekly" ? `week of ${key}` : key;
   const mains = categories.filter((c) => c.type === "expense" && !c.parentId && !c.deletedAt);
   const available = mains.filter((c) => !list.some((b) => b.categoryId === c._id));

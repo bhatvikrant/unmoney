@@ -3,15 +3,16 @@ import { useNavigate, useSearchParams } from "react-router";
 import { Search, Star, SlidersHorizontal, StickyNote, Download, X, CheckSquare } from "lucide-react";
 import { toast } from "sonner";
 import { useView } from "@/lib/store";
-import { budgetStatus, notesRange, txCarryBefore, txExportRows, txListRange } from "../../../shared/views";
+import { budgetStatus, notesRange, txCarryBefore, txCsvRows, txListRange } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
+import { useShortcuts, useSwipe } from "@/lib/shortcuts";
 import { useMonthParam } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
 import { addDays, parts, todayISO, weekday, MONTH_SHORT } from "../../../shared/dates";
-import { monthKey, monthRange, parseMonthKey, weekRange, weeksInRange, yearRange } from "../../../shared/period";
+import { formatNumber } from "../../../shared/money";
+import { monthKey, monthKeyForDate, monthRange, parseMonthKey, weekRange, weeksInRange, yearRange } from "../../../shared/period";
 import { kindsOf, sumKinds } from "../../../shared/ledger";
-import { toMajor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { MonthNav } from "@/components/shell/MonthNav";
 import { Money, SummaryBar } from "@/components/shell/Money";
@@ -33,11 +34,16 @@ export default function TransactionsPage() {
   const nav = useNavigate();
   const { settings, ledger } = useApp();
   const { month, range, shift, setMonth } = useMonthParam();
+  const goToday = () => setMonth(monthKeyForDate(todayISO(), settings.monthStartDay));
+  useShortcuts({ n: () => nav(`/t/new?date=${addDate()}`), "/": () => nav("/search"), ArrowLeft: () => shift(-1), ArrowRight: () => shift(1), t: goToday });
   const [sp, setSp] = useSearchParams();
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
   const [filterOpen, setFilterOpen] = useState(false);
+  // a fresh sheet on every open, so it starts from the filter in the URL (not ticks a Clear removed)
+  const [filterKey, setFilterKey] = useState(0);
   const bulk = useBulkSelect();
+  const swipe = useSwipe(() => shift(1), () => shift(-1), !bulk.active);
 
   const snap = useView();
   const raw = useMemo(() => txListRange(snap, range.from, range.to), [snap, range.from, range.to]);
@@ -70,17 +76,17 @@ export default function TransactionsPage() {
     <>
       <PageHeader
         title="Transactions"
-        left={<Button variant="ghost" size="icon" aria-label="Search" onClick={() => nav("/search")}><Search className="size-5" /></Button>}
+        left={<Button variant="ghost" size="icon" aria-label="Search" title="Search (/)" onClick={() => nav("/search")}><Search className="size-5" /></Button>}
         right={
           <>
             {view === "daily" ? <Button variant="ghost" size="icon" aria-label="Select entries" className={cn(bulk.active && "text-primary")} onClick={() => (bulk.active ? bulk.exit() : bulk.start())}><CheckSquare className="size-5" /></Button> : null}
             <Button variant="ghost" size="icon" aria-label="Bookmarks" onClick={() => nav("/bookmarks")}><Star className="size-5" /></Button>
-            <Button variant="ghost" size="icon" aria-label="Filter" className={cn(filtered && "text-primary")} onClick={() => setFilterOpen(true)}><SlidersHorizontal className="size-5" /></Button>
+            <Button variant="ghost" size="icon" aria-label="Filter" className={cn(filtered && "text-primary")} onClick={() => { setFilterKey((k) => k + 1); setFilterOpen(true); }}><SlidersHorizontal className="size-5" /></Button>
           </>
         }
         sub={
           <div className="mx-auto max-w-3xl">
-            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} onClick={() => setMonth(monthKey(parts(todayISO()).y, parts(todayISO()).m))} />
+            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} onClick={goToday} />
             <SegmentedTabs value={view} onChange={setView} items={[
               { value: "daily", label: "Daily" }, { value: "calendar", label: "Calendar" }, { value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }, { value: "summary", label: "Summary" },
             ]} />
@@ -94,6 +100,8 @@ export default function TransactionsPage() {
           </div>
         }
       />
+      {/* swipe sideways to change month, like Money Manager */}
+      <div {...swipe} className="min-h-[70dvh]">
       <Page className={cn(bulk.active && view === "daily" && "pb-40")}>
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
         {raw && view === "daily" ? <TransactionList txs={txs} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
@@ -102,10 +110,11 @@ export default function TransactionsPage() {
         {view === "monthly" ? <MonthlyView month={month} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}
         {raw && view === "summary" ? <SummaryView txs={txs} month={month} range={range} /> : null}
       </Page>
+      </div>
       {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[calc(var(--tabbar-h)+6rem)] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
-      {bulk.active && view === "daily" ? null : <Fab onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${addDate()}`); }} />}
+      {bulk.active && view === "daily" ? null : <Fab title="New entry (N)" onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${addDate()}`); }} />}
       {view === "daily" ? <BulkBar bulk={bulk} txs={txs} /> : null}
-      <FilterSheet open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
+      <FilterSheet key={filterKey} open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>
   );
 }
@@ -138,8 +147,9 @@ function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: st
   const today = todayISO();
   const labels = [0, 1, 2, 3, 4, 5, 6].map((i) => (settings.weekStartDay + i) % 7);
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const { fmt } = useApp();
-  const short = (n: number) => fmt(n).replace(/^[-+]?[^\d-]+\s?/, "");
+  // amounts without the symbol, keeping the sign (a refund day is negative)
+  const { settings: st } = useApp();
+  const short = (n: number) => formatNumber(n, st.decimals);
   return (
     <>
       <div className="grid grid-cols-7 text-center text-[11px] text-muted-foreground border-b">
@@ -173,7 +183,7 @@ function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: st
             <TransactionList txs={byDay.get(day)?.list ?? []} emptyText="Nothing on this day" />
             <div className="flex gap-2 px-2 pt-3">
               <Button className="flex-1" onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${day}`); }}>Add entry</Button>
-              <Button variant="outline" className="flex-1" onClick={() => nav(`/notes?date=${day}`)}>Add note</Button>
+              <Button variant="outline" className="flex-1" onClick={() => nav(`/notes?date=${day}&month=${monthKeyForDate(day, settings.monthStartDay)}`)}>Add note</Button>
             </div>
           </>
         ) : null}
@@ -243,7 +253,7 @@ function MonthlyView({ month, onPick }: { month: string; onPick: (m: string) => 
 function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: { from: string; to: string } }) {
   const nav = useNavigate();
   const snap = useView();
-  const { ledger, accountById, categoryById, settings } = useApp();
+  const { ledger, accountById, categoryById } = useApp();
   const status = useMemo(() => budgetStatus(snap, "monthly", month), [snap, month]);
   const byGroup = useMemo(() => {
     const exp = new Map<string, number>();
@@ -263,12 +273,7 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
 
   async function exportMonth() {
     try {
-      const rows = txExportRows(snap, range.from, range.to);
-      const csv = toCSV(rows.map((r) => ({
-        Date: r.time ? `${r.date} ${r.time}` : r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note,
-        Amount: toMajor(Number(r.amount), settings.decimals), "Income/Expense": r.type, Description: r.description,
-        "Amount Sub": r.subAmount, Currency: r.subCurrency, Fee: r.fee === "" ? "" : toMajor(Number(r.fee), settings.decimals), Tags: r.tags,
-      })));
+      const csv = toCSV(txCsvRows(snap, range.from, range.to));
       downloadText(`UnMoney-${month}.csv`, csv, "text/csv");
     } catch { toast.error("Export failed"); }
   }

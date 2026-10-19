@@ -11,7 +11,9 @@ import { toast } from "sonner";
 import { Check, Copy, Download, FileSpreadsheet, Share2, Smartphone } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { applyOp, detectImportFormat, type ImportFormat, type OpResult } from "../../../shared/ops";
+import { applyOp, detectImportFormat, type ImportFormat, type NewImportAccount, type OpResult } from "../../../shared/ops";
+import { accountNamesIn, guessKind } from "@/lib/csv";
+import { ACCOUNT_KINDS } from "../../../shared/defaults";
 import { CURRENCIES } from "../../../shared/currencies";
 import { useStore, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
@@ -313,17 +315,27 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
   // How the file writes dates and numbers, read from all its rows; the user can correct it below.
   const [format, setFormat] = useState<ImportFormat>(() => detectImportFormat(loaded.rows, LOCALE_FORMAT));
   const hasSlashDates = useMemo(() => loaded.rows.some((r) => /^\d{1,2}[/-]\d{1,2}[/-]\d{4}/.test((r.date ?? "").trim())), [loaded.rows]);
+  // Accounts the file names that do not exist yet, each with a type the user can correct, so cards keep a billing cycle.
+  const newNames = useMemo(() => {
+    const have = new Set(view.accounts.filter((a) => !a.deletedAt).map((a) => a.name.trim().toLowerCase()));
+    return accountNamesIn(loaded.rows).filter((n) => !have.has(n.toLowerCase()));
+  }, [loaded.rows, view.accounts]);
+  const [kinds, setKinds] = useState<Record<string, NewImportAccount["kind"]>>({});
+  const newAccounts = useMemo<NewImportAccount[] | undefined>(
+    () => (createAccounts ? newNames.map((name) => ({ name, kind: kinds[name] ?? guessKind(name) })) : undefined),
+    [createAccounts, newNames, kinds],
+  );
   const hasCommas = useMemo(() => loaded.rows.some((r) => (r.amount ?? "").includes(",")), [loaded.rows]);
 
   // Dry run against the local data: what would be imported, created and skipped.
   const dry = useMemo<DryRun | { error: string }>(() => {
     try {
-      const op = { id: "dryrun", kind: "transactions.importRows" as const, args: { rows: loaded.rows, format, createMissing, createAccounts, skipInvalid: true, skipDuplicates: true }, at: 0 };
+      const op = { id: "dryrun", kind: "transactions.importRows" as const, args: { rows: loaded.rows, format, newAccounts, createMissing, createAccounts, skipInvalid: true, skipDuplicates: true }, at: 0 };
       return applyOp(view, op, { userId: (userId ?? "") as Id<"users"> }).result as DryRun;
     } catch (e) {
       return { error: e instanceof Error ? e.message : "This file cannot be imported" };
     }
-  }, [loaded.rows, view, userId, format, createMissing, createAccounts]);
+  }, [loaded.rows, view, userId, format, newAccounts, createMissing, createAccounts]);
 
   const fileCurrency = loaded.currency && loaded.currency !== settings.mainCurrency && CURRENCIES.some((c) => c.code === loaded.currency) ? loaded.currency : null;
   const noEntriesYet = view.transactions.length === 0;
@@ -339,7 +351,7 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
     const opIds: string[] = [];
     try {
       for (let i = 0; i < rows.length; i += CHUNK) {
-        const { id, result } = await dispatchTracked("transactions.importRows", { rows: rows.slice(i, i + CHUNK), format, createMissing, createAccounts, skipInvalid: true, rowOffset: i });
+        const { id, result } = await dispatchTracked("transactions.importRows", { rows: rows.slice(i, i + CHUNK), format, newAccounts, createMissing, createAccounts, skipInvalid: true, rowOffset: i });
         opIds.push(id);
         inserted += result.inserted;
         setProgress(Math.min(1, (i + CHUNK) / rows.length));
@@ -382,7 +394,6 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
           <div className="px-4 py-3 space-y-1 text-sm">
             <div><b className="tabular">{ready}</b> {ready === 1 ? "entry" : "entries"} ready to import.</div>
             {dry.duplicates.length ? <div className="text-muted-foreground">{dry.duplicates.length} {dry.duplicates.length === 1 ? "entry is" : "entries are"} already in UnMoney and will be left out.</div> : null}
-            {dry.createdAccounts.length ? <div className="text-muted-foreground">New payment methods, outside any group: {dry.createdAccounts.join(", ")}</div> : null}
             {skipped ? (
               <details className="text-muted-foreground">
                 <summary className="cursor-pointer text-destructive">{skipped} {skipped === 1 ? "row" : "rows"} will be skipped</summary>
@@ -403,6 +414,19 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
           </div>
         ) : null}
       </Section>
+      {createAccounts && newNames.length ? (
+        <Section title="New payment methods">
+          {newNames.map((name) => (
+            <Row key={name} label={name} right={
+              <Select value={kinds[name] ?? guessKind(name)} onValueChange={(v) => setKinds((k) => ({ ...k, [name]: v as NewImportAccount["kind"] }))}>
+                <SelectTrigger className="h-8 w-40" aria-label={`Type of ${name}`}><SelectValue /></SelectTrigger>
+                <SelectContent>{ACCOUNT_KINDS.map((k) => <SelectItem key={k.kind} value={k.kind}>{k.label}</SelectItem>)}</SelectContent>
+              </Select>
+            } />
+          ))}
+          <p className="px-4 py-2 text-xs text-muted-foreground">They go outside any group. Credit cards bill the first bank account, settle on the 1st and are paid on the 15th; change that in Payment methods after the import.</p>
+        </Section>
+      ) : null}
       <Section title="Options">
         <label className="flex items-center gap-3 px-4 py-3 border-b text-sm"><Checkbox checked={createMissing} onCheckedChange={(v) => setCreateMissing(!!v)} />Create categories that don't exist yet</label>
         <label className="flex items-center gap-3 px-4 py-3 text-sm"><Checkbox checked={createAccounts} onCheckedChange={(v) => setCreateAccounts(!!v)} />Create payment methods that don't exist yet</label>

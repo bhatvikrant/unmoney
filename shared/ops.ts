@@ -111,6 +111,10 @@ export type ImportRow = {
   description?: string; subAmount?: string; subCurrency?: string;
   /** HH:MM, when the source has times (Money Manager's Excel export does). */
   time?: string;
+  /** Transfer fee, in major units (UnMoney's own CSV/TSV export). */
+  fee?: string;
+  /** Comma-separated; older UnMoney exports separated them with spaces. */
+  tags?: string;
 };
 export type NewImportAccount = { name: string; kind: AccountKind };
 export type CatType = "income" | "expense";
@@ -143,6 +147,8 @@ export interface Ops {
   /** entries: false leaves the entries alone; the app rescales or removes them itself, in chunks (see src/lib/bulk.ts). */
   "settings.changeMainCurrency": { args: { code: string; keepData: boolean; entries?: boolean }; result: void };
   "settings.setPasscode": { args: { hash?: string; salt?: string }; result: void };
+  /** Store amounts with this many decimals, rounding them when there are fewer. entries: false as for changeMainCurrency. */
+  "settings.changeDecimals": { args: { decimals: number; entries?: boolean }; result: void };
   "settings.setDefaultAccount": { args: { id?: Id<"accounts"> }; result: void };
 
   "accountGroups.create": { args: { name: string }; result: Id<"accountGroups"> };
@@ -187,7 +193,8 @@ export interface Ops {
     args: { rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
     result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
   };
-  "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean }; result: Id<"transactions"> };
+  /** today: the device's date, so the server (in UTC) puts the copy on the same day. */
+  "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean; today?: string }; result: Id<"transactions"> };
   /** Multiply amounts by `factor` (a change of main currency's decimals), a chunk of entries at a time. */
   "transactions.rescale": { args: { ids: Id<"transactions">[]; factor: number }; result: void };
   /** Entries from a backup, with ids already pointing at the restored accounts, categories and schedules (restoreRows). */
@@ -251,8 +258,9 @@ const ALL: Table[] = [...TABLES];
 export const OP_TABLES: Record<OpKind, Table[]> = {
   "settings.completeOnboarding": ["settings", "accountGroups", "accounts", "categories"],
   "settings.update": ["settings"],
-  "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks"],
+  "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks", "categoryCleanups"],
   "settings.setPasscode": ["settings"],
+  "settings.changeDecimals": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks", "categoryCleanups"],
   "settings.setDefaultAccount": ["settings", "accounts"],
   "accountGroups.create": ["accountGroups"],
   "accountGroups.update": ["accountGroups"],
@@ -263,7 +271,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "accounts.update": ["accountGroups", "accounts"],
   "accounts.setHidden": ["accounts"],
   "accounts.remove": ["accounts"],
-  "accounts.restore": ["accountGroups", "accounts"],
+  "accounts.restore": ["accountGroups", "accounts", "categories", "repeats"],
   "accounts.permanentlyDelete": ["accounts", "transactions"],
   "accounts.reorder": ["accountGroups", "accounts"],
   "accounts.move": ["accountGroups", "accounts"],
@@ -274,7 +282,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "categories.remove": ["categories"],
   "categories.reorder": ["categories"],
   "categories.applyCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups"],
-  "categories.undoCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups"],
+  "categories.undoCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups", "accounts"],
   "transactions.create": ["accounts", "categories", "transactions", "repeats"],
   "transactions.update": ["accounts", "categories", "transactions", "repeats"],
   "transactions.remove": ["transactions", "repeats"],
@@ -286,7 +294,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.restoreRows": ["accounts", "categories", "repeats", "transactions", "bookmarks"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
-  "repeats.catchUp": ["settings", "repeats", "transactions"],
+  "repeats.catchUp": ["settings", "repeats", "transactions", "accounts", "categories"],
   "bookmarks.create": ["accounts", "transactions", "bookmarks"],
   "bookmarks.update": ["bookmarks"],
   "bookmarks.remove": ["bookmarks"],
@@ -359,6 +367,7 @@ export function txScope(op: Op): TxScope {
     }
     case "categories.undoCleanup": return { cleanupIds: [id] };
     case "settings.changeMainCurrency":
+    case "settings.changeDecimals":
     case "backup.restore":
     case "backup.wipeAll": return a.entries === false ? {} : { all: true };
     default: return {};
@@ -374,6 +383,12 @@ export function mergeTxScopes(scopes: TxScope[]): TxScope {
     for (const k of keys) if (s[k]?.length) out[k] = [...new Set([...(out[k] ?? []), ...s[k]!])];
   }
   return out;
+}
+
+function splitTags(raw: string | undefined): string[] {
+  const t = (raw ?? "").trim();
+  if (!t) return [];
+  return [...new Set(t.split(t.includes(",") ? "," : /\s+/).map((x) => x.trim().replace(/^#/, "")).filter(Boolean))];
 }
 
 /** How a file writes dates and numbers; decided once for the whole file (`detectImportFormat`). */
@@ -526,8 +541,17 @@ const checkAmount = (n: number | undefined) => {
 const isDate = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const nextOrder = (docs: { order: number }[]) => Math.max(-1, ...docs.map((d) => d.order)) + 1;
 
-function validateTx(w: Work, t: TxFields): TxFields {
+/**
+ * `was`: the entry being edited. Its own account and category may have been deleted since; any
+ * other deleted account or category is refused, so nothing new lands where the user cannot see it.
+ */
+function validateTx(w: Work, t: TxFields, was?: Doc<"transactions">): TxFields {
   if (!isDate(t.date)) throw new Error("Bad date");
+  const kept = new Set([was?.accountId, was?.toAccountId, was?.categoryId, was?.subcategoryId].filter(Boolean));
+  for (const [table, id, what] of [["accounts", t.accountId, "account"], ["accounts", t.type === "transfer" ? t.toAccountId : undefined, "account"],
+    ["categories", t.type === "transfer" ? undefined : t.categoryId, "category"], ["categories", t.type === "transfer" ? undefined : t.subcategoryId, "category"]] as const) {
+    if (id && !kept.has(id) && w.get(table, id)?.deletedAt) throw new Error(`That ${what} has been deleted`);
+  }
   checkAmount(t.amount);
   checkAmount(t.feeAmount);
   w.must("accounts", t.accountId, "Pick an account");
@@ -865,6 +889,7 @@ function undoCleanup(w: Work, id: Id<"categoryCleanups">): { restoredEntries: nu
     if (c && !c.deletedAt && !liveSubs(w, cid).length && !categoryInUse(w, cid)) w.patch("categories", cid, { deletedAt: w.at });
   }
   w.patch("categoryCleanups", id, { undoneAt: w.at });
+  resumePaused(w);
   return { restoredEntries };
 }
 
@@ -874,11 +899,61 @@ const strip = (d: Record<string, unknown>) => {
   return rest;
 };
 
+/**
+ * An amount times a power of ten. Scaling down divides by the whole power (10 ** -4 is
+ * 0.00009999…, so 5000 * 10 ** -4 would round to 0 rather than 1), and a result past MAX_AMOUNT
+ * is refused.
+ */
+export function scaleAmount(n: number, factor: number): number {
+  const v = factor >= 1 ? Math.round(n * factor) : Math.round(n / Math.round(1 / factor));
+  checkAmount(v);
+  return v;
+}
+
 function rescale(w: Work, ids: Id<"transactions">[], factor: number) {
-  const scale = (n: number | undefined) => (n === undefined ? undefined : Math.round(n * factor));
+  const scale = (n: number | undefined) => (n === undefined ? undefined : scaleAmount(n, factor));
   for (const id of ids) {
     const t = w.must("transactions", id);
     w.patch("transactions", id, { amount: scale(t.amount)!, feeAmount: scale(t.feeAmount), installmentTotal: scale(t.installmentTotal) });
+  }
+}
+
+/**
+ * Schedules stopped because their account or category was deleted start again once everything
+ * they use is back, from the next date due after the restore: the dates missed meanwhile are skipped
+ * rather than filled in all at once.
+ */
+function resumePaused(w: Work) {
+  const live = (table: "accounts" | "categories", id: string | undefined) => !id || (!!w.get(table, id) && !w.get(table, id)!.deletedAt);
+  const today = new Date(w.at).toISOString().slice(0, 10);
+  for (const r of [...w.snap.repeats]) {
+    if (!r.pausedForDeleted) continue;
+    const t = r.template;
+    if (!live("accounts", t.accountId) || !live("accounts", t.toAccountId) || !live("categories", t.categoryId) || !live("categories", t.subcategoryId)) continue;
+    let next = r.nextDate;
+    for (let guard = 0; next < today && guard < 1000; guard++) next = nextOccurrence(next, r.startDate, r.frequency);
+    const ended = !!r.endDate && next > r.endDate;
+    w.patch("repeats", r._id, { active: !ended, pausedForDeleted: undefined, nextDate: next });
+  }
+}
+
+/** Opening balances, budgets and what repeats and bookmarks will enter, when amounts change scale. */
+function rescaleOtherAmounts(w: Work, factor: number) {
+  const scale = (n: number) => scaleAmount(n, factor);
+  for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: scale(a.initialBalance) });
+  for (const b of [...w.snap.budgets]) {
+    const overrides: Record<string, number> = {};
+    for (const [k, val] of Object.entries(b.overrides)) overrides[k] = scale(val);
+    w.patch("budgets", b._id, { amount: scale(b.amount), overrides });
+  }
+  const template = (t: Template): Template => ({ ...t, amount: scale(t.amount), feeAmount: t.feeAmount === undefined ? undefined : scale(t.feeAmount) });
+  for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
+  for (const b of [...w.snap.bookmarks]) w.patch("bookmarks", b._id, { template: template(b.template) });
+  // a tidy-up undone later puts these budgets back, so they change scale too
+  for (const c of [...w.snap.categoryCleanups]) {
+    w.patch("categoryCleanups", c._id, {
+      budgetsBefore: c.budgetsBefore.map((b) => ({ ...b, amount: scale(b.amount), overrides: Object.fromEntries(Object.entries(b.overrides).map(([k, v]) => [k, scale(v)])) })),
+    });
   }
 }
 
@@ -939,18 +1014,20 @@ const handlers: Handlers = {
       if (entries) w.clear("transactions");
     } else if (factor !== 1) {
       if (entries) rescale(w, w.snap.transactions.map((t) => t._id), factor);
-      for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: Math.round(a.initialBalance * factor) });
-      for (const b of [...w.snap.budgets]) {
-        const overrides: Record<string, number> = {};
-        for (const [k, val] of Object.entries(b.overrides)) overrides[k] = Math.round(val * factor);
-        w.patch("budgets", b._id, { amount: Math.round(b.amount * factor), overrides });
-      }
-      // the amounts future repeats and bookmarks will enter
-      const template = (t: Template): Template => ({ ...t, amount: Math.round(t.amount * factor), feeAmount: t.feeAmount === undefined ? undefined : Math.round(t.feeAmount * factor) });
-      for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
-      for (const b of [...w.snap.bookmarks]) w.patch("bookmarks", b._id, { template: template(b.template) });
+      rescaleOtherAmounts(w, factor);
     }
     w.patch("settings", s._id, { mainCurrency: info.code, symbol: info.symbol, decimals: info.decimals, symbolPosition: info.position ?? "before" });
+  },
+
+  "settings.changeDecimals": (w, { decimals, entries = true }) => {
+    const s = w.requireSettings();
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 4) throw new Error("Decimals must be between 0 and 4");
+    const factor = 10 ** (decimals - s.decimals);
+    if (factor !== 1) {
+      if (entries) rescale(w, w.snap.transactions.map((t) => t._id), factor);
+      rescaleOtherAmounts(w, factor);
+    }
+    w.patch("settings", s._id, { decimals });
   },
 
   "settings.setPasscode": (w, { hash, salt }) => {
@@ -1021,6 +1098,7 @@ const handlers: Handlers = {
     // A method whose group was deleted meanwhile comes back outside any group.
     const g = w.get("accountGroups", a.groupId);
     w.patch("accounts", id, { deletedAt: undefined, kind: resolveKind(a, w.snap.accountGroups) as AccountKind, ...(g && !g.deletedAt ? {} : { groupId: undefined }) });
+    resumePaused(w);
   },
   "accounts.permanentlyDelete": (w, { id }) => {
     w.must("accounts", id);
@@ -1136,7 +1214,7 @@ const handlers: Handlers = {
 
   "transactions.update": (w, { id, scope, ...input }) => {
     const existing = w.must("transactions", id);
-    const t = validateTx(w, input);
+    const t = validateTx(w, input, existing);
     w.patch("transactions", id, { ...t });
     if (scope === "future" && existing.repeatId) {
       for (const s of [...w.snap.transactions]) {
@@ -1209,6 +1287,7 @@ const handlers: Handlers = {
     wanted.sort((a, b) => Number(isCardKind(kindOfNew(a))) - Number(isCardKind(kindOfNew(b))));
     const kindOfAcc = (x: Doc<"accounts">) => resolveKind(x, w.snap.accountGroups);
     const createdBanks: Doc<"accounts">[] = [];
+    const createdTyped: string[] = [];
     for (const a of wanted) {
       const kind = kindOfNew(a);
       const bank = createdBanks[0] ?? [...accByName.values()].find((x) => kindOfAcc(x) === "bank")
@@ -1222,6 +1301,7 @@ const handlers: Handlers = {
       });
       const created = w.get("accounts", id)!;
       accByName.set(a.name.trim().toLowerCase(), created);
+      createdTyped.push(created.name);
       if (kind === "bank") createdBanks.push(created);
     }
     const catKey = (type: string, name: string, parent?: string) => `${type}:${parent ?? ""}:${name.toLowerCase()}`;
@@ -1258,7 +1338,7 @@ const handlers: Handlers = {
       const time = r.time?.match(/^(\d{1,2}):(\d{2})/);
       const base: Prepared = {
         _row: rowNo, type, date, _acc: acc, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
-        description: r.description?.trim() || undefined, tags: [], photoIds: [],
+        description: r.description?.trim() || undefined, tags: splitTags(r.tags), photoIds: [],
         time: time ? `${time[1].padStart(2, "0")}:${time[2]}` : undefined,
       };
       if (r.subAmount && r.subCurrency && r.subCurrency.trim().toLowerCase() !== settings.mainCurrency.toLowerCase()) {
@@ -1274,6 +1354,8 @@ const handlers: Handlers = {
         if (!to) { errors.push({ row: rowNo, reason: `Unknown destination account "${r.category}"` }); continue; }
         if (to.toLowerCase() === acc.toLowerCase()) { errors.push({ row: rowNo, reason: "From and To are the same" }); continue; }
         base._to = to;
+        const fee = r.fee?.trim() ? parseNumber(r.fee, format?.decimal) : null;
+        if (fee) base.feeAmount = toMinor(Math.abs(fee), settings.decimals);
       } else {
         const name = (r.category ?? "").trim();
         if (!name) { errors.push({ row: rowNo, reason: "Category is required" }); continue; }
@@ -1316,7 +1398,7 @@ const handlers: Handlers = {
     });
     // Only create accounts some imported row still uses.
     const used = new Set(fresh.flatMap((p) => [p._acc.toLowerCase(), ...(p._to ? [p._to.toLowerCase()] : [])]));
-    const createdAccounts: string[] = [];
+    const createdAccounts: string[] = [...createdTyped];
     for (const [key, name] of toCreateAccs) {
       if (!used.has(key) || accByName.has(key)) continue;
       const id = w.insert("accounts", { kind: "other", name, initialBalance: 0, includeInTotals: true, hidden: false, order: nextOrder(w.snap.accounts), transferAsExpense: false });
@@ -1380,11 +1462,11 @@ const handlers: Handlers = {
     return inserted;
   },
 
-  "transactions.copy": (w, { id, useToday }) => {
+  "transactions.copy": (w, { id, useToday, today }) => {
     const t = w.must("transactions", id);
     const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, ...rest } = t;
     void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal;
-    return w.insert("transactions", { ...rest, date: useToday ? todayISO() : t.date });
+    return w.insert("transactions", { ...rest, date: useToday ? (today && isDate(today) ? today : todayISO()) : t.date });
   },
 
   "repeats.update": (w, { id, ...patch }) => {
@@ -1408,6 +1490,11 @@ const handlers: Handlers = {
     let created = 0;
     for (const rep of [...w.snap.repeats]) {
       if (!rep.active || rep.nextDate > horizon) continue;
+      // a schedule whose account or category was deleted stops instead of filling a hidden account
+      const tpl = rep.template;
+      const gone = [w.get("accounts", tpl.accountId), tpl.toAccountId ? w.get("accounts", tpl.toAccountId) : null, tpl.categoryId ? w.get("categories", tpl.categoryId) : null]
+        .some((d) => d === undefined || d?.deletedAt);
+      if (gone) { w.patch("repeats", rep._id, { active: false, pausedForDeleted: true }); continue; }
       let next = rep.nextDate;
       let guard = 0;
       let stopped = false;

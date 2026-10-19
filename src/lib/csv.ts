@@ -97,6 +97,8 @@ export function mapImportRow(row: Record<string, string>, headers: string[] = Ob
     description: get("Description", "Memo", "description") || undefined,
     subAmount: (mainCol ? get("Amount Sub", "Amount") : get("Amount Sub", "Amount_1", "AmountSub", "subAmount")) || undefined,
     subCurrency: get("Currency", "subCurrency") || undefined,
+    fee: get("Fee", "fee") || undefined,
+    tags: get("Tags", "tags") || undefined,
   };
 }
 

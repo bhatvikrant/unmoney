@@ -165,6 +165,8 @@ export default defineSchema({
     startDate: v.string(),
     endDate: v.optional(v.string()),
     nextDate: v.string(),
+    /** Switched off because its account or category was deleted; restoring that switches it back on. */
+    pausedForDeleted: v.optional(v.boolean()),
     installmentCount: v.optional(v.number()),
     template: template,
     active: v.boolean(),
@@ -219,7 +221,9 @@ export default defineSchema({
   fileOwners: defineTable({
     userId: v.id("users"),
     storageId: v.id("_storage"),
-  }).index("by_storage", ["storageId"]),
+  })
+    .index("by_storage", ["storageId"])
+    .index("by_user", ["userId"]),
 
   /**
    * The last "Tidy up" of a user's categories, with what it changed, so it can be undone for 30
