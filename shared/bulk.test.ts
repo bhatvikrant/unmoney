@@ -21,6 +21,8 @@ function ledger(): Snapshot {
   s = run(s, "transactions.create", { ...tx, installment: { count: 3 } }).snap;
   s = run(s, "transactions.create", { ...tx, amount: 900, subAmount: 1000, subCurrency: "EUR", exchangeRate: 0.9 }).snap;
   s = run(s, "transactions.create", { type: "transfer", accountId: bank._id, toAccountId: cash._id, amount: 5000, feeAmount: 150, note: "ATM", tags: [], photoIds: [], date: "2026-01-03" }).snap;
+  const atm = s.transactions.find((t) => t.note === "ATM")!;
+  s = run(s, "bookmarks.create", { template: { type: "transfer", accountId: bank._id, toAccountId: cash._id, amount: 5000, note: "ATM", tags: [] }, transactionId: atm._id }).snap;
   return s;
 }
 
@@ -45,7 +47,11 @@ test("a chunked restore ends up exactly where the one-shot restore did", () => {
   const restored = run(target, "backup.restore", { data: { ...data, transactions: [] }, entries: false });
   let chunked = restored.snap;
   const rows = restoreRowsFrom(data, restored.result as RestoreIds);
-  for (let i = 0; i < rows.length; i += 2) chunked = run(chunked, "transactions.restoreRows", { rows: rows.slice(i, i + 2) }).snap;
+  for (let i = 0; i < rows.length; i += 2) chunked = run(chunked, "transactions.restoreRows", { rows: rows.slice(i, i + 2), bookmarks: (restored.result as RestoreIds).bookmarks }).snap;
+  // bookmarks point at the restored copy of their entry, as in a one-shot restore
+  const linked = (x: Snapshot) => x.bookmarks.map((b) => x.transactions.find((t) => t._id === b.transactionId)?.note ?? null);
+  expect(linked(chunked)).toEqual(linked(oneShot));
+  expect(linked(chunked)).toEqual(["ATM"]);
 
   expect(describe(chunked)).toEqual(describe(oneShot));
   expect(describe(chunked)).toEqual(describe(source));
@@ -77,7 +83,7 @@ test("changing currency rescales what repeats and bookmarks will enter", () => {
   s = run(s, "bookmarks.create", { template: { type: "expense", accountId: s.accounts[0]._id, categoryId: food, amount: 450, note: "Coffee", tags: [] } }).snap;
   const after = run(s, "settings.changeMainCurrency", { code: "JPY", keepData: true }).snap;
   expect(after.repeats.find((r) => r.kind === "repeat")!.template.amount).toBe(16);
-  expect(after.bookmarks[0].template.amount).toBe(5);
+  expect(after.bookmarks.find((b) => b.template.note === "Coffee")!.template.amount).toBe(5);
 });
 
 test("fewer decimal places rounds amounts instead of multiplying what they show", () => {

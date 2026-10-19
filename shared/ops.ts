@@ -186,7 +186,7 @@ export interface Ops {
   /** Multiply amounts by `factor` (a change of main currency's decimals), a chunk of entries at a time. */
   "transactions.rescale": { args: { ids: Id<"transactions">[]; factor: number }; result: void };
   /** Entries from a backup, with ids already pointing at the restored accounts, categories and schedules (restoreRows). */
-  "transactions.restoreRows": { args: { rows: Record<string, unknown>[] }; result: number };
+  "transactions.restoreRows": { args: { rows: Record<string, unknown>[]; bookmarks?: Record<string, string> }; result: number };
 
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
   "repeats.remove": { args: { id: Id<"repeats"> }; result: void };
@@ -221,7 +221,11 @@ export type OpKind = keyof Ops;
 export type OpArgs<K extends OpKind> = Ops[K]["args"];
 export type OpResult<K extends OpKind> = Ops[K]["result"];
 
-export type RestoreIds = { accounts: Record<string, string>; categories: Record<string, string>; repeats: Record<string, string> };
+export type RestoreIds = {
+  accounts: Record<string, string>; categories: Record<string, string>; repeats: Record<string, string>;
+  /** Backup entry id → the restored bookmark that pointed at it, to link again as the entry comes back. */
+  bookmarks?: Record<string, string>;
+};
 
 export type BackupData = {
   version: number;
@@ -273,7 +277,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.importRows": ["settings", "accountGroups", "accounts", "categories", "currencies", "transactions"],
   "transactions.copy": ["transactions"],
   "transactions.rescale": ["transactions"],
-  "transactions.restoreRows": ["accounts", "categories", "repeats", "transactions"],
+  "transactions.restoreRows": ["accounts", "categories", "repeats", "transactions", "bookmarks"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions", "accounts", "categories"],
@@ -901,6 +905,8 @@ export function restoreRowsFrom(data: BackupData, ids: RestoreIds): Record<strin
       categoryId: t.categoryId ? map(ids.categories, t.categoryId) : undefined,
       subcategoryId: t.subcategoryId ? map(ids.categories, t.subcategoryId) : undefined,
       repeatId: t.repeatId ? map(ids.repeats, t.repeatId) : undefined,
+      // which backup entry this was, so a bookmark of it can point at the restored copy
+      fromBackupId: typeof t._id === "string" ? t._id : undefined,
     }];
   });
 }
@@ -1354,15 +1360,17 @@ const handlers: Handlers = {
     rescale(w, ids, factor);
   },
 
-  "transactions.restoreRows": (w, { rows }) => {
+  "transactions.restoreRows": (w, { rows, bookmarks = {} }) => {
     let inserted = 0;
     for (const r of rows) {
-      const s = strip(r);
+      const { fromBackupId, ...s } = strip(r);
       if (!w.get("accounts", s.accountId as string)) continue;
       if (s.type === "transfer" ? !w.get("accounts", s.toAccountId as string) : s.toAccountId !== undefined) continue;
       for (const k of ["categoryId", "subcategoryId"] as const) if (s[k] && !w.get("categories", s[k] as string)) s[k] = undefined;
       if (s.repeatId && !w.get("repeats", s.repeatId as string)) s.repeatId = undefined;
-      w.insert("transactions", clean({ ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [] }) as never);
+      const id = w.insert("transactions", clean({ ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [] }) as never);
+      const bookmark = typeof fromBackupId === "string" ? bookmarks[fromBackupId] : undefined;
+      if (bookmark && w.get("bookmarks", bookmark)) w.patch("bookmarks", bookmark as Id<"bookmarks">, { transactionId: id });
       inserted++;
     }
     return inserted;
@@ -1551,6 +1559,7 @@ const handlers: Handlers = {
       repeatIds.set(r._id as string, w.insert("repeats", { ...s, template } as never));
     }
     const txIds = new Map<string, Id<"transactions">>();
+    const bookmarkLinks: Record<string, string> = {};
     if (entries) {
       for (const t of data.transactions ?? []) {
         const s = mapTemplate(strip(t));
@@ -1562,7 +1571,8 @@ const handlers: Handlers = {
       const s = strip(b);
       const template = mapTemplate(s.template as Record<string, unknown>);
       if (!template.accountId) continue;
-      w.insert("bookmarks", { ...s, template, transactionId: s.transactionId ? txIds.get(s.transactionId as string) : undefined } as never);
+      const bookmarkId = w.insert("bookmarks", { ...s, template, transactionId: s.transactionId ? txIds.get(s.transactionId as string) : undefined } as never);
+      if (!entries && typeof s.transactionId === "string") bookmarkLinks[s.transactionId] = bookmarkId;
     }
     for (const b of data.budgets ?? []) {
       const s = strip(b);
@@ -1578,7 +1588,7 @@ const handlers: Handlers = {
       if (existing) w.patch("settings", existing._id, s as never);
       else w.insert("settings", s as never);
     }
-    return { accounts: Object.fromEntries(accountIds), categories: Object.fromEntries(catIds), repeats: Object.fromEntries(repeatIds) };
+    return { accounts: Object.fromEntries(accountIds), categories: Object.fromEntries(catIds), repeats: Object.fromEntries(repeatIds), bookmarks: bookmarkLinks };
   },
 
   "backup.wipeAll": (w, { confirm, entries = true }) => {
