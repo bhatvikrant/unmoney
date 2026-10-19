@@ -55,6 +55,13 @@ vercel git connect                                  # link github.com/bhatvikran
 
 The Vercel project is connected to the GitHub repo, so every push to `main` builds and deploys to production; other branches get preview deployments.
 
+Each branch's preview build also gets its own Convex preview deployment (`preview/<branch>`, created by `npx convex deploy` with the preview deploy key in Vercel's Preview env; `scripts/convex-preview-env.mjs` then sets its env vars). Convex only garbage-collects those days later, so `.github/workflows/delete-convex-preview.yml` deletes the merged branch's one as soon as its PR merges. It needs a `CONVEX_ACCESS_TOKEN` repo secret: in the Convex dashboard go to Team settings › Access tokens, create one, then `gh secret set CONVEX_ACCESS_TOKEN`. To clean up by hand (uses your `npx convex login` token):
+
+```bash
+node scripts/delete-convex-preview.mjs feat/some-branch              # add --dry-run to only list
+git branch -r --merged main | sed 's#.*origin/##' | grep -v '^main$' | xargs node scripts/delete-convex-preview.mjs
+```
+
 `vercel.json` sets the build command to `npx convex deploy --cmd 'npm run build'`, so every Vercel build pushes `convex/` to production and bakes the production `VITE_CONVEX_URL` into the bundle (it needs `CONVEX_DEPLOY_KEY` in the Vercel env). It also rewrites every path to `index.html` so React Router deep links work.
 
 Once, after the deploy that added `fileOwners`: record who owns the photos and import files uploaded before it (until this runs, those older files stay readable by any signed-in user who has their id):

@@ -1,0 +1,24 @@
+name: Delete Convex preview
+
+# Each branch's Vercel preview gets its own Convex preview deployment. Convex only cleans those
+# up days later, so delete the merged branch's one right away.
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  delete-preview:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/delete-convex-preview.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/delete-convex-preview.mjs "$BRANCH"
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          CONVEX_ACCESS_TOKEN: ${{ secrets.CONVEX_ACCESS_TOKEN }}
