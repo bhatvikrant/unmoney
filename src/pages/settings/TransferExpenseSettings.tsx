@@ -4,7 +4,8 @@ import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Switch } from "@/components/ui/switch";
 
 export default function TransferExpenseSettings() {
-  const { accountGroups } = useApp();
+  const { accountGroups, archivedAccounts } = useApp();
+  const sections = archivedAccounts.length ? [...accountGroups, { id: "archived", name: "Archived", accounts: archivedAccounts }] : accountGroups;
   const update = useOp("accounts.update");
   const setHidden = useOp("accounts.setHidden");
   return (
@@ -12,7 +13,7 @@ export default function TransferExpenseSettings() {
       <PageHeader back="/settings" title="Payment method settings" />
       <Page className="pb-8">
         <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 px-4 py-2 text-[10px] text-muted-foreground uppercase tracking-wide"><span>Payment method</span><span className="text-center w-16">In totals</span><span className="text-center w-16">Visible</span><span className="text-center w-16">Transfer = expense</span></div>
-        {accountGroups.map((g) => (
+        {sections.map((g) => (
           <div key={g.id} className="mb-3">
             <div className="px-4 py-1 text-xs text-muted-foreground">{g.name}</div>
             <div className="bg-card border-y">
