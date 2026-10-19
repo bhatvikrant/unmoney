@@ -6,7 +6,7 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import {
-  applyOp, clean, emptySnapshot, isTmpId, OP_TABLES, rewriteIds, tmpIdsIn, type Op, type OpKind, type Snapshot, type Table,
+  applyOp, clean, emptySnapshot, isTmpId, mergeTxScopes, OP_TABLES, rewriteIds, tmpIdsIn, txScope, type Op, type OpKind, type Snapshot, type Table, type TxScope,
 } from "../../shared/ops";
 
 export async function loadTable<T extends Table>(ctx: QueryCtx | MutationCtx, userId: Id<"users">, table: T): Promise<Doc<T>[]> {
@@ -34,10 +34,61 @@ export async function loadTable<T extends Table>(ctx: QueryCtx | MutationCtx, us
   return docs as Doc<T>[];
 }
 
-export async function loadSnapshot(ctx: QueryCtx | MutationCtx, userId: Id<"users">, tables: Iterable<Table>): Promise<Snapshot> {
+/** The user's entries an op scope names, read through indexes; never the whole table unless `all`. */
+export async function loadTransactions(ctx: QueryCtx | MutationCtx, userId: Id<"users">, scope: TxScope): Promise<Doc<"transactions">[]> {
+  if (scope.all) return loadTable(ctx, userId, "transactions");
+  const found = new Map<string, Doc<"transactions">>();
+  const add = (docs: (Doc<"transactions"> | null)[]) => { for (const d of docs) if (d && d.userId === userId) found.set(d._id, d); };
+  const byId = async (ids: string[] | undefined) => {
+    const real = (ids ?? []).filter((id) => !isTmpId(id)).map((id) => ctx.db.normalizeId("transactions", id)).filter((id) => id !== null);
+    const docs = await Promise.all(real.map((id) => ctx.db.get(id)));
+    add(docs);
+    return docs;
+  };
+  const series = async (repeatIds: (string | undefined)[]) => {
+    const real = [...new Set(repeatIds)].filter((id): id is string => !!id && !isTmpId(id)).map((id) => ctx.db.normalizeId("repeats", id)).filter((id) => id !== null);
+    for (const docs of await Promise.all(real.map((id) => ctx.db.query("transactions").withIndex("by_repeat", (q) => q.eq("repeatId", id)).collect()))) add(docs);
+  };
+  await byId(scope.ids);
+  const members = await byId(scope.seriesOf);
+  await series([...members.map((d) => d?.repeatId), ...(scope.repeatIds ?? [])]);
+  const accounts = (scope.accountIds ?? []).filter((id) => !isTmpId(id)).map((id) => ctx.db.normalizeId("accounts", id)).filter((id) => id !== null);
+  for (const accountId of accounts) {
+    const [from, to] = await Promise.all([
+      ctx.db.query("transactions").withIndex("by_user_account", (q) => q.eq("userId", userId).eq("accountId", accountId)).collect(),
+      ctx.db.query("transactions").withIndex("by_user_to_account", (q) => q.eq("userId", userId).eq("toAccountId", accountId)).collect(),
+    ]);
+    add(from);
+    add(to);
+  }
+  for (const docs of await Promise.all((scope.dates ?? []).map((date) => ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId).eq("date", date)).collect()))) add(docs);
+  return [...found.values()];
+}
+
+export async function loadSnapshot(ctx: QueryCtx | MutationCtx, userId: Id<"users">, tables: Iterable<Table>, scope: TxScope = { all: true }): Promise<Snapshot> {
   const snap = emptySnapshot();
-  await Promise.all([...tables].map(async (t) => { (snap as Record<Table, unknown[]>)[t] = await loadTable(ctx, userId, t); }));
+  await Promise.all([...tables].map(async (t) => {
+    (snap as Record<Table, unknown[]>)[t] = t === "transactions" ? await loadTransactions(ctx, userId, scope) : await loadTable(ctx, userId, t);
+  }));
   return snap;
+}
+
+/**
+ * The entries a batch needs. An op may name a series by an entry an earlier op in the same batch
+ * created; the database cannot say which series that is, so a dry run over the scoped snapshot
+ * finds the schedule each such entry belongs to.
+ */
+async function scopeFor(ctx: MutationCtx, userId: Id<"users">, ops: Op[], tables: Set<Table>): Promise<TxScope> {
+  const scope = mergeTxScopes(ops.map(txScope));
+  if (!tables.has("transactions") || scope.all || !scope.seriesOf?.some(isTmpId)) return scope;
+  const wanted = new Set(scope.seriesOf.filter(isTmpId));
+  const repeatIds = new Set<string>();
+  let snap = await loadSnapshot(ctx, userId, tables, scope);
+  for (const op of ops) {
+    try { snap = applyOp(snap, op, { userId }).snap; } catch { continue; }
+    for (const t of snap.transactions) if (wanted.has(t._id) && t.repeatId) repeatIds.add(t.repeatId);
+  }
+  return mergeTxScopes([scope, { repeatIds: [...repeatIds] }]);
 }
 
 export type OpOutcome = { id: string; status: "applied"; idMap: Record<string, string> } | { id: string; status: "rejected"; error: string };
@@ -54,7 +105,7 @@ function stableJSON(v: unknown): string {
 export async function runOps(ctx: MutationCtx, userId: Id<"users">, ops: Op[]): Promise<OpOutcome[]> {
   const tables = new Set<Table>();
   for (const op of ops) for (const t of OP_TABLES[op.kind as OpKind] ?? []) tables.add(t);
-  const before = await loadSnapshot(ctx, userId, tables);
+  const before = await loadSnapshot(ctx, userId, tables, await scopeFor(ctx, userId, ops, tables));
   let snap = before;
   const outcomes: OpOutcome[] = [];
   const applied: Op[] = [];
