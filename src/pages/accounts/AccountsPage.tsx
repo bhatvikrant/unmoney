@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AccountRow } from "@/lib/app";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { Archive, ArchiveRestore, CheckSquare, ChevronDown, FolderInput, Merge, Pencil, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Money } from "@/components/shell/Money";
 import { EmptyState } from "@/components/shell/misc";
 import { cn } from "@/lib/utils";
+import { useBottomBar } from "@/components/shell/SplitLayout";
 import { MoveToGroupSheet } from "./MoveToGroupSheet";
 import { CardThumb } from "@/components/CardFace";
 import { cardColorOf } from "../../../shared/defaults";
@@ -24,7 +25,9 @@ import { HistorySection } from "@/components/HistorySection";
 const sectionHead = "w-full flex items-center px-4 py-2 text-sm text-muted-foreground bg-muted/60";
 
 export default function AccountsPage() {
+  const bar = useBottomBar();
   const nav = useNavigate();
+  const { pathname } = useLocation();
   const { accountGroups, archivedAccounts, accountsSummary, accounts, loading } = useApp();
   const move = useOp("accounts.move");
   const setArchived = useOp("accounts.setArchived");
@@ -79,7 +82,7 @@ export default function AccountsPage() {
         {selecting ? (
           <label className={cn(row, "cursor-pointer")}><Checkbox checked={selected.has(a._id)} onCheckedChange={() => pick(a._id)} aria-label={`Select ${a.name}`} />{body}</label>
         ) : (
-          <button type="button" onClick={() => nav(`/payment-methods/${a._id}`)} className={row}>{body}</button>
+          <button type="button" aria-current={pathname === `/payment-methods/${a._id}` || pathname.startsWith(`/payment-methods/${a._id}/`) || undefined} onClick={() => nav(`/payment-methods/${a._id}`)} className={cn(row, "aria-[current]:bg-accent")}>{body}</button>
         )}
       </SwipeToDelete>
     );
@@ -158,7 +161,7 @@ export default function AccountsPage() {
         <HistorySection scope="accounts" />
       </Page>
       {selecting ? (
-        <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
+        <div className={cn(bar, "z-30 bg-background/95 backdrop-blur border-t md:safe-bottom")}>
           <div className="mx-auto max-w-3xl flex items-center gap-2 p-3 text-sm">
             <Button variant="outline" size="sm" onClick={() => setSelected(chosen.length === shown.length ? new Set() : new Set(shown.map((a) => a._id)))}>{chosen.length === shown.length && shown.length ? "Clear" : "Select all"}</Button>
             <span className="text-muted-foreground">{chosen.length}<span className="hidden sm:inline"> selected</span></span>

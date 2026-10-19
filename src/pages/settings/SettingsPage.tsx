@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { ChevronRight } from "lucide-react";
 import { useOp, useStore } from "@/lib/store";
@@ -17,6 +17,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 
 export default function SettingsPage() {
   const nav = useNavigate();
+  const { pathname } = useLocation();
   const { settings: s, user, accounts } = useApp();
   const update = useOp("settings.update");
   const setDefaultAccount = useOp("settings.setDefaultAccount");
@@ -30,7 +31,7 @@ export default function SettingsPage() {
     await clearLocal();
     await signOut();
   }
-  const link = (label: string, to: string, value?: string, info?: string) => <Row label={label} value={value} info={info} onClick={() => nav(to)} right={<ChevronRight className="size-4 text-muted-foreground" />} />;
+  const link = (label: string, to: string, value?: string, info?: string) => <Row label={label} value={value} info={info} active={pathname === to || pathname.startsWith(`${to}/`)} onClick={() => nav(to)} right={<ChevronRight className="size-4 text-muted-foreground" />} />;
   return (
     <>
       <PageHeader title="More" />

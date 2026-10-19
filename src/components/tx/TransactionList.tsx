@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useLocation } from "react-router";
 import { useOpenEntry } from "@/lib/nav";
 import { ArrowRight, Camera, Repeat, Star } from "lucide-react";
 import type { Doc } from "../../../convex/_generated/dataModel";
@@ -106,7 +106,8 @@ export function TransactionList({ txs, selectable, selected, onToggle, onLongPre
     else void undoable.entry(t._id).finally(() => setSwiped(null));
   };
   const openEntry = useOpenEntry();
-  const { id: openId } = useParams();
+  // From the path (/t/:id, /search/t/:id): a list in a parent route does not get its child route's params.
+  const openId = useLocation().pathname.match(/\/t\/([^/]+)$/)?.[1];
   const { ledger } = useApp();
   const bookmarked = useBookmarkedIds();
   const groups = useMemo(() => {

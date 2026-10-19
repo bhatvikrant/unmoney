@@ -15,6 +15,8 @@ import AppShell from "@/components/shell/AppShell";
 import LedgerRoute from "@/pages/transactions/LedgerRoute";
 import { useMediaQuery, WIDE } from "@/lib/media";
 import SearchPage from "@/pages/transactions/SearchPage";
+import TransactionEditor from "@/pages/transactions/TransactionEditor";
+import { SplitLayout } from "@/components/shell/SplitLayout";
 import BookmarksPage from "@/pages/transactions/BookmarksPage";
 import NotesPage from "@/pages/transactions/NotesPage";
 import StatsPage from "@/pages/stats/StatsPage";
@@ -117,35 +119,46 @@ function Gate() {
           <Route index element={<LedgerRoute />} />
           <Route path="t/new" element={<LedgerRoute />} />
           <Route path="t/:id" element={<LedgerRoute />} />
-          <Route path="search" element={<SearchPage />} />
-          <Route path="bookmarks" element={<BookmarksPage />} />
+          {/* On a wide screen each list opens its items in a panel beside it (SplitLayout); on a phone they are screens of their own. */}
+          <Route path="search" element={<SplitLayout list={<SearchPage />} label="Entry" width={440} />}>
+            <Route path="t/new" element={<TransactionEditor />} />
+            <Route path="t/:id" element={<TransactionEditor />} />
+          </Route>
+          <Route path="bookmarks" element={<SplitLayout list={<BookmarksPage />} label="Entry" width={440} keyParams={["bookmark"]} />}>
+            <Route path="t/new" element={<TransactionEditor />} />
+            <Route path="t/:id" element={<TransactionEditor />} />
+          </Route>
           <Route path="notes" element={<NotesPage />} />
-          <Route path="stats" element={<StatsPage />} />
-          <Route path="stats/c/:id" element={<CategoryDetail />} />
-          <Route path="budget" element={<BudgetPage />} />
-          <Route path="budget/settings" element={<BudgetSettings />} />
-          <Route path="payment-methods" element={<AccountsPage />} />
-          <Route path="payment-methods/new" element={<AccountEditor />} />
-          <Route path="payment-methods/order" element={<AccountOrder />} />
-          <Route path="payment-methods/:id" element={<AccountDetail />} />
-          <Route path="payment-methods/:id/edit" element={<AccountEditor />} />
+          <Route path="stats" element={<SplitLayout list={<StatsPage />} label="Category" />}>
+            <Route path="c/:id" element={<CategoryDetail />} />
+          </Route>
+          <Route path="budget" element={<SplitLayout list={<BudgetPage />} label="Budget settings" />}>
+            <Route path="settings" element={<BudgetSettings />} />
+          </Route>
+          <Route path="payment-methods" element={<SplitLayout list={<AccountsPage />} label="Payment method" />}>
+            <Route path="new" element={<AccountEditor />} />
+            <Route path="order" element={<AccountOrder />} />
+            <Route path=":id" element={<AccountDetail />} />
+            <Route path=":id/edit" element={<AccountEditor />} />
+          </Route>
           <Route path="accounts/*" element={<Moved from="/accounts" to="/payment-methods" />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="settings/categories" element={<CategoriesSettings />} />
-          <Route path="settings/categories/tidy" element={<CategoryTidyUp />} />
-          <Route path="settings/currency" element={<CurrencySettings />} />
-          <Route path="settings/sub-currencies" element={<SubCurrencySettings />} />
-          <Route path="settings/repeats" element={<RepeatSettings />} />
-          <Route path="settings/passcode" element={<PasscodeSettings />} />
-          <Route path="settings/period" element={<PeriodSettings />} />
-          <Route path="settings/style" element={<StyleSettings />} />
-          <Route path="settings/backup" element={<BackupSettings />} />
+          <Route path="settings" element={<SplitLayout list={<SettingsPage />} label="Setting" />}>
+            <Route path="categories" element={<CategoriesSettings />} />
+            <Route path="categories/tidy" element={<CategoryTidyUp />} />
+            <Route path="currency" element={<CurrencySettings />} />
+            <Route path="sub-currencies" element={<SubCurrencySettings />} />
+            <Route path="repeats" element={<RepeatSettings />} />
+            <Route path="passcode" element={<PasscodeSettings />} />
+            <Route path="period" element={<PeriodSettings />} />
+            <Route path="style" element={<StyleSettings />} />
+            <Route path="backup" element={<BackupSettings />} />
+            <Route path="groups" element={<AccountGroupSettings />} />
+            <Route path="deleted-payment-methods" element={<DeletedAccounts />} />
+            <Route path="account-groups" element={<Navigate to="/settings/groups" replace />} />
+            <Route path="deleted-accounts" element={<Navigate to="/settings/deleted-payment-methods" replace />} />
+            <Route path="transfer-expense" element={<TransferExpenseSettings />} />
+          </Route>
           <Route path="import" element={<ImportPage />} />
-          <Route path="settings/groups" element={<AccountGroupSettings />} />
-          <Route path="settings/deleted-payment-methods" element={<DeletedAccounts />} />
-          <Route path="settings/account-groups" element={<Navigate to="/settings/groups" replace />} />
-          <Route path="settings/deleted-accounts" element={<Navigate to="/settings/deleted-payment-methods" replace />} />
-          <Route path="settings/transfer-expense" element={<TransferExpenseSettings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
@@ -174,17 +187,24 @@ function Moved({ from, to }: { from: string; to: string }) {
   return <Navigate to={`${to}${pathname.slice(from.length)}${search}${hash}`} replace />;
 }
 
+/** Lists that open their items beside them on a wide screen (the ledger and the SplitLayout routes). */
+const SPLIT_SECTIONS = ["/search", "/bookmarks", "/stats", "/budget", "/payment-methods", "/settings"];
+function splitSectionOf(pathname: string): string | undefined {
+  if (pathname === "/" || pathname.startsWith("/t/")) return "/";
+  return SPLIT_SECTIONS.find((s) => pathname === s || pathname.startsWith(`${s}/`));
+}
+
 /**
  * Every page change, including back/forward, starts at the top; except, on a wide screen, opening
- * or switching entries beside the ledger, which stays where it was.
+ * or switching items beside a list, which stays where it was.
  */
 function ScrollToTop() {
   const { pathname } = useLocation();
   const wide = useMediaQuery(WIDE);
   const prev = useRef(pathname);
   useLayoutEffect(() => {
-    const ledger = (p: string) => p === "/" || p.startsWith("/t/");
-    if (!(wide && ledger(prev.current) && ledger(pathname))) window.scrollTo(0, 0);
+    const section = splitSectionOf(prev.current);
+    if (!(wide && section && section === splitSectionOf(pathname))) window.scrollTo(0, 0);
     prev.current = pathname;
   }, [pathname, wide]);
   return null;

@@ -14,6 +14,10 @@ export function useGoBack() {
   }, [nav]);
 }
 
+/** Lists other than the ledger that show an entry beside them on a wide screen, at <list>/t/<id>. */
+const ENTRY_LISTS = ["/search", "/bookmarks"];
+const entryListOf = (pathname: string) => ENTRY_LISTS.find((l) => pathname === l || pathname.startsWith(`${l}/t/`));
+
 /** Params that belong to the entry form rather than to the list it was opened from. */
 const ENTRY_PARAMS = ["date", "bookmark", "type", "from"];
 
@@ -37,6 +41,17 @@ export function useOpenEntry() {
   const { pathname, search } = useLocation();
   const wide = useMediaQuery(WIDE);
   return useCallback((id: string, extra: Record<string, string> = {}) => {
+    const list = wide ? entryListOf(pathname) : undefined;
+    if (list) {
+      // Beside Search or Bookmarks: the list keeps its own query (the search), the previous entry's bookmark goes,
+      // and like the ledger the entry takes the list's place in history.
+      const params = new URLSearchParams(search);
+      params.delete("bookmark");
+      for (const [k, v] of Object.entries(extra)) params.set(k, v);
+      const query = params.toString();
+      nav(`${list}/t/${id}${query ? `?${query}` : ""}`, { replace: true });
+      return;
+    }
     const besideLedger = wide && (pathname === "/" || (pathname.startsWith("/t/") && new URLSearchParams(search).get("from") === "ledger"));
     // Only the ledger's params are worth carrying (an entry from Search or Stats goes back by history, and their
     // filters would only clutter its URL); an entry's own URL holds nothing but the ledger's, so it passes them on.
@@ -50,15 +65,21 @@ export function useOpenEntry() {
 }
 
 /**
- * Leave an entry: back to the ledger as it is now (month and filters may have changed while the
- * entry was open) when it was shown beside it, else back to wherever it was opened from.
+ * Leave an entry: back to the list as it is now (the ledger's month and filters, or the search, may
+ * have changed while the entry was open) when it was shown beside it, else back to wherever it was opened from.
  */
 export function useCloseEntry() {
   const nav = useNavigate();
   const goBack = useGoBack();
-  const { search } = useLocation();
+  const { pathname, search } = useLocation();
   return useCallback(() => {
-    if (new URLSearchParams(search).get("from") === "ledger") nav(`/${listQuery(search)}`, { replace: true });
+    const list = entryListOf(pathname);
+    if (list && pathname !== list) {
+      const params = new URLSearchParams(search);
+      params.delete("bookmark");
+      const query = params.toString();
+      nav(`${list}${query ? `?${query}` : ""}`, { replace: true });
+    } else if (new URLSearchParams(search).get("from") === "ledger") nav(`/${listQuery(search)}`, { replace: true });
     else goBack();
-  }, [nav, goBack, search]);
+  }, [nav, goBack, pathname, search]);
 }
