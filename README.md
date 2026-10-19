@@ -39,6 +39,10 @@ npx convex env set AUTH_GOOGLE_SECRET <client secret>
 npx convex run seed:demo '{"email":"you@example.com"}'
 ```
 
+## Split on UnSplit
+
+Expenses can be handed to [UnSplit](https://github.com/bhatvikrant/unsplit) to share with others: select entries and tap Split (or open one and tap "Split on UnSplit"). The apps share nothing but the user's Google account, so the handoff is a URL fragment each way: UnMoney opens UnSplit's `/expenses/new` with the entries, UnSplit comes back to `/unsplit/return` with the expense it made, and the entries get a link to it. See [docs/specs/unsplit-split.md](docs/specs/unsplit-split.md). Set `VITE_UNSPLIT_URL` to use a local UnSplit.
+
 ## Deploy
 
 Live at https://unmoney.vercel.app. Backend: Convex production deployment `brilliant-cheetah-609` (same project as the dev deployment); frontend: Vercel project `unmoney`. This is what was run to get there:

@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { useOpenEntry } from "@/lib/nav";
-import { ArrowRight, Camera, Repeat, Star } from "lucide-react";
+import { ArrowRight, Camera, Repeat, Star, Users } from "lucide-react";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { useView } from "@/lib/store";
@@ -62,6 +62,7 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
           {tx.installmentIndex ? <Badge variant="secondary" className="text-[10px] px-1 py-0">{tx.installmentIndex}/{tx.installmentCount}</Badge> : null}
           {tx.repeatId && !tx.installmentIndex ? <Repeat className="size-3 text-muted-foreground shrink-0" /> : null}
           {tx.photoIds.length ? <Camera className="size-3 text-muted-foreground shrink-0" /> : null}
+          {tx.split ? <Users className="size-3 text-muted-foreground shrink-0" aria-label="Split on UnSplit" /> : null}
         </div>
         <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
           {isTransfer && !tx.note ? null : sub}

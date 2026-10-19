@@ -157,6 +157,8 @@ export default defineSchema({
     installmentIndex: v.optional(v.number()),
     installmentCount: v.optional(v.number()),
     installmentTotal: v.optional(v.number()),
+    /** The shared expense this entry was handed to UnSplit as (src/lib/unsplit.ts). */
+    split: v.optional(v.object({ app: v.literal("unsplit"), expenseId: v.string() })),
   })
     .index("by_user_date", ["userId", "date"])
     .index("by_user_account", ["userId", "accountId"])

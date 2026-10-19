@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bookmark, CalendarDays, StickyNote, Tag, Trash2, WalletCards, X } from "lucide-react";
+import { Bookmark, CalendarDays, StickyNote, Tag, Trash2, Users, WalletCards, X } from "lucide-react";
 import { useLocation } from "react-router";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -11,6 +11,8 @@ import { Money } from "@/components/shell/Money";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import type { Tx } from "@/components/tx/TransactionList";
 import type { BulkSelect } from "@/components/tx/useBulkSelect";
+import { SplitDialog } from "@/components/tx/SplitDialog";
+import { canSplit } from "@/lib/unsplit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useBottomBar } from "@/components/shell/SplitLayout";
@@ -33,6 +35,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   const [edit, setEdit] = useState<Edit>(null);
   const [val, setVal] = useState("");
   const [sheet, setSheet] = useState<null | "category" | "account">(null);
+  const [split, setSplit] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const chosen = useMemo(() => txs.filter((t) => bulk.selected.has(t._id)), [txs, bulk.selected]);
@@ -41,6 +44,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   // The category picker lists one type at a time; entries of the other type (and transfers) are left alone.
   const catType = chosen.some((t) => t.type === "expense") ? "expense" : "income";
   const ids = () => chosen.map((t) => t._id as Id<"transactions">);
+  const splittable = chosen.some(canSplit);
 
   async function run(fn: () => Promise<string | null | void>) {
     if (busy) return;
@@ -111,12 +115,14 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
             <Button variant="outline" size="sm" disabled={off} onClick={() => setSheet("account")}><WalletCards className="size-4" />Payment method</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={() => setEdit("note")}><StickyNote className="size-4" />Note</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={toggleBookmarks}><Bookmark className="size-4" />{allMarked ? "Unbookmark" : "Bookmark"}</Button>
+            <Button variant="outline" size="sm" disabled={off || !splittable} title={splittable ? "Split with others on UnSplit" : "Only expenses can be split"} onClick={() => setSplit(true)}><Users className="size-4" />Split</Button>
             <Button variant="destructive" size="sm" disabled={off} onClick={() => setEdit("delete")}><Trash2 className="size-4" />Delete</Button>
           </div>
         </div>
       </div>
       <CategoryPicker open={sheet === "category"} onOpenChange={(o) => !o && setSheet(null)} type={catType} onPick={pickCategory} />
       <AccountPicker open={sheet === "account"} onOpenChange={(o) => !o && setSheet(null)} onPick={pickAccount} title="Move to payment method" />
+      <SplitDialog open={split} onOpenChange={(o) => !o && setSplit(false)} txs={chosen} />
       <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
         <DialogContent>
           <DialogHeader>
