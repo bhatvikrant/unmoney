@@ -82,11 +82,11 @@ export function DayHeader({ date, income, expense }: { date: string; income: num
   return (
     <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/40 border-b text-sm">
       <span className="text-xl font-semibold tabular w-8">{d}</span>
-      <span className="text-[11px] text-muted-foreground">{y}/{String(m).padStart(2, "0")}</span>
+      <span className="text-[11px] text-muted-foreground">{String(m).padStart(2, "0")}/{y}</span>
       <span className="text-[10px] rounded bg-muted-foreground/70 text-background px-1.5 py-0.5">{WEEKDAY_SHORT[weekday(date)]}</span>
       <span className="flex-1" />
-      <Money amount={income} kind="income" className="text-xs" />
-      <Money amount={expense} kind="expense" className="text-xs w-24 text-right" />
+      <Money amount={income} kind="income" className="text-xs opacity-60" />
+      <Money amount={expense} kind="expense" className="text-xs w-24 text-right opacity-60" />
     </div>
   );
 }
