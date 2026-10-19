@@ -4,7 +4,7 @@ import { useOp, useView } from "@/lib/store";
 import { useUndoableDelete } from "@/lib/undo";
 import { notesRange } from "../../../shared/views";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { useMonthParam, useMonthsWithData } from "@/lib/period-hooks";
+import { useMonthParam, useMonthsWithData, usePeriodNeighbours } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
 import { NOTE_COLORS } from "../../../shared/defaults";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -20,8 +20,9 @@ import { cn } from "@/lib/utils";
 import { todayISO } from "../../../shared/dates";
 
 export default function NotesPage() {
-  const { month, range, shift, setMonth } = useMonthParam();
+  const { month, range, setMonth } = useMonthParam();
   const monthsWithData = useMonthsWithData("notes");
+  const nb = usePeriodNeighbours("monthly", month, monthsWithData.dates);
   const [sp, setSp] = useSearchParams();
   const view = useView();
   const notes = useMemo(() => notesRange(view, range.from, range.to), [view, range.from, range.to]);
@@ -48,7 +49,7 @@ export default function NotesPage() {
 
   return (
     <>
-      <PageHeader back="/" title="Notes" sub={<div className="mx-auto max-w-3xl"><MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} month={month} onPick={setMonth} withData={monthsWithData.months} spent={monthsWithData.spent} /></div>} />
+      <PageHeader back="/" title="Notes" sub={<div className="mx-auto max-w-3xl"><MonthNav label={monthLabel(month)} onPrev={nb.prev ? () => setMonth(nb.prev!) : undefined} onNext={nb.next ? () => setMonth(nb.next!) : undefined} month={month} onPick={setMonth} withData={monthsWithData.months} spent={monthsWithData.spent} /></div>} />
       <Page>
         {notes && !notes.length ? <EmptyState title="No notes this month" hint="Notes are daily memos. They show as coloured dots on the calendar." /> : null}
         <div className="bg-card border-y">

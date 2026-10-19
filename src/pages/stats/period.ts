@@ -25,10 +25,11 @@ export function useStatPeriod() {
   else if (period === "yearly") { range = yearRange(year, settings.monthStartDay); label = String(year); key = String(year); }
   else if (period === "custom") { range = { from, to }; label = `${dateLabel(from, { year: true })} – ${dateLabel(to, { year: true })}`; key = `${from}:${to}`; }
   else { range = monthRange(month, settings.monthStartDay); label = monthLabel(month); key = month; }
-  const shift = (n: number) => {
-    if (period === "weekly") set({ week: addDays(week, 7 * n) });
-    else if (period === "yearly") set({ year: String(year + n) });
-    else if (period === "monthly") set({ month: shiftMonthKey(month, n) });
+  /** Show the period with this key: a week's first day, a month key or a year, matching `period`. */
+  const go = (k: string) => {
+    if (period === "weekly") set({ week: k });
+    else if (period === "yearly") set({ year: k });
+    else set({ month: k });
   };
   /** 12 trailing periods for trend charts (months for monthly/custom, weeks for weekly, years for yearly). */
   const trailing = (): { key: string; from: string; to: string; label: string }[] => {
@@ -37,5 +38,5 @@ export function useStatPeriod() {
     const base = period === "monthly" ? month : monthKeyForDate(to, settings.monthStartDay);
     return Array.from({ length: 12 }, (_, i) => { const k = shiftMonthKey(base, -(11 - i)); const { m } = parseMonthKey(k); return { key: k, ...monthRange(k, settings.monthStartDay), label: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1] }; });
   };
-  return { period, setPeriod: (p: StatPeriod) => set({ period: p }), range, label, key, shift, set, month, trailing, monthKey, from, to };
+  return { period, setPeriod: (p: StatPeriod) => set({ period: p }), range, label, key, go, set, month, trailing, monthKey, from, to };
 }
