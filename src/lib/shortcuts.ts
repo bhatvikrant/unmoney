@@ -28,9 +28,10 @@ export function useShortcuts(keys: Record<string, () => void>, enabled = true) {
 /**
  * Touch handlers for a horizontal swipe: left calls onLeft (next), right calls onRight (previous).
  * A swipe that starts on a swipe-to-delete row is that row's: a left swipe opens it, and a right
- * swipe on an open row closes it. A right swipe on a closed row still counts.
+ * swipe on an open row closes it. A right swipe on a closed row still counts. `onRowTook` hears
+ * about a left swipe that would have been "next" but went to a row.
  */
-export function useSwipe(onLeft: () => void, onRight: () => void, enabled = true) {
+export function useSwipe(onLeft: () => void, onRight: () => void, enabled = true, onRowTook?: () => void) {
   const start = useRef<{ x: number; y: number; row?: string } | null>(null);
   return {
     onTouchStart: (e: TouchEvent) => {
@@ -45,7 +46,10 @@ export function useSwipe(onLeft: () => void, onRight: () => void, enabled = true
       const dy = e.changedTouches[0].clientY - s.y;
       // clearly sideways and long enough, so scrolling the list never changes the month
       if (Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy)) return;
-      if (s.row && (dx < 0 || s.row === "open")) return;
+      if (s.row && (dx < 0 || s.row === "open")) {
+        if (dx < 0 && s.row !== "open") onRowTook?.();
+        return;
+      }
       if (dx < 0) onLeft(); else onRight();
     },
   };
