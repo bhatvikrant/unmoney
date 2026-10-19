@@ -7,7 +7,8 @@ import { useApp, useRefreshRates } from "@/lib/app";
 import { staleLabel, useFxState } from "@/lib/fxRates";
 import { cn } from "@/lib/utils";
 import { CURRENCIES } from "../../../shared/currencies";
-import { formatRate, rateAmount, type RateSide } from "../../../shared/money";
+import { formatRate, parseNumber, rateAmount, type RateSide } from "../../../shared/money";
+import { localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { EmptyState } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
@@ -17,9 +18,11 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 
+/** A rate as typed ("73,9" in German, "73.9" in English), or 0 when it is not a positive number. */
+const readRate = (text: string) => { const n = parseNumber(text, LOCALE_DECIMAL); return n !== null && n > 0 ? n : 0; };
 /** A rate as typed, in the direction shown, back to how it is stored: units of the sub currency per 1 main. */
-const toStored = (text: string, flip: boolean) => (flip ? 1 / Number(text) : Number(text));
-const toShown = (rate: number, flip: boolean) => String(flip ? Number((1 / rate).toPrecision(6)) : rate);
+const toStored = (text: string, flip: boolean) => (flip ? 1 / readRate(text) : readRate(text));
+const toShown = (rate: number, flip: boolean) => localNumber(flip ? Number((1 / rate).toPrecision(6)) : rate);
 
 /**
  * How finely a custom currency can be split, asked as its smallest amount rather than a number of
@@ -35,7 +38,7 @@ const SMALLEST = [
 /** "S$1 = [ 73.9 ] INR": typed as one unit of the side shown first; the swap button turns it around. */
 function RateField({ main, sub, value, flip, onChange }: { main: RateSide; sub: RateSide; value: string; flip: boolean; onChange: (value: string, flip: boolean) => void }) {
   const [one, other] = flip ? [sub, main] : [main, sub];
-  const swap = () => onChange(Number(value) > 0 ? toShown(Number(value), true) : value, !flip);
+  const swap = () => onChange(readRate(value) ? toShown(readRate(value), true) : value, !flip);
   return (
     <div className="flex items-center gap-2">
       <span className="text-sm whitespace-nowrap">{rateAmount(one, "1", one.symbol === other.symbol)} =</span>
@@ -112,7 +115,7 @@ export default function SubCurrencySettings() {
           <div className="max-h-64 overflow-y-auto border rounded-md divide-y">
             {options.map((c) => <button key={c.code} type="button" disabled={busy} onClick={() => addStandard(c.code)} className="w-full flex justify-between px-3 py-2 text-sm hover:bg-accent"><span>{c.name}</span><span className="text-muted-foreground">{c.code}</span></button>)}
           </div>
-          <Button variant="outline" className="w-full" onClick={() => { setAdding(false); setCustom({ code: "", name: "", symbol: "", rate: "1", flip: true, decimals: "2" }); }}>Custom currency (gold, points, crypto…)</Button>
+          <Button variant="outline" className="w-full" onClick={() => { setAdding(false); setCustom({ code: "", name: "", symbol: "", rate: localNumber(1), flip: true, decimals: "2" }); }}>Custom currency (gold, points, crypto…)</Button>
         </div>
       </BottomSheet>
       <Dialog open={!!custom} onOpenChange={(o) => !o && setCustom(null)}>
@@ -127,7 +130,7 @@ export default function SubCurrencySettings() {
               <div className="space-y-1.5 col-span-2"><Label>Smallest amount</Label><Select value={custom.decimals} onValueChange={(v) => setCustom({ ...custom, decimals: v })}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{SMALLEST.map((o) => <SelectItem key={o.decimals} value={String(o.decimals)}>{o.amount} <span className="text-muted-foreground">· {o.hint}</span></SelectItem>)}</SelectContent></Select></div>
             </div>
           ) : null}
-          <DialogFooter><Button disabled={!custom?.code || !custom.name || !(Number(custom.rate) > 0)} onClick={async () => { try { await add({ code: custom!.code, name: custom!.name, symbol: custom!.symbol || custom!.code, rate: toStored(custom!.rate, custom!.flip), decimals: Number(custom!.decimals), symbolPosition: "after", isCustom: true }); setCustom(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Add</Button></DialogFooter>
+          <DialogFooter><Button disabled={!custom?.code || !custom.name || !readRate(custom.rate)} onClick={async () => { try { await add({ code: custom!.code, name: custom!.name, symbol: custom!.symbol || custom!.code, rate: toStored(custom!.rate, custom!.flip), decimals: Number(custom!.decimals), symbolPosition: "after", isCustom: true }); setCustom(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Add</Button></DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
@@ -140,7 +143,7 @@ export default function SubCurrencySettings() {
               <div className="space-y-1.5"><Label>Symbol position</Label><Select value={edit.symbolPosition} onValueChange={(v) => setEdit({ ...edit, symbolPosition: v as "before" | "after" })}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="before">Before</SelectItem><SelectItem value="after">After</SelectItem></SelectContent></Select></div>
             </div>
           ) : null}
-          <DialogFooter><Button disabled={!(Number(edit?.rate) > 0)} onClick={saveEdit}>Save</Button></DialogFooter>
+          <DialogFooter><Button disabled={!edit || !readRate(edit.rate)} onClick={saveEdit}>Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>
