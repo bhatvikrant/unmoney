@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { currentUserId } from "./lib/auth";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { loadTable, runOps, type OpOutcome } from "./lib/snapshot";
@@ -12,7 +12,7 @@ const tableArg = v.union(...TABLES.map((t) => v.literal(t)));
 export const me = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await currentUserId(ctx);
     if (!userId) return null;
     const user = await ctx.db.get(userId);
     return { userId, user: user ? { name: user.name, email: user.email, image: user.image } : null };
@@ -23,7 +23,7 @@ export const me = query({
 export const table = query({
   args: { table: tableArg },
   handler: async (ctx, { table }) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await currentUserId(ctx);
     if (!userId) return null;
     return loadTable(ctx, userId, table);
   },
@@ -36,7 +36,7 @@ export const table = query({
 export const transactionsPage = query({
   args: { paginationOpts: paginationOptsValidator },
   handler: async (ctx, { paginationOpts }) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await currentUserId(ctx);
     if (!userId) return { page: [], isDone: true, continueCursor: "" };
     return ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).paginate(paginationOpts);
   },
@@ -52,7 +52,7 @@ const opArg = v.object({ id: v.string(), kind: v.string(), args: v.any(), at: v.
 export const apply = mutation({
   args: { ops: v.array(opArg) },
   handler: async (ctx, { ops }) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await currentUserId(ctx);
     if (!userId) throw new Error("Not signed in");
     const results: OpOutcome[] = [];
     const fresh: Op[] = [];

@@ -246,9 +246,9 @@ const ALL: Table[] = [...TABLES];
 export const OP_TABLES: Record<OpKind, Table[]> = {
   "settings.completeOnboarding": ["settings", "accountGroups", "accounts", "categories"],
   "settings.update": ["settings"],
-  "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks"],
+  "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks", "categoryCleanups"],
   "settings.setPasscode": ["settings"],
-  "settings.changeDecimals": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks"],
+  "settings.changeDecimals": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks", "categoryCleanups"],
   "settings.setDefaultAccount": ["settings", "accounts"],
   "accountGroups.create": ["accountGroups"],
   "accountGroups.update": ["accountGroups"],
@@ -259,7 +259,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "accounts.update": ["accountGroups", "accounts"],
   "accounts.setHidden": ["accounts"],
   "accounts.remove": ["accounts"],
-  "accounts.restore": ["accountGroups", "accounts"],
+  "accounts.restore": ["accountGroups", "accounts", "categories", "repeats"],
   "accounts.permanentlyDelete": ["accounts", "transactions"],
   "accounts.reorder": ["accountGroups", "accounts"],
   "accounts.payCard": ["accounts", "transactions"],
@@ -268,7 +268,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "categories.remove": ["categories"],
   "categories.reorder": ["categories"],
   "categories.applyCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups"],
-  "categories.undoCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups"],
+  "categories.undoCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups", "accounts"],
   "transactions.create": ["accounts", "categories", "transactions", "repeats"],
   "transactions.update": ["accounts", "categories", "transactions", "repeats"],
   "transactions.remove": ["transactions", "repeats"],
@@ -861,6 +861,7 @@ function undoCleanup(w: Work, id: Id<"categoryCleanups">): { restoredEntries: nu
     if (c && !c.deletedAt && !liveSubs(w, cid).length && !categoryInUse(w, cid)) w.patch("categories", cid, { deletedAt: w.at });
   }
   w.patch("categoryCleanups", id, { undoneAt: w.at });
+  resumePaused(w);
   return { restoredEntries };
 }
 
@@ -870,17 +871,47 @@ const strip = (d: Record<string, unknown>) => {
   return rest;
 };
 
+/**
+ * An amount times a power of ten. Scaling down divides by the whole power (10 ** -4 is
+ * 0.00009999…, so 5000 * 10 ** -4 would round to 0 rather than 1), and a result past MAX_AMOUNT
+ * is refused.
+ */
+export function scaleAmount(n: number, factor: number): number {
+  const v = factor >= 1 ? Math.round(n * factor) : Math.round(n / Math.round(1 / factor));
+  checkAmount(v);
+  return v;
+}
+
 function rescale(w: Work, ids: Id<"transactions">[], factor: number) {
-  const scale = (n: number | undefined) => (n === undefined ? undefined : Math.round(n * factor));
+  const scale = (n: number | undefined) => (n === undefined ? undefined : scaleAmount(n, factor));
   for (const id of ids) {
     const t = w.must("transactions", id);
     w.patch("transactions", id, { amount: scale(t.amount)!, feeAmount: scale(t.feeAmount), installmentTotal: scale(t.installmentTotal) });
   }
 }
 
+/**
+ * Schedules stopped because their account or category was deleted start again once everything
+ * they use is back, from the next date due after the restore: the dates missed meanwhile are skipped
+ * rather than filled in all at once.
+ */
+function resumePaused(w: Work) {
+  const live = (table: "accounts" | "categories", id: string | undefined) => !id || (!!w.get(table, id) && !w.get(table, id)!.deletedAt);
+  const today = new Date(w.at).toISOString().slice(0, 10);
+  for (const r of [...w.snap.repeats]) {
+    if (!r.pausedForDeleted) continue;
+    const t = r.template;
+    if (!live("accounts", t.accountId) || !live("accounts", t.toAccountId) || !live("categories", t.categoryId) || !live("categories", t.subcategoryId)) continue;
+    let next = r.nextDate;
+    for (let guard = 0; next < today && guard < 1000; guard++) next = nextOccurrence(next, r.startDate, r.frequency);
+    const ended = !!r.endDate && next > r.endDate;
+    w.patch("repeats", r._id, { active: !ended, pausedForDeleted: undefined, nextDate: next });
+  }
+}
+
 /** Opening balances, budgets and what repeats and bookmarks will enter, when amounts change scale. */
 function rescaleOtherAmounts(w: Work, factor: number) {
-  const scale = (n: number) => Math.round(n * factor);
+  const scale = (n: number) => scaleAmount(n, factor);
   for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: scale(a.initialBalance) });
   for (const b of [...w.snap.budgets]) {
     const overrides: Record<string, number> = {};
@@ -890,6 +921,12 @@ function rescaleOtherAmounts(w: Work, factor: number) {
   const template = (t: Template): Template => ({ ...t, amount: scale(t.amount), feeAmount: t.feeAmount === undefined ? undefined : scale(t.feeAmount) });
   for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
   for (const b of [...w.snap.bookmarks]) w.patch("bookmarks", b._id, { template: template(b.template) });
+  // a tidy-up undone later puts these budgets back, so they change scale too
+  for (const c of [...w.snap.categoryCleanups]) {
+    w.patch("categoryCleanups", c._id, {
+      budgetsBefore: c.budgetsBefore.map((b) => ({ ...b, amount: scale(b.amount), overrides: Object.fromEntries(Object.entries(b.overrides).map(([k, v]) => [k, scale(v)])) })),
+    });
+  }
 }
 
 /** A backup's entries with their account, category and schedule ids moved to the restored copies, for restoreRows. */
@@ -1025,6 +1062,7 @@ const handlers: Handlers = {
     const g = w.get("accountGroups", a.groupId);
     if (g?.deletedAt) w.patch("accountGroups", g._id, { deletedAt: undefined });
     w.patch("accounts", id, { deletedAt: undefined });
+    resumePaused(w);
   },
   "accounts.permanentlyDelete": (w, { id }) => {
     w.must("accounts", id);
@@ -1408,7 +1446,7 @@ const handlers: Handlers = {
       const tpl = rep.template;
       const gone = [w.get("accounts", tpl.accountId), tpl.toAccountId ? w.get("accounts", tpl.toAccountId) : null, tpl.categoryId ? w.get("categories", tpl.categoryId) : null]
         .some((d) => d === undefined || d?.deletedAt);
-      if (gone) { w.patch("repeats", rep._id, { active: false }); continue; }
+      if (gone) { w.patch("repeats", rep._id, { active: false, pausedForDeleted: true }); continue; }
       let next = rep.nextDate;
       let guard = 0;
       let stopped = false;
