@@ -71,7 +71,10 @@ export function lintCategories(snap: Snapshot, now = Date.now()): QuickFix[] {
     // Where a category ends up once the duplicate merges above it go through.
     const finalOf = new Map<string, Id<"categories">>();
 
-    // Same name written differently, under the same parent.
+    // Same name written differently, under the same parent. The starter category keeps its name
+    // ("Food" over a user's "food"); otherwise the most-used one does.
+    const defaults = new Set<string>(type === "expense" ? DEFAULT_EXPENSE_CATEGORIES : DEFAULT_INCOME_CATEGORIES);
+    const isDefault = (c: Doc<"categories">) => !c.parentId && defaults.has(c.name);
     const groups = new Map<string, Doc<"categories">[]>();
     for (const c of live) {
       const key = `${c.parentId ?? ""}|${normName(c.name)}`;
@@ -79,7 +82,7 @@ export function lintCategories(snap: Snapshot, now = Date.now()): QuickFix[] {
     }
     for (const g of groups.values()) {
       if (g.length < 2) continue;
-      g.sort((a, b) => entriesOf(b._id) - entriesOf(a._id) || a.order - b.order);
+      g.sort((a, b) => Number(isDefault(b)) - Number(isDefault(a)) || entriesOf(b._id) - entriesOf(a._id) || a.order - b.order);
       const target = g[0];
       for (const c of g) { taken.add(c._id); finalOf.set(c._id, target._id); }
       out.push({ key: `merge:${g.map((c) => c._id).sort().join(",")}`, type, kind: "merge", ids: g.map((c) => c._id), targetId: target._id, parentId: target.parentId, reason: "Same name written differently." });
@@ -102,7 +105,6 @@ export function lintCategories(snap: Snapshot, now = Date.now()): QuickFix[] {
     }
 
     // Unused: no entries, budgets, repeats or bookmarks. Starter categories get a month's grace.
-    const defaults = new Set<string>(type === "expense" ? DEFAULT_EXPENSE_CATEGORIES : DEFAULT_INCOME_CATEGORIES);
     const refs = (x: { categoryId?: string; subcategoryId?: string }, id: string) => x.categoryId === id || x.subcategoryId === id;
     for (const c of live) {
       if (taken.has(c._id) || entriesOf(c._id) || live.some((x) => x.parentId === c._id)) continue;
