@@ -53,9 +53,12 @@ export default function TransactionsPage() {
   const monthsWithData = useMonthsWithData("transactions");
   const openEntry = useOpenEntry();
   const entryOpen = useLocation().pathname.startsWith("/t/");
-  const goToday = () => setMonth(monthKeyForDate(todayISO(), settings.monthStartDay));
+  const thisMonth = monthKeyForDate(todayISO(), settings.monthStartDay);
+  const goToday = () => setMonth(thisMonth);
+  // The page stops at the current month: there is nothing to see in a future month yet.
+  const next = () => { if (month < thisMonth) shift(1); };
   // not while an entry is open beside the list: they would replace it and lose unsaved edits
-  useShortcuts({ n: () => openEntry("new", { date: addDate() }), "/": () => nav("/search"), ArrowLeft: () => shift(-1), ArrowRight: () => shift(1), t: goToday }, !entryOpen);
+  useShortcuts({ n: () => openEntry("new", { date: addDate() }), "/": () => nav("/search"), ArrowLeft: () => shift(-1), ArrowRight: next, t: goToday }, !entryOpen);
   const [sp, setSp] = useSearchParams();
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
@@ -63,7 +66,7 @@ export default function TransactionsPage() {
   // a fresh sheet on every open, so it starts from the filter in the URL (not ticks a Clear removed)
   const [filterKey, setFilterKey] = useState(0);
   const bulk = useBulkSelect();
-  const swipe = useSwipe(() => shift(1), () => shift(-1), !bulk.active, swipeHintOnce);
+  const swipe = useSwipe(next, () => shift(-1), !bulk.active, swipeHintOnce);
 
   const snap = useView();
   const raw = useMemo(() => txListRange(snap, range.from, range.to), [snap, range.from, range.to]);
@@ -106,7 +109,7 @@ export default function TransactionsPage() {
         }
         sub={
           <div className="mx-auto max-w-3xl">
-            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} month={month} onPick={setMonth} withData={monthsWithData.months} spent={monthsWithData.spent} />
+            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={next} month={month} onPick={setMonth} maxMonth={thisMonth} withData={monthsWithData.months} spent={monthsWithData.spent} />
             <SegmentedTabs value={view} onChange={setView} items={[
               { value: "daily", label: "Daily" }, { value: "calendar", label: "Calendar" }, { value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }, { value: "summary", label: "Summary" },
             ]} />
@@ -127,7 +130,7 @@ export default function TransactionsPage() {
         {raw && view === "daily" ? <TransactionList txs={txs} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} swipeToDelete emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}
         {raw && view === "weekly" ? <WeeklyView txs={txs} range={range} /> : null}
-        {view === "monthly" ? <MonthlyView month={month} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}
+        {view === "monthly" ? <MonthlyView month={month} onPick={(m) => { if (m > thisMonth) return; setMonth(m); setView("daily"); }} /> : null}
         {raw && view === "summary" ? <SummaryView txs={txs} month={month} range={range} /> : null}
       </Page>
       </div>
