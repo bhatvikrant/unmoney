@@ -46,11 +46,15 @@ export default function AccountsPage() {
                     <button key={a._id} type="button" onClick={() => nav(`/accounts/${a._id}`)} className="w-full flex items-center px-4 py-3 border-b last:border-b-0 text-sm hover:bg-accent/40 text-left">
                       <span className="flex-1 truncate">{a.name}</span>
                       {isCard ? (
-                        <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><Money amount={a.payable ?? 0} kind="expense" /><div className="text-[10px] text-muted-foreground"><Money amount={a.balance} muted /></div></span><Money amount={a.outstanding ?? 0} kind="expense" /></span>
+                        <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><Money amount={a.payable ?? 0} kind="expense" /><div className="text-[10px] text-muted-foreground"><Money amount={a.balance} muted /></div></span><span><Money amount={a.outstanding ?? 0} kind="expense" />{a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={-a.upcoming} sign muted /> upcoming</div> : null}</span></span>
                       ) : a.kind === "debitCard" ? (
                         <span className="text-right"><Money amount={-(a.monthlyUsage ?? 0)} className="text-muted-foreground" /><div className="text-[10px] text-muted-foreground">this month</div></span>
                       ) : (
-                        <Money amount={a.balance} kind={!a.includeInTotals ? "plain" : a.balance < 0 ? "expense" : "income"} />
+                        <span className="text-right">
+                          <Money amount={a.balance} kind={!a.includeInTotals ? "plain" : a.balance < 0 ? "expense" : "income"} />
+                          {/* future-dated entries are not in the balance yet */}
+                          {a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={a.upcoming} sign muted /> upcoming</div> : null}
+                        </span>
                       )}
                     </button>
                   ))}
