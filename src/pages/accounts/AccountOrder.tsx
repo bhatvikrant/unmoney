@@ -6,6 +6,7 @@ import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNavigate } from "react-router";
+import { NO_GROUP, NO_GROUP_NAME } from "../../../shared/views";
 
 export default function AccountOrder() {
   const nav = useNavigate();
@@ -26,16 +27,17 @@ export default function AccountOrder() {
     [list[ai], list[aj]] = [list[aj], list[ai]];
     commit(list);
   };
-  const changeGroup = (id: string, groupId: string) => commit(ordered.map((a) => (a._id === id ? { ...a, groupId: groupId as Id<"accountGroups"> } : a)));
+  const changeGroup = (id: string, groupId: string) => commit(ordered.map((a) => (a._id === id ? { ...a, groupId: groupId === NO_GROUP ? undefined : (groupId as Id<"accountGroups">) } : a)));
+  const sections = [...live.map((g) => ({ id: g._id as string, name: g.name })), { id: NO_GROUP, name: NO_GROUP_NAME }];
   return (
     <>
-      <PageHeader back="/accounts" title="Order & visibility" right={<Button variant="ghost" size="sm" onClick={() => nav("/settings/account-groups")}>Groups</Button>} />
+      <PageHeader back="/payment-methods" title="Order & visibility" right={<Button variant="ghost" size="sm" onClick={() => nav("/settings/groups")}>Groups</Button>} />
       <Page className="pb-8">
-        {live.map((g) => {
-          const items = ordered.filter((a) => a.groupId === g._id);
+        {sections.map((g) => {
+          const items = ordered.filter((a) => (a.groupId ?? NO_GROUP) === g.id);
           if (!items.length) return null;
           return (
-            <div key={g._id} className="mt-3">
+            <div key={g.id} className="mt-3">
               <div className="px-4 py-1 text-xs text-muted-foreground">{g.name}</div>
               <div className="bg-card border-y">
                 {items.map((a) => (
@@ -43,7 +45,7 @@ export default function AccountOrder() {
                     <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(a._id, -1)}><ArrowUp className="size-4" /></Button>
                     <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(a._id, 1)}><ArrowDown className="size-4" /></Button>
                     <span className="flex-1 truncate px-1">{a.name}</span>
-                    <Select value={a.groupId} onValueChange={(v) => changeGroup(a._id, v)}><SelectTrigger className="h-7 w-32 text-xs"><SelectValue /></SelectTrigger><SelectContent>{live.map((x) => <SelectItem key={x._id} value={x._id}>{x.name}</SelectItem>)}</SelectContent></Select>
+                    <Select value={a.groupId ?? NO_GROUP} onValueChange={(v) => changeGroup(a._id, v)}><SelectTrigger className="h-7 w-32 text-xs" aria-label={`Group of ${a.name}`}><SelectValue /></SelectTrigger><SelectContent>{sections.map((x) => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}</SelectContent></Select>
                     <Button variant="ghost" size="icon" className="size-7" aria-label={a.hidden ? "Show" : "Hide"} onClick={() => setHidden({ id: a._id, hidden: !a.hidden })}>{a.hidden ? <EyeOff className="size-4 text-muted-foreground" /> : <Eye className="size-4" />}</Button>
                   </div>
                 ))}
@@ -51,7 +53,7 @@ export default function AccountOrder() {
             </div>
           );
         })}
-        <p className="px-4 py-3 text-xs text-muted-foreground">Hidden accounts stay in the totals but disappear from lists and pickers.</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground">Hidden payment methods stay in the totals but disappear from lists and pickers.</p>
       </Page>
     </>
   );

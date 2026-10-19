@@ -59,7 +59,7 @@ export function MoneyManagerPrompt() {
           <div className="mb-1 flex size-10 items-center justify-center rounded-full bg-muted"><ArrowRightLeft className="size-5" /></div>
           <DialogTitle>Coming from Money Manager?</DialogTitle>
           <DialogDescription>
-            Bring over your accounts, categories and every entry from Money Manager's Excel export. You see what will be added before anything is imported.
+            Bring over your payment methods, categories and every entry from Money Manager's Excel export. You see what will be added before anything is imported.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">

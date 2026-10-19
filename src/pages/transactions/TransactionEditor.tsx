@@ -180,7 +180,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
     const amount = toMinor(amountMajor, settings.decimals);
     if (!f.accountId) throw new Error("Pick an account");
     if (f.type !== "transfer" && !f.categoryId) throw new Error("Pick a category");
-    if (f.type === "transfer" && !f.toAccountId) throw new Error("Pick an account to transfer to");
+    if (f.type === "transfer" && !f.toAccountId) throw new Error("Pick a payment method to transfer to");
     const fee = f.type === "transfer" && f.feeOn ? toMinor(evaluateExpression(f.fee) ?? 0, settings.decimals) : undefined;
     return {
       type: f.type,
@@ -284,12 +284,12 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
             <>
               <Field label="From" onClick={() => setSheet("account")} value={f.accountId ? accountName(f.accountId) : "Select"} />
               <Field label="To" onClick={() => setSheet("to")} value={f.toAccountId ? accountName(f.toAccountId) : "Select"} right={
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Swap accounts" onClick={(e) => { e.stopPropagation(); setF((p) => ({ ...p, accountId: p.toAccountId, toAccountId: p.accountId })); }}><ArrowLeftRight className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7" aria-label="Swap payment methods" onClick={(e) => { e.stopPropagation(); setF((p) => ({ ...p, accountId: p.toAccountId, toAccountId: p.accountId })); }}><ArrowLeftRight className="size-4" /></Button>
               } />
             </>
           ) : (
             <>
-              <Field label="Account" onClick={() => setSheet("account")} value={f.accountId ? accountName(f.accountId) : "Select"} />
+              <Field label="Method" onClick={() => setSheet("account")} value={f.accountId ? accountName(f.accountId) : "Select"} />
               <Field label="Category" onClick={() => setSheet("category")} value={f.categoryId ? categoryLabel({ categoryId: f.categoryId, subcategoryId: f.subcategoryId }) : "Select"} />
             </>
           )}
@@ -386,7 +386,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         </div>
       </div>
 
-      <AccountPicker open={sheet === "account"} onOpenChange={(o) => !o && setSheet(null)} onPick={(a) => set("accountId", a)} title={f.type === "transfer" ? "From" : "Account"} exclude={f.type === "transfer" ? f.toAccountId : undefined} />
+      <AccountPicker open={sheet === "account"} onOpenChange={(o) => !o && setSheet(null)} onPick={(a) => set("accountId", a)} title={f.type === "transfer" ? "From" : "Payment method"} exclude={f.type === "transfer" ? f.toAccountId : undefined} />
       <AccountPicker open={sheet === "to"} onOpenChange={(o) => !o && setSheet(null)} onPick={(a) => set("toAccountId", a)} title="To" exclude={f.accountId} />
       {f.type !== "transfer" ? (
         <CategoryPicker open={sheet === "category"} onOpenChange={(o) => !o && setSheet(null)} type={f.type} onPick={(c, s) => setF((p) => ({ ...p, categoryId: c, subcategoryId: s }))} />
