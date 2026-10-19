@@ -169,12 +169,16 @@ export interface Ops {
   "accounts.move": { args: { ids: Id<"accounts">[]; groupId?: Id<"accountGroups"> }; result: void };
   /** Migration: gives every account without a kind its group's old kind. Safe to run any number of times. */
   "accounts.adoptKinds": { args: Record<string, never>; result: number };
+  /** Archives (or brings back) methods no longer in use. Entries on them are left untouched. */
+  "accounts.setArchived": { args: { ids: Id<"accounts">[]; archived: boolean }; result: void };
   "accounts.payCard": { args: { id: Id<"accounts">; amount: number; date: string; fromAccountId?: Id<"accounts"> }; result: Id<"transactions"> };
 
   "categories.create": { args: { type: "income" | "expense"; name: string; parentId?: Id<"categories"> }; result: Id<"categories"> };
   "categories.update": { args: { id: Id<"categories">; name?: string; parentId?: Id<"categories"> | null }; result: void };
   "categories.remove": { args: { id: Id<"categories"> }; result: void };
   "categories.reorder": { args: { ids: Id<"categories">[] }; result: void };
+  /** Archives (or brings back) categories no longer in use. Entries, budgets and schedules on them are left untouched. */
+  "categories.setArchived": { args: { ids: Id<"categories">[]; archived: boolean }; result: void };
   /** Tidy up: run a plan of category changes, moving every affected entry, and keep a record to undo it. */
   "categories.applyCleanup": { args: { steps: CleanupStep[] }; result: CleanupResult };
   "categories.undoCleanup": { args: { id: Id<"categoryCleanups"> }; result: { restoredEntries: number } };
@@ -276,11 +280,13 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "accounts.reorder": ["accountGroups", "accounts"],
   "accounts.move": ["accountGroups", "accounts"],
   "accounts.adoptKinds": ["accountGroups", "accounts"],
+  "accounts.setArchived": ["settings", "accounts"],
   "accounts.payCard": ["accounts", "transactions"],
   "categories.create": ["categories"],
   "categories.update": ["categories"],
   "categories.remove": ["categories"],
   "categories.reorder": ["categories"],
+  "categories.setArchived": ["categories"],
   "categories.applyCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups"],
   "categories.undoCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups", "accounts"],
   "transactions.create": ["accounts", "categories", "transactions", "repeats"],
@@ -1036,7 +1042,9 @@ const handlers: Handlers = {
   },
   "settings.setDefaultAccount": (w, { id }) => {
     const s = w.requireSettings();
-    if (id && w.must("accounts", id).deletedAt) throw new Error("That account is deleted");
+    const a = id ? w.must("accounts", id) : undefined;
+    if (a?.deletedAt) throw new Error("That payment method is deleted");
+    if (a?.archivedAt) throw new Error("That payment method is archived");
     w.patch("settings", s._id, { defaultAccountId: id });
   },
 
@@ -1122,6 +1130,18 @@ const handlers: Handlers = {
       w.patch("accounts", a._id, { groupId, order: order++, kind: resolveKind(a, w.snap.accountGroups) as AccountKind });
     }
   },
+  "accounts.setArchived": (w, { ids, archived }) => {
+    if (!ids.length) throw new Error("Pick at least one payment method");
+    for (const id of ids) {
+      const a = w.must("accounts", id);
+      if (archived === !!a.archivedAt) continue;
+      // Only the flag changes: balances, entries, repeats and bookmarks on it are left as they are.
+      w.patch("accounts", id, { archivedAt: archived ? w.at : undefined });
+    }
+    // New entries should not start on an archived method.
+    const s = w.settings();
+    if (archived && s?.defaultAccountId && ids.includes(s.defaultAccountId)) w.patch("settings", s._id, { defaultAccountId: undefined });
+  },
   "accounts.adoptKinds": (w) => {
     let n = 0;
     for (const a of [...w.snap.accounts]) {
@@ -1175,6 +1195,14 @@ const handlers: Handlers = {
     const now = Date.now();
     for (const c of [...w.snap.categories]) if (c.parentId === id) w.patch("categories", c._id, { deletedAt: now });
     w.patch("categories", id, { deletedAt: now });
+  },
+  "categories.setArchived": (w, { ids, archived }) => {
+    if (!ids.length) throw new Error("Pick at least one category");
+    for (const id of ids) {
+      const c = w.must("categories", id);
+      // Only the flag changes; a main category's subcategories go out of sight with it without being touched.
+      if (archived !== !!c.archivedAt) w.patch("categories", id, { archivedAt: archived ? w.at : undefined });
+    }
   },
   "categories.reorder": (w, { ids }) => {
     ids.forEach((id, i) => { w.must("categories", id); w.patch("categories", id, { order: i }); });
