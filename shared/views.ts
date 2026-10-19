@@ -287,7 +287,22 @@ export function txExportRows(snap: Snapshot, from?: string, to?: string) {
     subAmount: t.subAmount ?? "",
     subCurrency: t.subCurrency ?? "",
     fee: t.feeAmount ?? "",
-    tags: t.tags.join(" "),
+    tags: t.tags.join(", "),
+  }));
+}
+
+/**
+ * Entries as CSV/TSV records, amounts in major units (a sub-currency amount in its own decimals).
+ * The columns are the ones the importer reads back, fees and tags included.
+ */
+export function txCsvRows(snap: Snapshot, from?: string, to?: string): Record<string, string | number>[] {
+  const decimals = snap.settings[0]?.decimals ?? 2;
+  const curDecimals = new Map(snap.currencies.map((c) => [c.code, c.decimals]));
+  const major = (minor: number | string, d: number) => (minor === "" ? "" : Number(minor) / 10 ** d);
+  return txExportRows(snap, from, to).map((r) => ({
+    Date: r.time ? `${r.date} ${r.time}` : r.date, Account: r.account, Category: r.category, Subcategory: r.subcategory, Note: r.note,
+    Amount: major(r.amount, decimals), "Income/Expense": r.type, Description: r.description,
+    "Amount Sub": major(r.subAmount, curDecimals.get(r.subCurrency) ?? 2), Currency: r.subCurrency, Fee: major(r.fee, decimals), Tags: r.tags,
   }));
 }
 
