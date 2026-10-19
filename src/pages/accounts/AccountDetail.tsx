@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { Pencil } from "lucide-react";
+import { Archive, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useOp, useStore, useView } from "@/lib/store";
 import { accountGet } from "../../../shared/views";
@@ -38,6 +38,7 @@ export default function AccountDetail() {
   const today = useToday();
   const data = useMemo(() => accountGet(view, realId, gran, r.from, r.to, today), [view, realId, gran, r.from, r.to, today]);
   const payCard = useOp("accounts.payCard");
+  const setArchived = useOp("accounts.setArchived");
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
   if (!data) return <><PageHeader back="/payment-methods" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Payment method not found</div></>;
   const a = data.account;
@@ -48,6 +49,13 @@ export default function AccountDetail() {
         <Select value={gran} onValueChange={(v) => setGran(v as typeof gran)}><SelectTrigger className="h-8 w-16"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">D</SelectItem><SelectItem value="monthly">M</SelectItem><SelectItem value="yearly">Y</SelectItem></SelectContent></Select></>}
         sub={<div className="mx-auto max-w-3xl"><MonthNav label={gran === "yearly" ? String(parseMonthKey(month).y) : monthLabel(month)} onPrev={() => shift(gran === "yearly" ? -12 : -1)} onNext={() => shift(gran === "yearly" ? 12 : 1)} /></div>} />
       <Page className="pb-8">
+        {a.archivedAt ? (
+          <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border bg-muted/50 px-3 py-2 text-sm" role="status">
+            <Archive className="size-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 text-muted-foreground">Archived. Not offered when adding entries; its entries still count.</span>
+            <Button size="sm" variant="outline" className="h-7" onClick={() => setArchived({ ids: [a._id], archived: false }).catch((e) => toast.error(e instanceof Error ? e.message : "Failed"))}>Unarchive</Button>
+          </div>
+        ) : null}
         {data.kind === "card" || data.kind === "debitCard" ? (
           <div className="px-4 pt-4 pb-1">
             <CardFace kind={data.kind} name={a.name} bankName={a.bankName} last4={a.last4} color={cardColorOf({ kind: data.kind, color: a.color })} className="mx-auto sm:mx-0" />
@@ -87,7 +95,7 @@ export default function AccountDetail() {
               <div className="space-y-1.5"><Label>Amount ({settings.mainCurrency})</Label><Input inputMode="decimal" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} /></div>
               <div className="space-y-1.5"><Label>Date</Label><Input type="date" value={pay.date} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></div>
               <div className="space-y-1.5"><Label>Pay from</Label>
-                <Select value={pay.from} onValueChange={(v) => setPay({ ...pay, from: v })}><SelectTrigger className="w-full"><SelectValue placeholder="Pick" /></SelectTrigger><SelectContent>{accounts.filter((x) => x._id !== a._id && x.kind !== "card").map((x) => <SelectItem key={x._id} value={x._id}>{x.name} · {fmt(x.balance)}</SelectItem>)}</SelectContent></Select>
+                <Select value={pay.from} onValueChange={(v) => setPay({ ...pay, from: v })}><SelectTrigger className="w-full"><SelectValue placeholder="Pick" /></SelectTrigger><SelectContent>{accounts.filter((x) => x._id !== a._id && x.kind !== "card" && (!x.archivedAt || x._id === pay.from)).map((x) => <SelectItem key={x._id} value={x._id}>{x.name} · {fmt(x.balance)}</SelectItem>)}</SelectContent></Select>
               </div>
             </div>
           ) : null}

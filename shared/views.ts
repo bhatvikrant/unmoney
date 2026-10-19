@@ -75,7 +75,8 @@ export type AccountRow = Omit<Doc<"accounts">, "kind"> & {
 export type AccountGroupRow = { id: string; name: string; group: Doc<"accountGroups"> | null; accounts: AccountRow[]; total: number; payable: number; outstanding: number };
 export const NO_GROUP = "none";
 export const NO_GROUP_NAME = "No group";
-export type AccountsList = { groups: AccountGroupRow[]; accounts: AccountRow[]; assets: number; liabilities: number; total: number };
+/** `groups` holds the methods in use; archived ones are only in `archived` (and `accounts`), and still count in the totals. */
+export type AccountsList = { groups: AccountGroupRow[]; archived: AccountRow[]; accounts: AccountRow[]; assets: number; liabilities: number; total: number };
 
 export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
   const ledger = ledgerOf(snap);
@@ -111,11 +112,12 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
     payable: items.reduce((s, r) => s + (r.payable ?? 0), 0),
     outstanding: items.reduce((s, r) => s + (r.outstanding ?? 0), 0),
   });
+  const inUse = rows.filter((r) => !r.archivedAt);
   const groups = [
-    ...liveGroups.map((g) => section(g._id, g.name, g, rows.filter((r) => r.groupId === g._id))),
-    section(NO_GROUP, NO_GROUP_NAME, null, rows.filter((r) => !r.groupId)),
+    ...liveGroups.map((g) => section(g._id, g.name, g, inUse.filter((r) => r.groupId === g._id))),
+    section(NO_GROUP, NO_GROUP_NAME, null, inUse.filter((r) => !r.groupId)),
   ].filter((g) => g.accounts.length > 0);
-  return { groups, accounts: rows, assets, liabilities, total: assets - liabilities };
+  return { groups, archived: rows.filter((r) => r.archivedAt), accounts: rows, assets, liabilities, total: assets - liabilities };
 }
 
 export function accountsListDeleted(snap: Snapshot) {

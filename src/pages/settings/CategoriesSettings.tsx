@@ -1,12 +1,13 @@
 import { useOp, useView } from "@/lib/store";
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { ArrowDown, ArrowUp, Plus, Pencil, Trash2, CornerDownRight, WandSparkles, ChevronRight, Check, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Pencil, Trash2, CornerDownRight, WandSparkles, ChevronRight, ChevronDown, Check, X, Archive, ArchiveRestore } from "lucide-react";
 import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { CLEANUP_UNDO_MS } from "../../../shared/ops";
 import { lintCategories } from "../../../shared/categoryLint";
 import { useApp } from "@/lib/app";
+import { cn } from "@/lib/utils";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SegmentedTabs } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
@@ -22,9 +23,16 @@ export default function CategoriesSettings() {
   const update = useOp("categories.update");
   const remove = useOp("categories.remove");
   const reorder = useOp("categories.reorder");
-  const live = categories.filter((c) => c.type === type && !c.deletedAt);
+  const setArchived = useOp("categories.setArchived");
+  const [showArchived, setShowArchived] = useState(false);
+  const ofType = categories.filter((c) => c.type === type && !c.deletedAt);
+  const live = ofType.filter((c) => !c.archivedAt);
   const mains = live.filter((c) => !c.parentId);
   const subsOf = (id: string) => live.filter((c) => c.parentId === id);
+  // Archived: main categories (their subcategories go with them) and subcategories archived on their own under a main still in use.
+  const archived = ofType.filter((c) => c.archivedAt && (!c.parentId || mains.some((m) => m._id === c.parentId)));
+  const nameOf = (id?: string) => categories.find((c) => c._id === id)?.name;
+  const archive = (id: Id<"categories">, value: boolean) => setArchived({ ids: [id], archived: value }).then(() => setDialog(null)).catch((e) => toast.error(e instanceof Error ? e.message : "Failed"));
   const tidy = useTidyUndo();
   const [dialog, setDialog] = useState<null | { id?: Id<"categories">; name: string; parentId: string }>(null);
   const move = (list: typeof mains, id: string, dir: -1 | 1) => {
@@ -77,7 +85,31 @@ export default function CategoriesSettings() {
             </div>
           ))}
         </div>
-        <p className="px-4 py-3 text-xs text-muted-foreground">Subcategories need the Subcategories switch in Settings. Edit a subcategory and set its parent to "Main category" to promote it.</p>
+        {archived.length ? (
+          <div className="mt-4">
+            <button type="button" onClick={() => setShowArchived(!showArchived)} aria-expanded={showArchived} className="w-full flex items-center px-4 py-1.5 text-sm text-muted-foreground">
+              <ChevronDown className={cn("size-4 mr-1 transition-transform", !showArchived && "-rotate-90")} />
+              <Archive className="size-3.5 mr-1.5" />
+              <span className="flex-1 text-left">Archived</span>
+              <span className="text-xs tabular">{archived.length}</span>
+            </button>
+            {showArchived ? (
+              <div className="bg-card border-y">
+                {archived.map((c) => {
+                  const subs = ofType.filter((x) => x.parentId === c._id).length;
+                  return (
+                    <div key={c._id} className="flex items-center gap-1 border-b last:border-b-0 px-4 py-1.5 text-sm text-muted-foreground">
+                      <span className="flex-1 min-w-0 truncate">{c.parentId ? `${nameOf(c.parentId)} › ` : ""}{c.name}{subs ? <span className="text-xs"> · {subs} {subs === 1 ? "subcategory" : "subcategories"}</span> : null}</span>
+                      <Button variant="ghost" size="sm" className="h-7" onClick={() => archive(c._id, false)}><ArchiveRestore className="size-4" />Unarchive</Button>
+                      <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Delete ${c.name}`} onClick={() => del(c._id, c.name)}><Trash2 className="size-4" /></Button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        <p className="px-4 py-3 text-xs text-muted-foreground">Subcategories need the Subcategories switch in Settings. Edit a subcategory and set its parent to "Main category" to promote it. Archive a category you no longer use (edit it): it stops showing when you add entries, and entries already on it keep it.</p>
         <UndoLastTidy tidy={tidy} />
       </Page>
       <Dialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)}>
@@ -93,7 +125,10 @@ export default function CategoriesSettings() {
               ) : null}
             </div>
           ) : null}
-          <DialogFooter><Button onClick={save} disabled={!dialog?.name.trim()}>Save</Button></DialogFooter>
+          <DialogFooter className="sm:justify-between">
+            {dialog?.id ? <Button variant="outline" onClick={() => archive(dialog.id!, true)}><Archive className="size-4" />Archive{!dialog.parentId || dialog.parentId === "main" ? (subsOf(dialog.id).length ? " with subcategories" : "") : ""}</Button> : <span />}
+            <Button onClick={save} disabled={!dialog?.name.trim()}>Save</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

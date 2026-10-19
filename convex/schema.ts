@@ -112,6 +112,11 @@ export default defineSchema({
     last4: v.optional(v.string()),
     /** Cards only: background of the card in the app, "#rrggbb". */
     color: v.optional(v.string()),
+    /**
+     * Set when the user archives a method they no longer use. It drops out of pickers and the
+     * grouped list, but its balance and every entry on it stay exactly as they were.
+     */
+    archivedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
@@ -123,6 +128,8 @@ export default defineSchema({
     name: v.string(),
     parentId: v.optional(v.id("categories")),
     order: v.number(),
+    /** Set when the user archives a category they no longer use: it leaves the pickers (with its subcategories), entries keep it. */
+    archivedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
   })
     .index("by_user_type", ["userId", "type"])
