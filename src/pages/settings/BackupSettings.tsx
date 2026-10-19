@@ -2,7 +2,8 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-import { useOp, useView } from "@/lib/store";
+import { useView } from "@/lib/store";
+import { useBulkOps } from "@/lib/bulk";
 import { backupExport, txExportRows } from "../../../shared/views";
 import { type BackupData } from "../../../shared/ops";
 import { useApp } from "@/lib/app";
@@ -18,8 +19,7 @@ export default function BackupSettings() {
   const view = useView();
   const nav = useNavigate();
   const { settings } = useApp();
-  const restore = useOp("backup.restore");
-  const wipe = useOp("backup.wipeAll");
+  const bulk = useBulkOps();
   const restoreRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
@@ -44,8 +44,9 @@ export default function BackupSettings() {
     if (!file) return;
     if (!window.confirm("Restore replaces ALL current data with the backup. Continue?")) return;
     setBusy(true);
-    try { await restore({ data: JSON.parse(await file.text()) as BackupData }); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "Restore failed"); }
+    // the toast from bulk.restore reports how the sync ends
+    try { await bulk.restore(JSON.parse(await file.text()) as BackupData); }
+    catch (e) { if (e instanceof SyntaxError) toast.error("That file is not a backup"); }
     setBusy(false);
     if (restoreRef.current) restoreRef.current.value = "";
   }
@@ -68,7 +69,7 @@ export default function BackupSettings() {
           <Row label="Import from Money Manager, Excel, CSV or TSV" hint="Review what will be added before anything is imported" onClick={() => nav("/import")} right={<ChevronRight className="size-4 text-muted-foreground" />} />
         </Section>
         <Section title="Danger zone">
-          <Row label="Delete all entries" hint="Removes transactions, notes, schedules, bookmarks and budgets. Payment methods and categories stay." right={<Button size="sm" variant="destructive" onClick={async () => { if (window.confirm("Delete every transaction? This cannot be undone.")) { await wipe({ confirm: "DELETE" }); } }}>Delete</Button>} />
+          <Row label="Delete all entries" hint="Removes transactions, notes, schedules, bookmarks and budgets. Payment methods and categories stay." right={<Button size="sm" variant="destructive" onClick={() => { if (window.confirm("Delete every transaction, note, schedule, bookmark and budget? This cannot be undone.")) void bulk.wipeAll().catch(() => {}); }}>Delete</Button>} />
         </Section>
       </Page>
     </>

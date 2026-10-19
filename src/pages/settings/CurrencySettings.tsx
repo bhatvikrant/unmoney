@@ -1,5 +1,6 @@
 import { useOp } from "@/lib/store";
 import { useMemo, useState } from "react";
+import { useBulkOps } from "@/lib/bulk";
 import { useApp } from "@/lib/app";
 import { getRates } from "@/lib/fxRates";
 import { CURRENCIES } from "../../../shared/currencies";
@@ -14,7 +15,7 @@ import { cn } from "@/lib/utils";
 export default function CurrencySettings() {
   const { settings: s, fmt } = useApp();
   const update = useOp("settings.update");
-  const change = useOp("settings.changeMainCurrency");
+  const bulk = useBulkOps();
   const [q, setQ] = useState("");
   const [picking, setPicking] = useState<string | null>(null);
   const list = useMemo(() => { const l = q.toLowerCase(); return CURRENCIES.filter((c) => c.code !== s.mainCurrency && (!l || c.code.toLowerCase().includes(l) || c.name.toLowerCase().includes(l))); }, [q, s.mainCurrency]);
@@ -40,8 +41,8 @@ export default function CurrencySettings() {
           <AlertDialogHeader><AlertDialogTitle>Switch to {picking}?</AlertDialogTitle><AlertDialogDescription>Keep your data (amounts stay as entered and are simply shown in the new currency), or start over with an empty ledger.</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="destructive" onClick={async () => { await change({ code: picking!, keepData: false }); setPicking(null); }}>Data initialisation</Button>
-            <AlertDialogAction onClick={async () => { await change({ code: picking!, keepData: true }); setPicking(null); }}>Data retention</AlertDialogAction>
+            <Button variant="destructive" onClick={() => { void bulk.changeMainCurrency(picking!, false).catch(() => {}); setPicking(null); }}>Data initialisation</Button>
+            <AlertDialogAction onClick={() => { void bulk.changeMainCurrency(picking!, true).catch(() => {}); setPicking(null); }}>Data retention</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

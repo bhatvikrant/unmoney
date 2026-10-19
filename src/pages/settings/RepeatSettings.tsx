@@ -14,7 +14,8 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FREQ_LABEL } from "@/components/tx/RepeatSheet";
-import { toMajor, toMinor } from "../../../shared/money";
+import { toMinor } from "../../../shared/money";
+import { amountInput, LOCALE_DECIMAL } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export default function RepeatSettings() {
@@ -34,7 +35,7 @@ export default function RepeatSettings() {
             const t = r.template;
             const kind = t.type === "income" ? "income" : t.type === "expense" ? "expense" : "transfer";
             return (
-              <button key={r._id} type="button" onClick={() => setEdit({ r, frequency: r.frequency, endDate: r.endDate ?? "", nextDate: r.nextDate, amount: String(toMajor(t.amount, settings.decimals)), note: t.note, active: r.active })} className={cn("w-full flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm text-left hover:bg-accent/40", !r.active && "opacity-60")}>
+              <button key={r._id} type="button" onClick={() => setEdit({ r, frequency: r.frequency, endDate: r.endDate ?? "", nextDate: r.nextDate, amount: amountInput(t.amount, settings.decimals), note: t.note, active: r.active })} className={cn("w-full flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm text-left hover:bg-accent/40", !r.active && "opacity-60")}>
                 <div className="w-20 shrink-0 text-xs text-muted-foreground line-clamp-2">{t.type === "transfer" ? "Transfer" : categoryLabel(t)}</div>
                 <div className="flex-1 min-w-0"><div className="truncate">{t.note || accountName(t.accountId)}</div><div className="text-xs text-muted-foreground">{r.kind === "installment" ? `${r.installmentCount} installments from ${r.startDate}` : `${FREQ_LABEL[r.frequency]} · next ${r.nextDate}${r.endDate ? ` · until ${r.endDate}` : ""}`}{!r.active ? " · stopped" : ""}</div></div>
                 <Money amount={t.amount} kind={kind} />
@@ -63,7 +64,7 @@ export default function RepeatSettings() {
           ) : edit ? <p className="text-sm text-muted-foreground">All {edit.r.installmentCount} entries were created when the plan was set. Edit or delete them from the ledger (use "This and future" to change the rest).</p> : null}
           <DialogFooter>
             <Button variant="destructive" onClick={async () => { await remove({ id: edit!.r._id }); setEdit(null); }}>Delete schedule</Button>
-            {edit?.r.kind === "repeat" ? <Button onClick={async () => { try { await update({ id: edit.r._id, frequency: edit.frequency, endDate: edit.endDate || null, nextDate: edit.nextDate, active: edit.active, template: { ...edit.r.template, amount: toMinor(edit.amount, settings.decimals), note: edit.note } }); setEdit(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Save</Button> : null}
+            {edit?.r.kind === "repeat" ? <Button onClick={async () => { try { await update({ id: edit.r._id, frequency: edit.frequency, endDate: edit.endDate || null, nextDate: edit.nextDate, active: edit.active, template: { ...edit.r.template, amount: toMinor(edit.amount, settings.decimals, LOCALE_DECIMAL), note: edit.note } }); setEdit(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Save</Button> : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>

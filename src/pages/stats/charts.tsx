@@ -14,7 +14,8 @@ export function CategoryPie({ items }: { items: { id: string; name: string; amou
   const { fmt } = useApp();
   const top = items.slice(0, 9);
   const rest = items.slice(9).reduce((s, i) => s + i.amount, 0);
-  const data = rest ? [...top, { id: "other", name: "Other", amount: rest, pct: 0 }] : top;
+  // not "Other": that is also a default category, and two slices would share the name
+  const data = rest ? [...top, { id: "rest", name: `${items.length - top.length} more`, amount: rest, pct: 0 }] : top;
   if (!data.length) return <div className="h-52 flex items-center justify-center text-sm text-muted-foreground">Nothing recorded in this period</div>;
   const total = data.reduce((s, d) => s + d.amount, 0);
   return (

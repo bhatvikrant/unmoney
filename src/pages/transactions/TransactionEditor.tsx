@@ -7,9 +7,11 @@ import { useOp, useStore, useView } from "@/lib/store";
 import { bookmarksList, noteSuggestions, txGet, txTags, type TxDetail } from "../../../shared/views";
 import { useApp, useRefreshRates } from "@/lib/app";
 import { staleLabel, useFxState } from "@/lib/fxRates";
+import { amountInput, localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { todayISO } from "../../../shared/dates";
-import { evaluateExpression, formatRate, toMajor, toMinor } from "../../../shared/money";
+import { evaluateExpression, formatRate, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { useGoBack } from "@/lib/nav";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
 import { RepeatSheet, repeatLabel, type RepeatChoice } from "@/components/tx/RepeatSheet";
@@ -83,15 +85,15 @@ export default function TransactionEditor() {
         toAccountId: existing.toAccountId,
         categoryId: existing.categoryId,
         subcategoryId: existing.subcategoryId,
-        amount: String(toMajor(existing.amount, settings.decimals)),
+        amount: amountInput(existing.amount, settings.decimals),
         subCurrency: existing.subCurrency ?? "",
-        subAmount: existing.subAmount !== undefined && cur ? String(toMajor(existing.subAmount, cur.decimals)) : "",
+        subAmount: existing.subAmount !== undefined && cur ? amountInput(existing.subAmount, cur.decimals) : "",
         rate: existing.exchangeRate,
         note: existing.note,
         description: existing.description ?? "",
         tags: existing.tags,
         feeOn: !!existing.feeAmount,
-        fee: existing.feeAmount ? String(toMajor(existing.feeAmount, settings.decimals)) : "",
+        fee: existing.feeAmount ? amountInput(existing.feeAmount, settings.decimals) : "",
         photoIds: existing.photoIds,
       };
     }
@@ -107,12 +109,12 @@ export default function TransactionEditor() {
           toAccountId: b.template.toAccountId,
           categoryId: b.template.categoryId,
           subcategoryId: b.template.subcategoryId,
-          amount: b.template.amount ? String(toMajor(b.template.amount, settings.decimals)) : "",
+          amount: b.template.amount ? amountInput(b.template.amount, settings.decimals) : "",
           note: b.template.note,
           description: b.template.description ?? "",
           tags: b.template.tags,
           feeOn: !!b.template.feeAmount,
-          fee: b.template.feeAmount ? String(toMajor(b.template.feeAmount, settings.decimals)) : "",
+          fee: b.template.feeAmount ? amountInput(b.template.feeAmount, settings.decimals) : "",
         };
       }
     }
@@ -128,6 +130,7 @@ type Existing = TxDetail;
 
 function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transactions">; existing?: Existing }) {
   const nav = useNavigate();
+  const goBack = useGoBack();
   const { settings, accountName, categoryLabel, currencies, fmt, accounts } = useApp();
   const [f, setF] = useState<Form>(initial);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -172,14 +175,14 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   }
 
   const mainMajor = useMemo(() => {
-    if (!sub) return evaluateExpression(f.amount);
-    const s = evaluateExpression(f.subAmount);
+    if (!sub) return evaluateExpression(f.amount, LOCALE_DECIMAL);
+    const s = evaluateExpression(f.subAmount, LOCALE_DECIMAL);
     if (s === null) return null;
     return rate ? s / rate : null;
   }, [f.amount, f.subAmount, rate, sub]);
 
   useEffect(() => {
-    if (sub && mainMajor !== null) set("amount", String(Math.round(mainMajor * 10 ** settings.decimals) / 10 ** settings.decimals));
+    if (sub && mainMajor !== null) set("amount", localNumber(Math.round(mainMajor * 10 ** settings.decimals) / 10 ** settings.decimals));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainMajor, sub]);
 
@@ -199,13 +202,14 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   }, [isEdit]);
 
   function buildArgs() {
-    const amountMajor = evaluateExpression(f.amount);
+    const amountMajor = evaluateExpression(f.amount, LOCALE_DECIMAL);
     if (amountMajor === null) throw new Error("Enter an amount");
     const amount = toMinor(amountMajor, settings.decimals);
+    if (amount === 0) throw new Error("Enter an amount");
     if (!f.accountId) throw new Error("Pick an account");
     if (f.type !== "transfer" && !f.categoryId) throw new Error("Pick a category");
     if (f.type === "transfer" && !f.toAccountId) throw new Error("Pick a payment method to transfer to");
-    const fee = f.type === "transfer" && f.feeOn ? toMinor(evaluateExpression(f.fee) ?? 0, settings.decimals) : undefined;
+    const fee = f.type === "transfer" && f.feeOn ? toMinor(evaluateExpression(f.fee, LOCALE_DECIMAL) ?? 0, settings.decimals) : undefined;
     return {
       type: f.type,
       date: f.date,
@@ -215,7 +219,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
       categoryId: f.type !== "transfer" ? f.categoryId : undefined,
       subcategoryId: f.type !== "transfer" ? f.subcategoryId : undefined,
       amount,
-      subAmount: sub ? toMinor(evaluateExpression(f.subAmount) ?? 0, sub.decimals) : undefined,
+      subAmount: sub ? toMinor(evaluateExpression(f.subAmount, LOCALE_DECIMAL) ?? 0, sub.decimals) : undefined,
       subCurrency: sub ? sub.code : undefined,
       exchangeRate: sub ? rate : undefined,
       note: f.note,
@@ -235,7 +239,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
       if (isEdit) {
         if (inSeries && !scope) { setConfirm("scope"); setBusy(false); return; }
         await update({ id: id!, ...args, scope });
-        nav(-1);
+        goBack();
       } else {
         await create({
           ...args,
@@ -245,7 +249,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         if (mode === "continue") {
           setF((p) => ({ ...p, amount: "", subAmount: "", note: "", description: "", tags: [], photoIds: [], fee: "", feeOn: false, repeat: { kind: "none" } }));
         } else {
-          nav(-1);
+          goBack();
         }
       }
     } catch (e) {
@@ -326,7 +330,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
                 </>
               ) : (
                 <>
-                  <PrefixedInput ref={amountRef} prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", String(v)); }} />
+                  <PrefixedInput ref={amountRef} prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount, LOCALE_DECIMAL); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", localNumber(v)); }} />
                 </>
               )}
               <Button variant="ghost" size="icon" className="size-8" aria-label="Calculator" onClick={() => setSheet("keypad")}><Calculator className="size-4" /></Button>
@@ -336,7 +340,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           {sub ? (
             <Field label="Converted">
               <div className="flex-1 flex items-center gap-2 text-sm">
-                <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value); const s = evaluateExpression(f.subAmount); if (m && s) setF((p) => ({ ...p, rate: s / m, rateFromFeed: false })); }} />
+                <PrefixedInput prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => { set("amount", e.target.value); const m = evaluateExpression(e.target.value, LOCALE_DECIMAL); const s = evaluateExpression(f.subAmount, LOCALE_DECIMAL); if (m && s) setF((p) => ({ ...p, rate: s / m, rateFromFeed: false })); }} />
                 <span className="flex flex-col items-end text-xs text-muted-foreground whitespace-nowrap">
                   <span>{rate ? formatRate(mainSide, sub, rate) : "No rate"}</span>
                   {rateAge ? <span className="text-[11px] text-muted-foreground/80">{rateAge}</span> : null}
@@ -369,7 +373,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
                         note: s.note,
                         categoryId: p.categoryId ?? s.categoryId,
                         subcategoryId: p.categoryId ? p.subcategoryId : s.subcategoryId,
-                        amount: p.amount || String(toMajor(s.amount, settings.decimals)),
+                        amount: p.amount || amountInput(s.amount, settings.decimals),
                         accountId: p.accountId ?? s.accountId,
                       })); }}
                       className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex justify-between gap-2"
@@ -443,8 +447,8 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            {inSeries ? <AlertDialogAction onClick={() => remove({ id: id!, scope: "future" }).then(() => nav(-1))}>This and future</AlertDialogAction> : null}
-            <AlertDialogAction onClick={() => remove({ id: id!, scope: "one" }).then(() => nav(-1))}>{inSeries ? "Only this one" : "Delete"}</AlertDialogAction>
+            {inSeries ? <AlertDialogAction onClick={() => remove({ id: id!, scope: "future" }).then(() => goBack())}>This and future</AlertDialogAction> : null}
+            <AlertDialogAction onClick={() => remove({ id: id!, scope: "one" }).then(() => goBack())}>{inSeries ? "Only this one" : "Delete"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

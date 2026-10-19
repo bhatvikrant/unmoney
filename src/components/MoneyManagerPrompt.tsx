@@ -38,7 +38,9 @@ export function MoneyManagerPrompt() {
   const [open, setOpen] = useState(false);
   const empty = view.transactions.length === 0;
   // Wait for the server's copy so a returning user on a new device is not asked.
-  const eligible = !!userId && status.live && empty && pathname !== "/import" && !wasSeen(userId);
+  // Only on the start screen: never on top of an entry being typed (the home-screen "Add" shortcut opens /t/new).
+  const home = pathname === "/";
+  const eligible = !!userId && status.live && empty && home && !wasSeen(userId);
 
   useEffect(() => {
     if (!eligible) return;
@@ -53,7 +55,7 @@ export function MoneyManagerPrompt() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) close(false); }}>
+    <Dialog open={open && home} onOpenChange={(o) => { if (!o) close(false); }}>
       <DialogContent>
         <DialogHeader>
           <div className="mb-1 flex size-10 items-center justify-center rounded-full bg-muted"><ArrowRightLeft className="size-5" /></div>

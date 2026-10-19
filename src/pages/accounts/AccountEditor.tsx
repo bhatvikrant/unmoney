@@ -5,13 +5,15 @@ import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { useGoBack } from "@/lib/nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { toMajor, toMinor } from "../../../shared/money";
+import { amountInput, LOCALE_DECIMAL } from "@/lib/format";
+import { toMinor } from "../../../shared/money";
 import { ACCOUNT_KINDS, cardColorOf, type AccountKind } from "../../../shared/defaults";
 import { CardColorPicker, CardFace } from "@/components/CardFace";
 import { NO_GROUP, NO_GROUP_NAME } from "../../../shared/views";
@@ -22,6 +24,7 @@ const NONE = "none";
 export default function AccountEditor() {
   const { id } = useParams();
   const nav = useNavigate();
+  const goBack = useGoBack();
   const { settings, accounts, groups } = useApp();
   const existing = id ? accounts.find((a) => a._id === id) : undefined;
   const liveGroups = groups.filter((g) => !g.deletedAt).sort((a, b) => a.order - b.order);
@@ -29,7 +32,7 @@ export default function AccountEditor() {
     name: existing?.name ?? "",
     kind: (existing?.kind ?? "bank") as AccountKind,
     groupId: (existing?.groupId ?? NO_GROUP) as string,
-    amount: existing ? String(toMajor(existing.initialBalance, settings.decimals)) : "0",
+    amount: existing ? amountInput(existing.initialBalance, settings.decimals) : "0",
     includeInTotals: existing?.includeInTotals ?? true,
     hidden: existing?.hidden ?? false,
     transferAsExpense: existing?.transferAsExpense ?? false,
@@ -56,7 +59,7 @@ export default function AccountEditor() {
   async function save() {
     try {
       const args = {
-        name: f.name, kind, groupId: f.groupId === NO_GROUP ? undefined : (f.groupId as Id<"accountGroups">), initialBalance: toMinor(f.amount, settings.decimals), includeInTotals: f.includeInTotals, hidden: f.hidden,
+        name: f.name, kind, groupId: f.groupId === NO_GROUP ? undefined : (f.groupId as Id<"accountGroups">), initialBalance: toMinor(f.amount, settings.decimals, LOCALE_DECIMAL), includeInTotals: f.includeInTotals, hidden: f.hidden,
         transferAsExpense: !!transferable && f.transferAsExpense, description: f.description || undefined,
         billingAccountId: kind === "card" && f.billingAccountId ? (f.billingAccountId as Id<"accounts">) : undefined,
         settlementDay: kind === "card" ? Number(f.settlementDay) : undefined, paymentDay: kind === "card" ? Number(f.paymentDay) : undefined,
@@ -67,7 +70,7 @@ export default function AccountEditor() {
       };
       if (args.last4 && args.last4.length !== 4) throw new Error("Enter all 4 last digits, or leave them empty");
       if (id) await update({ id: id as Id<"accounts">, ...args }); else await create(args);
-      if (id) nav(-1); else nav("/payment-methods");
+      if (id) goBack("/payment-methods"); else nav("/payment-methods");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   }
 
