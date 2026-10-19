@@ -45,10 +45,11 @@ export function EmptyState({ title, hint, action, className }: { title: string; 
   );
 }
 
-export function Fab({ onClick, label = "Add", className, icon }: { onClick: (e: MouseEvent<HTMLButtonElement>) => void; label?: string; className?: string; icon?: ReactNode }) {
+export function Fab({ onClick, label = "Add", className, icon, title }: { onClick: (e: MouseEvent<HTMLButtonElement>) => void; label?: string; className?: string; icon?: ReactNode; title?: string }) {
   return (
     <Button
       aria-label={label}
+      title={title}
       onClick={onClick}
       className={cn("fixed bottom-[calc(var(--tabbar-h)+1.5rem)] right-4 md:bottom-8 md:right-8 z-30 size-14 rounded-full shadow-lg", className)}
       size="icon"

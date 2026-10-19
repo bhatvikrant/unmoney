@@ -6,6 +6,7 @@ import { useView } from "@/lib/store";
 import { budgetStatus, notesRange, txCarryBefore, txCsvRows, txListRange } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
+import { useShortcuts, useSwipe } from "@/lib/shortcuts";
 import { useMonthParam } from "@/lib/period-hooks";
 import { monthLabel, dateLabel } from "@/lib/format";
 import { addDays, parts, todayISO, weekday, MONTH_SHORT } from "../../../shared/dates";
@@ -32,6 +33,8 @@ export default function TransactionsPage() {
   const nav = useNavigate();
   const { settings, ledger } = useApp();
   const { month, range, shift, setMonth } = useMonthParam();
+  const goToday = () => setMonth(monthKeyForDate(todayISO(), settings.monthStartDay));
+  useShortcuts({ n: () => nav(`/t/new?date=${addDate()}`), "/": () => nav("/search"), ArrowLeft: () => shift(-1), ArrowRight: () => shift(1), t: goToday });
   const [sp, setSp] = useSearchParams();
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
@@ -39,6 +42,7 @@ export default function TransactionsPage() {
   // a fresh sheet on every open, so it starts from the filter in the URL (not ticks a Clear removed)
   const [filterKey, setFilterKey] = useState(0);
   const bulk = useBulkSelect();
+  const swipe = useSwipe(() => shift(1), () => shift(-1), !bulk.active);
 
   const snap = useView();
   const raw = useMemo(() => txListRange(snap, range.from, range.to), [snap, range.from, range.to]);
@@ -71,7 +75,7 @@ export default function TransactionsPage() {
     <>
       <PageHeader
         title="Transactions"
-        left={<Button variant="ghost" size="icon" aria-label="Search" onClick={() => nav("/search")}><Search className="size-5" /></Button>}
+        left={<Button variant="ghost" size="icon" aria-label="Search" title="Search (/)" onClick={() => nav("/search")}><Search className="size-5" /></Button>}
         right={
           <>
             {view === "daily" ? <Button variant="ghost" size="icon" aria-label="Select entries" className={cn(bulk.active && "text-primary")} onClick={() => (bulk.active ? bulk.exit() : bulk.start())}><CheckSquare className="size-5" /></Button> : null}
@@ -81,7 +85,7 @@ export default function TransactionsPage() {
         }
         sub={
           <div className="mx-auto max-w-3xl">
-            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} onClick={() => setMonth(monthKeyForDate(todayISO(), settings.monthStartDay))} />
+            <MonthNav label={monthLabel(month)} onPrev={() => shift(-1)} onNext={() => shift(1)} onClick={goToday} />
             <SegmentedTabs value={view} onChange={setView} items={[
               { value: "daily", label: "Daily" }, { value: "calendar", label: "Calendar" }, { value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }, { value: "summary", label: "Summary" },
             ]} />
@@ -95,6 +99,8 @@ export default function TransactionsPage() {
           </div>
         }
       />
+      {/* swipe sideways to change month, like Money Manager */}
+      <div {...swipe} className="min-h-[70dvh]">
       <Page className={cn(bulk.active && view === "daily" && "pb-40")}>
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
         {raw && view === "daily" ? <TransactionList txs={txs} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
@@ -103,8 +109,9 @@ export default function TransactionsPage() {
         {view === "monthly" ? <MonthlyView month={month} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}
         {raw && view === "summary" ? <SummaryView txs={txs} month={month} range={range} /> : null}
       </Page>
+      </div>
       {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[calc(var(--tabbar-h)+6rem)] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
-      {bulk.active && view === "daily" ? null : <Fab onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${addDate()}`); }} />}
+      {bulk.active && view === "daily" ? null : <Fab title="New entry (N)" onClick={(e) => { primeKeyboard(e.currentTarget); nav(`/t/new?date=${addDate()}`); }} />}
       {view === "daily" ? <BulkBar bulk={bulk} txs={txs} /> : null}
       <FilterSheet key={filterKey} open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>
