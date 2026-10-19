@@ -1,3 +1,4 @@
+/** Symbols are the ones people write locally, made distinct where two would clash (CN¥ vs ¥, CA$ vs $). */
 export type CurrencyInfo = { code: string; name: string; symbol: string; decimals: number; position?: "before" | "after" };
 
 export const CURRENCIES: CurrencyInfo[] = [
@@ -7,9 +8,9 @@ export const CURRENCIES: CurrencyInfo[] = [
   { code: "INR", name: "Indian Rupee", symbol: "₹", decimals: 2 },
   { code: "JPY", name: "Japanese Yen", symbol: "¥", decimals: 0 },
   { code: "KRW", name: "South Korean Won", symbol: "₩", decimals: 0 },
-  { code: "CNY", name: "Chinese Yuan", symbol: "¥", decimals: 2 },
+  { code: "CNY", name: "Chinese Yuan", symbol: "CN¥", decimals: 2 },
   { code: "AUD", name: "Australian Dollar", symbol: "A$", decimals: 2 },
-  { code: "CAD", name: "Canadian Dollar", symbol: "C$", decimals: 2 },
+  { code: "CAD", name: "Canadian Dollar", symbol: "CA$", decimals: 2 },
   { code: "CHF", name: "Swiss Franc", symbol: "CHF", decimals: 2 },
   { code: "SGD", name: "Singapore Dollar", symbol: "S$", decimals: 2 },
   { code: "HKD", name: "Hong Kong Dollar", symbol: "HK$", decimals: 2 },
@@ -31,10 +32,10 @@ export const CURRENCIES: CurrencyInfo[] = [
   { code: "NGN", name: "Nigerian Naira", symbol: "₦", decimals: 2 },
   { code: "KES", name: "Kenyan Shilling", symbol: "KSh", decimals: 2 },
   { code: "EGP", name: "Egyptian Pound", symbol: "E£", decimals: 2 },
-  { code: "AED", name: "UAE Dirham", symbol: "د.إ", decimals: 2 },
-  { code: "SAR", name: "Saudi Riyal", symbol: "﷼", decimals: 2 },
+  { code: "AED", name: "UAE Dirham", symbol: "AED", decimals: 2 },
+  { code: "SAR", name: "Saudi Riyal", symbol: "SAR", decimals: 2 },
   { code: "ILS", name: "Israeli Shekel", symbol: "₪", decimals: 2 },
-  { code: "PKR", name: "Pakistani Rupee", symbol: "₨", decimals: 0 },
+  { code: "PKR", name: "Pakistani Rupee", symbol: "Rs", decimals: 0 },
   { code: "BDT", name: "Bangladeshi Taka", symbol: "৳", decimals: 2 },
   { code: "LKR", name: "Sri Lankan Rupee", symbol: "Rs", decimals: 2 },
   { code: "NPR", name: "Nepalese Rupee", symbol: "Rs", decimals: 2 },
