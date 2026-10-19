@@ -16,15 +16,16 @@ import { nextOccurrence, type Frequency } from "./repeat";
 import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
 import { normName, normNote } from "./categoryLint";
+import { describeOp, HISTORY_COALESCE_MS, HISTORY_KINDS, HISTORY_MAX, type HistoryLine } from "./history";
 
 export const TABLES = [
-  "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies", "categoryCleanups",
+  "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies", "categoryCleanups", "history",
 ] as const;
 export type Table = (typeof TABLES)[number];
 export type Snapshot = { [T in Table]: Doc<T>[] };
 
 export function emptySnapshot(): Snapshot {
-  return { settings: [], accountGroups: [], accounts: [], categories: [], transactions: [], repeats: [], bookmarks: [], budgets: [], notes: [], currencies: [], categoryCleanups: [] };
+  return { settings: [], accountGroups: [], accounts: [], categories: [], transactions: [], repeats: [], bookmarks: [], budgets: [], notes: [], currencies: [], categoryCleanups: [], history: [] };
 }
 
 export type Op = { id: string; kind: OpKind; args: unknown; at: number };
@@ -325,6 +326,9 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "backup.wipeAll": ["transactions", "notes", "repeats", "bookmarks", "budgets", "categoryCleanups"],
   "files.upload": [],
 };
+// Ops that write a history line also load the history (to add to it) and the settings (amounts in
+// the sentence are written in the user's currency), on the server exactly as on the device.
+for (const k of HISTORY_KINDS) OP_TABLES[k] = [...new Set<Table>([...OP_TABLES[k], "history", "settings"])];
 
 /**
  * Which of the user's entries an op reads or writes, so the server loads just those rather than
@@ -533,7 +537,23 @@ class Work {
 export function applyOp(base: Snapshot, op: Op, ctx: OpCtx): { snap: Snapshot; result: unknown } {
   const w = new Work(base, op, ctx);
   const result = run(w, op.kind, op.args as never);
+  for (const line of describeOp(op.kind, op.args, base, w.snap, result)) logHistory(w, line);
   return { snap: w.snap, result };
+}
+
+/** Adds a history line; the same line again soon after (reordering step by step) just updates the last one. */
+function logHistory(w: Work, line: HistoryLine) {
+  const last = w.snap.history.filter((h) => h.scope === line.scope).reduce<Doc<"history"> | undefined>((m, h) => (!m || h.at > m.at || (h.at === m.at && h._creationTime > m._creationTime) ? h : m), undefined);
+  if (last && last.text === line.text && w.at - last.at < HISTORY_COALESCE_MS) {
+    w.patch("history", last._id, { at: w.at });
+    return;
+  }
+  w.insert("history", { at: w.at, scope: line.scope, text: line.text });
+  const all = w.snap.history;
+  if (all.length > HISTORY_MAX) {
+    const oldest = [...all].sort((x, y) => x.at - y.at || x._creationTime - y._creationTime).slice(0, all.length - HISTORY_MAX);
+    for (const h of oldest) w.delete("history", h._id);
+  }
 }
 
 function run<K extends OpKind>(w: Work, kind: K, a: OpArgs<K>): OpResult<K> {

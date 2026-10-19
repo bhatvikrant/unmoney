@@ -262,6 +262,17 @@ export default defineSchema({
     templates: v.array(v.object({ table: v.union(v.literal("repeats"), v.literal("bookmarks")), id: v.string(), from: catPair, to: catPair })),
   }).index("by_user", ["userId"]),
 
+  /**
+   * The change history shown on the Payment methods and Categories pages: one plain sentence per
+   * change, written by the op that made it (shared/history.ts). Capped per user.
+   */
+  history: defineTable({
+    userId: v.id("users"),
+    at: v.number(),
+    scope: v.union(v.literal("accounts"), v.literal("categories")),
+    text: v.string(),
+  }).index("by_user", ["userId"]),
+
   /** Ops the client has synced, for idempotent retries. */
   syncOps: defineTable({
     userId: v.id("users"),
