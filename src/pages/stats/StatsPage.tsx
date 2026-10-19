@@ -4,8 +4,8 @@ import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useView } from "@/lib/store";
 import { statsByCategory, statsTrend } from "../../../shared/views";
 import { monthRecap } from "../../../shared/recap";
-import { monthKeyForDate } from "../../../shared/period";
-import { todayISO } from "../../../shared/dates";
+import { monthKeyForDate, monthRange } from "../../../shared/period";
+import { addDays, todayISO } from "../../../shared/dates";
 import { longMonth } from "@/pages/recap/cards";
 import { Row } from "@/components/shell/misc";
 import { useApp } from "@/lib/app";
@@ -15,7 +15,7 @@ import { useStatPeriod } from "./period";
 import { CategoryPie, TrendBars, colorAt } from "./charts";
 import { Money } from "@/components/shell/Money";
 import { cn } from "@/lib/utils";
-import { monthLabel } from "@/lib/format";
+import { dateLabel, monthLabel } from "@/lib/format";
 
 export default function StatsPage() {
   const nav = useNavigate();
@@ -38,8 +38,11 @@ export default function StatsPage() {
   const trend = useMemo(() => (mode === "trend" ? statsTrend(view, type, undefined, ranges) : undefined), [view, type, mode, rangeKey]);
   // every finished logical month with enough entries keeps its recap here
   const { settings } = useApp();
-  const finished = p.period === "monthly" && p.month < monthKeyForDate(todayISO(), settings.monthStartDay);
+  const thisMonth = monthKeyForDate(todayISO(), settings.monthStartDay);
+  const finished = p.period === "monthly" && p.month < thisMonth;
   const recap = useMemo(() => (finished ? monthRecap(view, p.month) : null), [view, finished, p.month]);
+  // the current month's row says when its recap comes and opens the list of earlier ones
+  const readyOn = p.period === "monthly" && p.month === thisMonth ? dateLabel(addDays(monthRange(p.month, settings.monthStartDay).to, 1)) : null;
   return (
     <>
       <PageHeader title={null} className="border-b-0" sub={<StatsHeaderBar />} />
@@ -55,6 +58,10 @@ export default function StatsPage() {
         {recap ? (
           <div className="border-b bg-card">
             <Row icon={<Sparkles />} label={`${longMonth(p.month)} recap`} hint={`${recap.cards.length} cards · what you spent, where, what changed`} right={<ChevronRight className="size-4 text-muted-foreground" />} onClick={() => nav(`/recap/${p.month}`)} />
+          </div>
+        ) : readyOn ? (
+          <div className="border-b bg-card">
+            <Row icon={<Sparkles />} label={<span className="text-muted-foreground">{longMonth(p.month)} recap</span>} hint={`Ready on ${readyOn} · earlier months`} right={<ChevronRight className="size-4 text-muted-foreground" />} onClick={() => nav("/recaps")} />
           </div>
         ) : null}
         <div className="flex justify-end px-3 pt-2">

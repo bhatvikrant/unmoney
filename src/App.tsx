@@ -13,6 +13,7 @@ import Onboarding from "@/pages/auth/Onboarding";
 import Lock from "@/pages/auth/Lock";
 import AppShell from "@/components/shell/AppShell";
 import RecapPage from "@/pages/recap/RecapPage";
+import RecapsPage from "@/pages/recap/RecapsPage";
 import LedgerRoute from "@/pages/transactions/LedgerRoute";
 import { useMediaQuery, WIDE } from "@/lib/media";
 import SearchPage from "@/pages/transactions/SearchPage";
@@ -134,6 +135,7 @@ function Gate() {
             <Route path="t/:id" element={<TransactionEditor />} />
           </Route>
           <Route path="notes" element={<NotesPage />} />
+          <Route path="recaps" element={<RecapsPage />} />
           <Route path="stats" element={<SplitLayout list={<StatsPage />} label="Category" />}>
             <Route path="c/:id" element={<CategoryDetail />} />
           </Route>
