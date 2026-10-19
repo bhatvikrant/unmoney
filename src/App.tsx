@@ -121,7 +121,7 @@ function Gate() {
       <ScrollToTop />
       <Routes>
         {/* full screen, beside the shell: no sidebar or tab bar behind the story cards */}
-        <Route path="recap/:month" element={<RecapPage />} />
+        <Route path="recap/:key" element={<RecapPage />} />
         <Route element={<AppShell />}>
           <Route index element={<LedgerRoute />} />
           <Route path="t/new" element={<LedgerRoute />} />
