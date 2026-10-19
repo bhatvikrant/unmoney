@@ -3,10 +3,11 @@ import { ChevronRight, Sparkles } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useView } from "@/lib/store";
 import { statsByCategory, statsTrend } from "../../../shared/views";
-import { monthRecap } from "../../../shared/recap";
-import { monthKeyForDate, monthRange } from "../../../shared/period";
+import { monthRecap, recapIndex, type RecapIndexYearRow } from "../../../shared/recap";
+import { monthKeyForDate, monthRange, parseMonthKey } from "../../../shared/period";
 import { addDays, todayISO } from "../../../shared/dates";
 import { longMonth } from "@/pages/recap/cards";
+import { YearRecapRow } from "@/pages/recap/RecapsPage";
 import { Row } from "@/components/shell/misc";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -43,6 +44,10 @@ export default function StatsPage() {
   const recap = useMemo(() => (finished ? monthRecap(view, p.month) : null), [view, finished, p.month]);
   // the current month's row says when its recap comes and opens the list of earlier ones
   const readyOn = p.period === "monthly" && p.month === thisMonth ? dateLabel(addDays(monthRange(p.month, settings.monthStartDay).to, 1)) : null;
+  // in Annually mode a finished year gets the same row the Recaps page gives it
+  const yearKey = p.period === "yearly" ? Number(p.key) : null;
+  const finishedYear = yearKey !== null && yearKey < parseMonthKey(thisMonth).y;
+  const yearRow = useMemo(() => (finishedYear ? (recapIndex(view, todayISO()).find((r) => r.kind === "year" && r.year === yearKey) as RecapIndexYearRow | undefined) ?? null : null), [view, finishedYear, yearKey]);
   return (
     <>
       <PageHeader title={null} className="border-b-0" sub={<StatsHeaderBar />} />
@@ -63,6 +68,8 @@ export default function StatsPage() {
           <div className="border-b bg-card">
             <Row icon={<Sparkles />} label={<span className="text-muted-foreground">{longMonth(p.month)} recap</span>} hint={`Ready on ${readyOn} · earlier months`} right={<ChevronRight className="size-4 text-muted-foreground" />} onClick={() => nav("/recaps")} />
           </div>
+        ) : yearRow ? (
+          <div className="border-b bg-card"><YearRecapRow row={yearRow} onOpen={() => nav(`/recap/${yearRow.year}`)} /></div>
         ) : null}
         <div className="flex justify-end px-3 pt-2">
           <div className="flex rounded-md bg-muted p-0.5 text-xs">

@@ -81,10 +81,12 @@ export function SegmentedTabs<T extends string>({ value, onChange, items, classN
   );
 }
 
-export function Row({ label, value, onClick, right, className, hint, info, active, icon }: {
+export function Row({ label, value, onClick, right, className, hint, info, active, icon, iconClassName }: {
   label: ReactNode; value?: ReactNode; onClick?: () => void; right?: ReactNode; className?: string; hint?: ReactNode;
   /** Leading icon in a small tinted square, for rows in a menu of pages. */
   icon?: ReactNode;
+  /** Overrides the icon square's colours (a filled square for a row that stands apart). */
+  iconClassName?: string;
   /** The row's page is open beside the list (wide screens). */
   active?: boolean;
   /** Longer explanation shown behind an (i) icon next to the label. */
@@ -92,7 +94,7 @@ export function Row({ label, value, onClick, right, className, hint, info, activ
 }) {
   const inner = (
     <>
-      {icon ? <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-foreground [&_svg]:size-4">{icon}</span> : null}
+      {icon ? <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-foreground [&_svg]:size-4", iconClassName)}>{icon}</span> : null}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-sm">
           <span className="min-w-0">{label}</span>

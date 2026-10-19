@@ -1,8 +1,8 @@
 /**
- * /recap/:month — the monthly recap as a run of full-screen story cards, outside the app shell.
- * Tap the right of the card (or →, or swipe left) for the next card, the left (←, swipe right)
- * for the previous one; × and Esc close. On a wide screen the card sits centred, 420×560, with
- * arrow buttons either side.
+ * /recap/:key — a monthly (YYYY-MM) or yearly (YYYY) recap as a run of full-screen story cards,
+ * outside the app shell. Tap the right of the card (or →, or swipe left) for the next card, the
+ * left (←, swipe right) for the previous one; × and Esc close. On a wide screen the card sits
+ * centred, 420×560, with arrow buttons either side.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useParams } from "react-router";
@@ -12,12 +12,13 @@ import { useStore, useView } from "@/lib/store";
 import { useGoBack } from "@/lib/nav";
 import { useShortcuts, useSwipe } from "@/lib/shortcuts";
 import { useMediaQuery, WIDE } from "@/lib/media";
-import { markRecapSeen } from "@/lib/recap";
+import { markRecapSeen, markRecapYearSeen } from "@/lib/recap";
 import { monthLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shell/misc";
-import { monthRecap, RECAP_MIN_ENTRIES } from "../../../shared/recap";
+import { monthKey } from "../../../shared/period";
+import { monthRecap, yearRecap, RECAP_MIN_ENTRIES, RECAP_YEAR_MIN_MONTHS } from "../../../shared/recap";
 import { RecapCardView } from "./cards";
 
 const SLIDE = 16;
@@ -28,9 +29,9 @@ const variants = {
 };
 
 export default function RecapPage() {
-  const { month = "" } = useParams();
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return <Navigate to="/stats" replace />;
-  return <Recap month={month} />;
+  const { key = "" } = useParams();
+  if (!/^\d{4}(-(0[1-9]|1[0-2]))?$/.test(key)) return <Navigate to="/stats" replace />;
+  return <Recap month={key} />;
 }
 
 function Recap({ month }: { month: string }) {
@@ -39,15 +40,19 @@ function Recap({ month }: { month: string }) {
   const goBack = useGoBack();
   const wide = useMediaQuery(WIDE);
   const still = useReducedMotion();
-  const recap = useMemo(() => monthRecap(view, month), [view, month]);
+  const year = /^\d{4}$/.test(month) ? Number(month) : null;
+  const recap = useMemo(() => (year !== null ? yearRecap(view, year) : monthRecap(view, month)), [view, month, year]);
   const [at, setAt] = useState(0);
   const [dir, setDir] = useState(1);
   const n = recap?.cards.length ?? 0;
 
-  // Opening a recap counts as having seen it: the ledger card for that month goes away.
-  useEffect(() => { if (userId && recap) markRecapSeen(userId, month); }, [userId, recap, month]);
+  // Opening a recap counts as having seen it: the ledger card for that month goes away. The year's card carried December too.
+  useEffect(() => {
+    if (!userId || !recap) return;
+    if (year !== null) { markRecapYearSeen(userId, year); markRecapSeen(userId, monthKey(year, 12)); } else markRecapSeen(userId, month);
+  }, [userId, recap, month, year]);
 
-  const close = () => goBack(`/stats?month=${month}`);
+  const close = () => goBack(year !== null ? `/stats?period=yearly&year=${year}` : `/stats?month=${month}`);
   const go = (i: number) => { setDir(i > at ? 1 : -1); setAt(i); };
   const next = () => (at < n - 1 ? go(at + 1) : close());
   const prev = () => { if (at > 0) go(at - 1); };
@@ -57,7 +62,9 @@ function Recap({ month }: { month: string }) {
   if (!recap) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center bg-background">
-        <EmptyState title={`Nothing recorded in ${monthLabel(month)}`} hint={`A recap needs at least ${RECAP_MIN_ENTRIES} expense entries in the month.`} action={<Button variant="outline" onClick={close}>Close</Button>} />
+        {year !== null
+          ? <EmptyState title={`${year} has fewer than ${RECAP_YEAR_MIN_MONTHS} months with a recap`} hint={`A year's recap needs ${RECAP_YEAR_MIN_MONTHS} months with at least ${RECAP_MIN_ENTRIES} expense entries each.`} action={<Button variant="outline" onClick={close}>Close</Button>} />
+          : <EmptyState title={`Nothing recorded in ${monthLabel(month)}`} hint={`A recap needs at least ${RECAP_MIN_ENTRIES} expense entries in the month.`} action={<Button variant="outline" onClick={close}>Close</Button>} />}
       </div>
     );
   }
