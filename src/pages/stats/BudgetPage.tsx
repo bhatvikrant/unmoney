@@ -17,9 +17,11 @@ export default function BudgetPage() {
   const nav = useNavigate();
   const { categoryById } = useApp();
   const p = useStatPeriod();
+  // a custom range has no budget of its own: show the month it starts in
   const period = p.period === "custom" ? "monthly" : p.period;
+  const key = p.period === "custom" ? p.month : p.key;
   const view = useView();
-  const status = useMemo(() => budgetStatus(view, period, p.key), [view, period, p.key]);
+  const status = useMemo(() => budgetStatus(view, period, key), [view, period, key]);
   const [detail, setDetail] = useState<{ item: BudgetItem; label: string } | null>(null);
   const ranges = p.trailing();
   const rangeKey = ranges.map((r) => r.key).join(",");
@@ -32,10 +34,10 @@ export default function BudgetPage() {
       <Page className="pb-8">
         <div className="flex items-center justify-between px-4 py-3 border-t">
           <div>
-            <div className="text-xs text-muted-foreground">Remaining ({label})</div>
-            <div className="text-2xl font-semibold tabular">{status?.total ? <Money amount={status.total.remaining} kind={status.total.remaining < 0 ? "expense" : "plain"} /> : status ? <Money amount={-status.spentAll} kind="expense" /> : "—"}</div>
+            <div className="text-xs text-muted-foreground">{status && !status.total ? `Spent (${label}, no total budget)` : `Remaining (${label})`}</div>
+            <div className="text-2xl font-semibold tabular">{status?.total ? <Money amount={status.total.remaining} kind={status.total.remaining < 0 ? "expense" : "plain"} /> : status ? <Money amount={status.spentAll} kind="expense" /> : "—"}</div>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => nav(`/budget/settings?period=${period}&month=${p.month}`)}>Budget setting ›</Button>
+          <Button variant="secondary" size="sm" onClick={() => nav(`/budget/settings?period=${period}&key=${key}`)}>Budget setting ›</Button>
         </div>
         {status?.total ? <div className="bg-card border-y"><BudgetBar item={status.total} label={label} elapsed={status.elapsed} onClick={() => setDetail({ item: status.total!, label })} /></div> : null}
         {status?.perCategory.length ? (
