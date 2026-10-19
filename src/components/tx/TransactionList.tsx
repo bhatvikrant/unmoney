@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { useOpenEntry } from "@/lib/nav";
 import { ArrowRight, Camera, Repeat, Star } from "lucide-react";
@@ -11,6 +11,9 @@ import { Money } from "@/components/shell/Money";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
+import { useUndoableDelete } from "@/lib/undo";
+import { DeleteSeriesEntryDialog } from "./DeleteSeriesEntryDialog";
 
 export type Tx = Doc<"transactions">;
 
@@ -20,8 +23,8 @@ function useBookmarkedIds(): Set<string> {
   return useMemo(() => new Set(bookmarks.flatMap((b) => (b.transactionId ? [b.transactionId as string] : []))), [bookmarks]);
 }
 
-export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, showDate, bookmarked, open }: {
-  tx: Tx; onClick?: () => void; onLongPress?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; showDate?: boolean; bookmarked?: boolean;
+export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, showDate, bookmarked, open, className }: {
+  tx: Tx; onClick?: () => void; onLongPress?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; showDate?: boolean; bookmarked?: boolean; className?: string;
   /** This entry is open in the panel beside the list. */
   open?: boolean;
 }) {
@@ -43,7 +46,7 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
   const sub = isTransfer ? (tx.note ? route : "") : route;
   const amount = isTransfer ? tx.amount : tx.amount;
   return (
-    <div className={cn("flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm", onClick && "cursor-pointer hover:bg-accent/40 active:bg-accent", onLongPress && "select-none [-webkit-touch-callout:none]", selected && "bg-primary/10", open && "bg-accent")}
+    <div className={cn("flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm", onClick && "cursor-pointer hover:bg-accent/40 active:bg-accent", onLongPress && "select-none [-webkit-touch-callout:none]", selected && "bg-primary/10", open && "bg-accent", className)}
       aria-current={open || undefined}
       onClick={() => { if (press.current.fired) { press.current.fired = false; return; } onClick?.(); }} {...pressProps}>
       {onSelect ? <Checkbox checked={!!selected} onCheckedChange={(v) => onSelect(!!v)} onClick={(e) => e.stopPropagation()} /> : null}
@@ -87,9 +90,21 @@ export function DayHeader({ date, income, expense }: { date: string; income: num
   );
 }
 
-export function TransactionList({ txs, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className }: {
-  txs: Tx[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void; emptyText?: string; className?: string;
+export function TransactionList({ txs, selectable, selected, onToggle, onLongPress, swipeToDelete, emptyText = "No transactions", className }: {
+  txs: Tx[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void;
+  /** Rows slide left to uncover Delete (off while selecting). */
+  swipeToDelete?: boolean;
+  emptyText?: string; className?: string;
 }) {
+  const undoable = useUndoableDelete();
+  /** The row swiped open, and an entry of a series waiting on "only this one / this and future". */
+  const [swiped, setSwiped] = useState<string | null>(null);
+  const [series, setSeries] = useState<Tx | null>(null);
+  // Deletes like the editor does: at once with Undo in the toast, or asking first for an entry in a series.
+  const remove = (t: Tx) => {
+    if (t.repeatId) setSeries(t);
+    else void undoable.entry(t._id).finally(() => setSwiped(null));
+  };
   const openEntry = useOpenEntry();
   const { id: openId } = useParams();
   const { ledger } = useApp();
@@ -111,21 +126,34 @@ export function TransactionList({ txs, selectable, selected, onToggle, onLongPre
         return (
           <Fragment key={date}>
             <DayHeader date={date} income={k.income} expense={k.expense} />
-            {list.map((t) => (
-              <TransactionRow
-                key={t._id}
-                tx={t}
-                onClick={selectable ? () => onToggle?.(t._id, !selected?.has(t._id)) : () => openEntry(t._id)}
-                open={t._id === openId}
-                onLongPress={!selectable && onLongPress ? () => onLongPress(t._id) : undefined}
-                selected={selected?.has(t._id)}
-                bookmarked={bookmarked.has(t._id)}
-                onSelect={selectable ? (v) => onToggle?.(t._id, v) : undefined}
-              />
-            ))}
+            {list.map((t) => {
+              const row = (
+                <TransactionRow
+                  key={t._id}
+                  tx={t}
+                  onClick={selectable ? () => onToggle?.(t._id, !selected?.has(t._id)) : () => openEntry(t._id)}
+                  open={t._id === openId}
+                  onLongPress={!selectable && onLongPress ? () => onLongPress(t._id) : undefined}
+                  selected={selected?.has(t._id)}
+                  bookmarked={bookmarked.has(t._id)}
+                  onSelect={selectable ? (v) => onToggle?.(t._id, v) : undefined}
+                  className={swipeToDelete ? "border-b-0" : undefined}
+                />
+              );
+              return swipeToDelete ? (
+                <SwipeToDelete key={t._id} className="border-b last:border-b-0" disabled={selectable}
+                  open={swiped === t._id} onOpenChange={(o) => setSwiped(o ? t._id : null)} onDelete={() => remove(t)}>
+                  {row}
+                </SwipeToDelete>
+              ) : row;
+            })}
           </Fragment>
         );
       })}
+      {swipeToDelete ? (
+        <DeleteSeriesEntryDialog open={!!series} onOpenChange={(o) => { if (!o) { setSeries(null); setSwiped(null); } }}
+          onPick={(scope) => { if (series) void undoable.entry(series._id, scope); }} />
+      ) : null}
     </div>
   );
 }
