@@ -79,7 +79,7 @@ export default function SettingsPage() {
             <Select value={s.repeatDisplay} onValueChange={(v) => update({ patch: { repeatDisplay: v as "onDate" | "firstOfMonth" } })}><SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="onDate">On the date</SelectItem><SelectItem value="firstOfMonth">First of month</SelectItem></SelectContent></Select>
           } />
           {link("Style", "/settings/style")}
-          {link("Passcode", "/settings/passcode", s.passcodeHash ? "On" : "Off", "Asks for a code each time you open UnMoney on this device. It protects the screen only; your data is still tied to your sign-in.")}
+          {link("Passcode", "/settings/passcode", s.passcodeHash ? "On" : "Off", "Asks for a 4-digit code when you open UnMoney, on every device you are signed in on. It locks the screen only; your data is still tied to your Google sign-in.")}
         </Section>
         <Section title="Data">
           {link("Import from Money Manager", "/import", undefined, "Bring over your accounts, categories and history from Money Manager's Excel export.")}

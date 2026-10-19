@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { hashPin, markUnlocked } from "@/lib/passcode";
+import { clearFailures, hashPin, lockoutRemaining, markUnlocked, recordFailure, requestPasscodeReset } from "@/lib/passcode";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Delete } from "lucide-react";
 
-export function PinPad({ title, onComplete, error, subtitle }: { title: string; subtitle?: string; onComplete: (pin: string) => void; error?: boolean }) {
+export function PinPad({ title, onComplete, error, subtitle, disabled }: { title: string; subtitle?: string; onComplete: (pin: string) => void; error?: boolean; disabled?: boolean }) {
   const [pin, setPin] = useState("");
   useEffect(() => {
     if (pin.length === 4) {
@@ -15,12 +16,13 @@ export function PinPad({ title, onComplete, error, subtitle }: { title: string; 
   }, [pin, onComplete]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if (disabled) return;
       if (/^\d$/.test(e.key)) setPin((p) => (p.length < 4 ? p + e.key : p));
       if (e.key === "Backspace") setPin((p) => p.slice(0, -1));
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, []);
+  }, [disabled]);
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
   return (
     <div className="flex flex-col items-center">
@@ -36,9 +38,10 @@ export function PinPad({ title, onComplete, error, subtitle }: { title: string; 
           <button
             key={i}
             type="button"
-            disabled={!k}
+            disabled={!k || disabled}
+            aria-label={k === "⌫" ? "Delete last digit" : undefined}
             onClick={() => (k === "⌫" ? setPin((p) => p.slice(0, -1)) : setPin((p) => (p.length < 4 ? p + k : p)))}
-            className={cn("size-16 rounded-full text-2xl font-light flex items-center justify-center", k && "bg-muted hover:bg-accent active:scale-95 transition")}
+            className={cn("size-16 rounded-full text-2xl font-light flex items-center justify-center", k && "bg-muted hover:bg-accent active:scale-95 transition", disabled && "opacity-40")}
           >
             {k === "⌫" ? <Delete className="size-6" /> : k}
           </button>
@@ -48,27 +51,55 @@ export function PinPad({ title, onComplete, error, subtitle }: { title: string; 
   );
 }
 
-export default function Lock({ hash, salt, onUnlock }: { hash: string; salt: string; onUnlock: () => void }) {
+/** Re-renders every second while a wait after wrong guesses runs; returns the seconds left. */
+function useLockout(): [number, () => void] {
+  const [left, setLeft] = useState(lockoutRemaining);
+  useEffect(() => {
+    if (!left) return;
+    const t = setInterval(() => setLeft(lockoutRemaining()), 1000);
+    return () => clearInterval(t);
+  }, [left]);
+  return [Math.ceil(left / 1000), () => setLeft(lockoutRemaining())];
+}
+
+export default function Lock({ hash, salt, userId, onUnlock }: { hash: string; salt: string; userId: string | null; onUnlock: () => void }) {
   const { signOut } = useAuthActions();
   const [error, setError] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [wait, refreshWait] = useLockout();
   return (
     <div className="min-h-dvh flex flex-col items-center justify-center p-6">
       <PinPad
         title="Enter passcode"
+        subtitle={wait ? `Too many wrong tries. Try again in ${wait} s.` : undefined}
+        disabled={wait > 0}
         error={error}
         onComplete={async (pin) => {
           if ((await hashPin(pin, salt)) === hash) {
+            clearFailures();
             markUnlocked();
             onUnlock();
           } else {
+            recordFailure();
+            refreshWait();
             setError(true);
             setTimeout(() => setError(false), 400);
           }
         }}
       />
-      <button type="button" className="mt-10 text-xs text-muted-foreground underline-offset-4 hover:underline" onClick={() => signOut()}>
-        Forgot it? Sign out and back in to reset.
-      </button>
+      {forgot ? (
+        <div className="mt-10 max-w-xs text-center">
+          <p className="text-sm text-muted-foreground">Sign in with Google again and the passcode is removed, on every device. Changes not yet synced stay on this device.</p>
+          <div className="mt-4 flex justify-center gap-2">
+            <Button variant="ghost" onClick={() => setForgot(false)}>Cancel</Button>
+            <Button disabled={!userId} onClick={() => { requestPasscodeReset(userId!); void signOut(); }}>Sign out to reset</Button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="mt-10 text-xs text-muted-foreground underline-offset-4 hover:underline" onClick={() => setForgot(true)}>
+          Forgot it?
+        </button>
+      )}
     </div>
   );
 }
