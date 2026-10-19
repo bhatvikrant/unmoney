@@ -316,8 +316,8 @@ export default defineSchema({
     email: v.string(),
     refreshTokenEnc: v.string(),
     iv: v.string(),
-    /** Gmail cursor for incremental sync. */
-    historyId: v.optional(v.string()),
+    /** The last check covered mail received up to this instant; the next one starts two days before it. Unset until the first check. */
+    syncedUpTo: v.optional(v.number()),
     lastSyncAt: v.optional(v.number()),
     lastError: v.optional(v.string()),
     status: v.union(v.literal("ok"), v.literal("reauth"), v.literal("paused")),
@@ -332,7 +332,7 @@ export default defineSchema({
     aiMonth: v.string(),
     aiCalls: v.number(),
     /** The last 10 checks. */
-    log: v.array(v.object({ at: v.number(), scanned: v.number(), found: v.number(), error: v.optional(v.string()) })),
+    log: v.array(v.object({ at: v.number(), scanned: v.number(), found: v.number(), error: v.optional(v.string()), note: v.optional(v.string()) })),
   }).index("by_user", ["userId"]),
 
   /**

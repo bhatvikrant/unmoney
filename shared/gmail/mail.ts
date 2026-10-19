@@ -71,3 +71,28 @@ export function oneLine(text: string): string {
 
 /** A UPI id: "swiggy.upi@axisbank", "rahul.v@okicici". An email address (handle@domain.tld) is not one. */
 export const VPA_RE = /\b[a-z0-9.\-_]+@[a-z]+\b(?!\.[a-z])/i;
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“", ndash: "–", mdash: "—", hellip: "…", copy: "©", reg: "®", trade: "™", bull: "•", middot: "·", times: "×", pound: "£", euro: "€", yen: "¥", inr: "₹" };
+
+/** An HTML mail as text: scripts, styles and tags gone, block elements as line breaks, entities decoded. */
+export function htmlToText(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<(script|style|head|title)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|li|h[1-6]|table|section|article|blockquote|pre|header|footer)>/gi, "\n")
+    .replace(/<(td|th)\b[^>]*>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, code: string) => {
+      if (code[0] === "#") {
+        const n = code[1].toLowerCase() === "x" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+        return Number.isFinite(n) && n > 0 ? String.fromCodePoint(n) : m;
+      }
+      return ENTITIES[code.toLowerCase()] ?? m;
+    })
+    .replace(/ /g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

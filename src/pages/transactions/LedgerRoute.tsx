@@ -15,7 +15,7 @@ export default function LedgerRoute() {
   const { pathname, search } = useLocation();
   // a new entry for another day (or from another bookmark) is a different form
   const sp = new URLSearchParams(search);
-  const formKey = `${pathname}|${sp.get("date") ?? ""}|${sp.get("bookmark") ?? ""}|${sp.get("type") ?? ""}`;
+  const formKey = `${pathname}|${sp.get("date") ?? ""}|${sp.get("bookmark") ?? ""}|${sp.get("type") ?? ""}|${sp.get("draft") ?? ""}`;
   const entry = pathname.startsWith("/t/");
   if (!wide) return entry ? <TransactionEditor /> : <TransactionsPage />;
   return (
