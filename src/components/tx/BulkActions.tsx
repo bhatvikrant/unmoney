@@ -3,6 +3,7 @@ import { Bookmark, CalendarDays, Landmark, StickyNote, Tag, Trash2, X } from "lu
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useOp, useView } from "@/lib/store";
+import { useUndoableDelete } from "@/lib/undo";
 import { useApp } from "@/lib/app";
 import { sumKinds } from "../../../shared/ledger";
 import { Money } from "@/components/shell/Money";
@@ -21,7 +22,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   const { ledger } = useApp();
   const view = useView();
   const bulkUpdate = useOp("transactions.bulkUpdate");
-  const bulkRemove = useOp("transactions.bulkRemove");
+  const undoable = useUndoableDelete();
   const addBookmark = useOp("bookmarks.create");
   const removeBookmark = useOp("bookmarks.remove");
   const [edit, setEdit] = useState<Edit>(null);
@@ -36,19 +37,19 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   const catType = chosen.some((t) => t.type === "expense") ? "expense" : "income";
   const ids = () => chosen.map((t) => t._id as Id<"transactions">);
 
-  async function run(fn: () => Promise<string | void>) {
+  async function run(fn: () => Promise<string | null | void>) {
     if (busy) return;
     setBusy(true);
     try {
       const msg = await fn();
-      toast.success(msg || "Done");
+      if (msg !== null) toast.success(msg || "Done");
       bulk.exit(); setEdit(null); setVal("");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
     finally { setBusy(false); }
   }
 
   const applyDialog = () => run(async () => {
-    if (edit === "delete") { await bulkRemove({ ids: ids() }); return `Deleted ${n} ${n === 1 ? "entry" : "entries"}`; }
+    if (edit === "delete") { await undoable.entries(ids()); return null; } // its own toast offers Undo
     if (edit === "date") await bulkUpdate({ ids: ids(), date: val });
     if (edit === "note") await bulkUpdate({ ids: ids(), note: val });
   });
@@ -113,7 +114,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{edit === "delete" ? `Delete ${n} ${n === 1 ? "entry" : "entries"}?` : edit === "date" ? `Set a new date for ${n}` : `Set a new note for ${n}`}</DialogTitle>
-            {edit === "delete" ? <DialogDescription>This can't be undone.</DialogDescription> : null}
+            {edit === "delete" ? <DialogDescription>You can undo this for a few seconds afterwards.</DialogDescription> : null}
           </DialogHeader>
           {edit === "date" ? <div className="space-y-1.5"><Label>Date</Label><Input type="date" value={val} onChange={(e) => setVal(e.target.value)} /></div> : null}
           {edit === "note" ? <div className="space-y-1.5"><Label>Note</Label><Input value={val} onChange={(e) => setVal(e.target.value)} /></div> : null}

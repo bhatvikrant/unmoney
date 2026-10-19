@@ -11,6 +11,7 @@ import { todayISO } from "../../../shared/dates";
 import { evaluateExpression, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { useGoBack } from "@/lib/nav";
+import { useUndoableDelete } from "@/lib/undo";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
 import { RepeatSheet, repeatLabel, type RepeatChoice } from "@/components/tx/RepeatSheet";
@@ -128,6 +129,7 @@ type Existing = TxDetail;
 function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transactions">; existing?: Existing }) {
   const nav = useNavigate();
   const goBack = useGoBack();
+  const undoable = useUndoableDelete();
   const { settings, accountName, categoryLabel, currencies, fmt, accounts } = useApp();
   const [f, setF] = useState<Form>(initial);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -140,7 +142,6 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   const view = useView();
   const create = useOp("transactions.create");
   const update = useOp("transactions.update");
-  const remove = useOp("transactions.remove");
   const copy = useOp("transactions.copy");
   const addBookmark = useOp("bookmarks.create");
   const removeBookmark = useOp("bookmarks.remove");
@@ -379,7 +380,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         <div className="mx-auto max-w-3xl space-y-2 p-3">
           {isEdit ? (
             <div className="grid grid-cols-3 gap-2">
-              <Button variant="outline" className="h-10 text-destructive hover:text-destructive" onClick={() => setConfirm("delete")}><Trash2 className="size-4" />Delete</Button>
+              <Button variant="outline" className="h-10 text-destructive hover:text-destructive" onClick={() => (inSeries ? setConfirm("delete") : void undoable.entry(id!).then(() => goBack()))}><Trash2 className="size-4" />Delete</Button>
               <Button variant="outline" className="h-10" onClick={() => setConfirm("copy")}><Copy className="size-4" />Copy</Button>
               <Button variant="outline" className={cn("h-10", bookmarked && "border-amber-400/60 text-amber-500 hover:text-amber-500")} aria-pressed={!!bookmarked} onClick={toggleBookmark}>
                 <Star key={bookmarked ? "on" : "off"} className={cn("size-4", bookmarked && "fill-current animate-in zoom-in-50 duration-300")} />
@@ -419,12 +420,12 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this entry?</AlertDialogTitle>
-            <AlertDialogDescription>{inSeries ? "This entry belongs to a repeat or installment series." : "This cannot be undone."}</AlertDialogDescription>
+            <AlertDialogDescription>This entry belongs to a repeat or installment series.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            {inSeries ? <AlertDialogAction onClick={() => remove({ id: id!, scope: "future" }).then(() => goBack())}>This and future</AlertDialogAction> : null}
-            <AlertDialogAction onClick={() => remove({ id: id!, scope: "one" }).then(() => goBack())}>{inSeries ? "Only this one" : "Delete"}</AlertDialogAction>
+            <AlertDialogAction onClick={() => undoable.entry(id!, "future").then(() => goBack())}>This and future</AlertDialogAction>
+            <AlertDialogAction onClick={() => undoable.entry(id!, "one").then(() => goBack())}>Only this one</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

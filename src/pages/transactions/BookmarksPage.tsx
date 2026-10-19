@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ArrowDown, ArrowUp, Pencil, Trash2 } from "lucide-react";
 import { useOp, useView } from "@/lib/store";
+import { useUndoableDelete } from "@/lib/undo";
 import { bookmarksList } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
@@ -16,7 +17,7 @@ export default function BookmarksPage() {
   const { accountName, categoryLabel } = useApp();
   const view = useView();
   const list = useMemo(() => bookmarksList(view), [view]);
-  const remove = useOp("bookmarks.remove");
+  const undoable = useUndoableDelete();
   const reorder = useOp("bookmarks.reorder");
   const [edit, setEdit] = useState(false);
   const move = (i: number, dir: -1 | 1) => {
@@ -52,7 +53,7 @@ export default function BookmarksPage() {
                   </div>
                   <Money amount={t.amount} kind={kind} />
                 </button>
-                {edit ? <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => remove({ id: b._id })}><Trash2 className="size-4" /></Button> : null}
+                {edit ? <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => { const doc = view.bookmarks.find((x) => x._id === b._id); if (doc) void undoable.bookmark(doc); }}><Trash2 className="size-4" /></Button> : null}
               </div>
             );
           })}
