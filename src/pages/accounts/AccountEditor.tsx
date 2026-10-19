@@ -54,7 +54,6 @@ export default function AccountEditor() {
         linkedAccountId: kind === "debitCard" && f.linkedAccountId ? (f.linkedAccountId as Id<"accounts">) : undefined,
       };
       if (id) await update({ id: id as Id<"accounts">, ...args }); else await create(args);
-      toast.success("Saved");
       if (id) goBack("/accounts"); else nav("/accounts");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   }

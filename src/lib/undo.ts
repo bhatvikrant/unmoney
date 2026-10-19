@@ -11,9 +11,9 @@ export function useUndoableDelete() {
   const { view, dispatch } = useStore();
 
   function offerUndo(message: string, undo: () => Promise<unknown>) {
-    toast.success(message, {
+    toast(message, {
       duration: 8000,
-      action: { label: "Undo", onClick: () => void undo().then(() => toast.success("Restored"), (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not restore")) },
+      action: { label: "Undo", onClick: () => void undo().catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not restore")) },
     });
   }
 

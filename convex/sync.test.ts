@@ -163,3 +163,33 @@ describe("daily schedules", () => {
     vi.useRealTimers();
   });
 });
+
+describe("tidying up categories on a ledger past the read limit", () => {
+  test("a merge and its undo move exactly the entries of the merged category", async () => {
+    const { t, userId, apply, accounts, food, seed } = await setup();
+    const cats = await t.run((ctx) => ctx.db.query("categories").withIndex("by_user_type", (q) => q.eq("userId", userId).eq("type", "expense")).collect());
+    const other = cats.find((c) => c.name === "Other")!;
+    const snacks = await t.run((ctx) => ctx.db.insert("categories", { userId, type: "expense", name: "Snacks", order: 99 }));
+    const chips = await t.run((ctx) => ctx.db.insert("categories", { userId, type: "expense", name: "Chips", parentId: food._id, order: 100 }));
+    await seed(BIG, () => ({ categoryId: other._id }));
+    await seed(30, () => ({ categoryId: snacks, note: "snack" }));
+    await seed(5, () => ({ categoryId: food._id, subcategoryId: chips, note: "chips" }));
+    await seed(7, () => ({ categoryId: food._id, note: "food" }));
+    void accounts;
+
+    const merged = await apply("categories.applyCleanup", { steps: [{ kind: "merge", sourceIds: [snacks, chips], target: { id: food._id } }] });
+    expect(merged.status).toBe("applied");
+    const inFood = () => t.run((ctx) => ctx.db.query("transactions").withIndex("by_user_category", (q) => q.eq("userId", userId).eq("categoryId", food._id)).collect());
+    let food2 = await inFood();
+    expect(food2.length).toBe(42);
+    expect(food2.filter((x) => x.subcategoryId).length).toBe(0);
+
+    const record = await t.run((ctx) => ctx.db.query("categoryCleanups").withIndex("by_user", (q) => q.eq("userId", userId)).unique());
+    expect((await apply("categories.undoCleanup", { id: record!._id })).status).toBe("applied");
+    food2 = await inFood();
+    expect(food2.map((x) => x.note).sort()).toEqual([...Array(5).fill("chips"), ...Array(7).fill("food")]);
+    expect(food2.filter((x) => x.subcategoryId === chips).length).toBe(5);
+    const back = await t.run((ctx) => ctx.db.query("transactions").withIndex("by_user_category", (q) => q.eq("userId", userId).eq("categoryId", snacks)).collect());
+    expect(back.length).toBe(30);
+  }, 120_000);
+});

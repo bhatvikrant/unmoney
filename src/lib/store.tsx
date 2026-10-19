@@ -49,10 +49,12 @@ const Ctx = createContext<Store | null>(null);
 const BATCH = 25;
 /** Entries per page of the transactions subscription; each page is one bounded server read. */
 const TX_PAGE = 2000;
+/** An import or a tidy-up can write hundreds of documents. */
+const SEND_ALONE = new Set<OpKind>(["transactions.importRows", "categories.applyCleanup", "categories.undoCleanup"]);
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
 /** An op that writes many documents is sent on its own, so one server transaction stays within Convex's limits. */
 const isHeavy = (op: QueuedOp) =>
-  op.kind === "transactions.importRows" || op.kind === "transactions.restoreRows" || ((op.args as { ids?: unknown[] }).ids?.length ?? 0) > 100;
+  SEND_ALONE.has(op.kind) || op.kind === "transactions.restoreRows" || ((op.args as { ids?: unknown[] }).ids?.length ?? 0) > 100;
 const isAuthError = (e: unknown) => /not signed in|unauthenticated|authentication/i.test(e instanceof Error ? e.message : String(e));
 
 type Live = { [T in Table]: Doc<T>[] | null | undefined };
@@ -69,7 +71,8 @@ function useLiveTables(): Live {
   const budgets = useQuery(api.sync.table, { table: "budgets" });
   const notes = useQuery(api.sync.table, { table: "notes" });
   const currencies = useQuery(api.sync.table, { table: "currencies" });
-  return { settings, accountGroups, accounts, categories, transactions, repeats, bookmarks, budgets, notes, currencies } as Live;
+  const categoryCleanups = useQuery(api.sync.table, { table: "categoryCleanups" });
+  return { settings, accountGroups, accounts, categories, transactions, repeats, bookmarks, budgets, notes, currencies, categoryCleanups } as Live;
 }
 
 /** Every page of the user's entries, kept live; undefined until the last page has arrived. */
@@ -149,7 +152,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     for (const t of TABLES) (s as Record<Table, unknown[]>)[t] = live[t] as unknown[];
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allLive, live.settings, live.accountGroups, live.accounts, live.categories, live.transactions, live.repeats, live.bookmarks, live.budgets, live.notes, live.currencies]);
+  }, [allLive, live.settings, live.accountGroups, live.accounts, live.categories, live.transactions, live.repeats, live.bookmarks, live.budgets, live.notes, live.currencies, live.categoryCleanups]);
 
   liveRef.current = allLive;
   connectedRef.current = conn.isWebSocketConnected;

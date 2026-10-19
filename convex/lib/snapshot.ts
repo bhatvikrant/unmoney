@@ -10,7 +10,7 @@ import {
 } from "../../shared/ops";
 
 export async function loadTable<T extends Table>(ctx: QueryCtx | MutationCtx, userId: Id<"users">, table: T): Promise<Doc<T>[]> {
-  const byUser = (t: "settings" | "accountGroups" | "accounts" | "repeats" | "bookmarks" | "budgets" | "currencies") =>
+  const byUser = (t: "settings" | "accountGroups" | "accounts" | "repeats" | "bookmarks" | "budgets" | "currencies" | "categoryCleanups") =>
     ctx.db.query(t).withIndex("by_user", (q) => q.eq("userId", userId)).collect();
   let docs: unknown[];
   switch (table) {
@@ -62,6 +62,24 @@ export async function loadTransactions(ctx: QueryCtx | MutationCtx, userId: Id<"
     add(to);
   }
   for (const docs of await Promise.all((scope.dates ?? []).map((date) => ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId).eq("date", date)).collect()))) add(docs);
+  const byCategory = (categoryId: Id<"categories">) => ctx.db.query("transactions").withIndex("by_user_category", (q) => q.eq("userId", userId).eq("categoryId", categoryId)).collect();
+  const categories = new Set<string>();
+  for (const cleanupId of scope.cleanupIds ?? []) {
+    const id = ctx.db.normalizeId("categoryCleanups", cleanupId);
+    const record = id ? await ctx.db.get(id) : null;
+    if (!record || record.userId !== userId) continue;
+    await byId(record.entries.map((e) => e.id));
+    for (const c of record.createdCategoryIds) categories.add(c);
+  }
+  for (const c of scope.categoryIds ?? []) categories.add(c);
+  for (const raw of categories) {
+    const id = isTmpId(raw) ? null : ctx.db.normalizeId("categories", raw);
+    const cat = id ? await ctx.db.get(id) : null;
+    if (!id || !cat || cat.userId !== userId) continue;
+    add(await byCategory(id));
+    // an entry filed under a subcategory carries its parent as categoryId
+    if (cat.parentId) add((await byCategory(cat.parentId)).filter((t) => t.subcategoryId === id));
+  }
   return [...found.values()];
 }
 

@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { Pencil, Eye, EyeOff } from "lucide-react";
+import { Pencil, Eye, EyeOff, Search, X, ArrowDownAZ, ArrowDownZA } from "lucide-react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export function AccountPicker({ open, onOpenChange, onPick, title = "Account", exclude }: {
   open: boolean; onOpenChange: (o: boolean) => void; onPick: (id: Id<"accounts">) => void; title?: string; exclude?: string;
@@ -54,39 +55,88 @@ export function CategoryPicker({ open, onOpenChange, type, onPick }: {
   const { categories, settings } = useApp();
   const nav = useNavigate();
   const [main, setMain] = useState<Id<"categories"> | null>(null);
-  const mains = useMemo(() => categories.filter((c) => c.type === type && !c.parentId && !c.deletedAt), [categories, type]);
-  const subs = useMemo(() => (main ? categories.filter((c) => c.parentId === main && !c.deletedAt) : []), [categories, main]);
+  const [query, setQuery] = useState("");
+  const [desc, setDesc] = useState(readSortDesc);
+  const sorted = useMemo(() => {
+    const dir = desc ? -1 : 1;
+    return categories.filter((c) => !c.deletedAt).sort((a, b) => dir * a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
+  }, [categories, desc]);
+  const mains = sorted.filter((c) => c.type === type && !c.parentId);
+  const subs = main ? sorted.filter((c) => c.parentId === main) : [];
+  const hasSubs = (id: Id<"categories">) => settings.subcategoryEnabled && sorted.some((c) => c.parentId === id);
+  const q = query.trim().toLocaleLowerCase();
+  const matches = (name: string) => name.toLocaleLowerCase().includes(q);
+  // While searching the top level, matching subcategories are listed too ("Food › Lunch") and pick straight away.
+  const mainIds = new Set(mains.map((c) => c._id));
+  const results = q && !main
+    ? sorted.filter((c) => (c.parentId ? settings.subcategoryEnabled && mainIds.has(c.parentId) : mainIds.has(c._id)) && matches(c.name))
+    : [];
+  const close = () => { onOpenChange(false); setMain(null); setQuery(""); };
   const pickMain = (id: Id<"categories">) => {
-    const hasSubs = settings.subcategoryEnabled && categories.some((c) => c.parentId === id && !c.deletedAt);
-    if (hasSubs) setMain(id);
-    else { onPick(id); onOpenChange(false); setMain(null); }
+    if (hasSubs(id)) { setMain(id); setQuery(""); }
+    else { onPick(id); close(); }
   };
+  const toggleSort = () => { setDesc(!desc); writeSortDesc(!desc); };
+  const nameOf = (id: Id<"categories">) => categories.find((c) => c._id === id)?.name;
+  const tile = "rounded-md border px-2 py-2 text-sm text-left truncate hover:bg-accent";
+  const shownSubs = q ? subs.filter((s) => matches(s.name)) : subs;
   return (
-    <BottomSheet open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) setMain(null); }} title={
+    <BottomSheet open={open} onOpenChange={(o) => { if (o) onOpenChange(o); else close(); }} title={
       <span className="flex items-center justify-center gap-2">
-        {main ? <button type="button" className="text-muted-foreground" onClick={() => setMain(null)}>‹ Back</button> : null}
-        {main ? categories.find((c) => c._id === main)?.name : "Category"}
-        <Button variant="ghost" size="icon" className="size-6" aria-label="Edit categories" onClick={() => { onOpenChange(false); nav("/settings/categories"); }}><Pencil className="size-3" /></Button>
+        {main ? <button type="button" className="text-muted-foreground" onClick={() => { setMain(null); setQuery(""); }}>‹ Back</button> : null}
+        {main ? nameOf(main) : "Category"}
+        <Button variant="ghost" size="icon" className="size-6" aria-label="Edit categories" onClick={() => { close(); nav("/settings/categories"); }}><Pencil className="size-3" /></Button>
       </span>
     }>
+      <div className="flex items-center gap-1.5 px-0.5 pb-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={main ? `Search in ${nameOf(main) ?? "category"}` : "Search categories"} aria-label="Search categories" className="pl-8 pr-8" />
+          {query ? (
+            <button type="button" aria-label="Clear search" onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="size-3.5" /></button>
+          ) : null}
+        </div>
+        <Button variant="outline" size="sm" className="h-8 gap-1 px-2 text-xs" onClick={toggleSort} aria-label={desc ? "Sorted Z to A, switch to A to Z" : "Sorted A to Z, switch to Z to A"}>
+          {desc ? <ArrowDownZA className="size-3.5" /> : <ArrowDownAZ className="size-3.5" />} {desc ? "Z–A" : "A–Z"}
+        </Button>
+      </div>
       {main ? (
         <div className="grid grid-cols-3 gap-1.5">
-          <button type="button" onClick={() => { onPick(main); onOpenChange(false); setMain(null); }} className="rounded-md border px-2 py-2 text-sm text-left hover:bg-accent text-muted-foreground">(no subcategory)</button>
-          {subs.map((s) => (
-            <button key={s._id} type="button" onClick={() => { onPick(main, s._id); onOpenChange(false); setMain(null); }} className="rounded-md border px-2 py-2 text-sm text-left truncate hover:bg-accent">{s.name}</button>
+          {!q ? <button type="button" onClick={() => { onPick(main); close(); }} className={cn(tile, "text-muted-foreground")}>(no subcategory)</button> : null}
+          {shownSubs.map((s) => (
+            <button key={s._id} type="button" onClick={() => { onPick(main, s._id); close(); }} className={tile}>{s.name}</button>
+          ))}
+        </div>
+      ) : q ? (
+        <div className="grid grid-cols-3 gap-1.5">
+          {results.map((c) => c.parentId ? (
+            <button key={c._id} type="button" onClick={() => { onPick(c.parentId!, c._id); close(); }} className={tile} title={`${nameOf(c.parentId)} › ${c.name}`}>
+              <span className="block truncate text-[11px] leading-tight text-muted-foreground">{nameOf(c.parentId)} ›</span>
+              <span className="block truncate">{c.name}</span>
+            </button>
+          ) : (
+            <button key={c._id} type="button" onClick={() => pickMain(c._id)} className={cn(tile, hasSubs(c._id) && "after:content-['›'] after:float-right after:text-muted-foreground")}>{c.name}</button>
           ))}
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-1.5">
-          {mains.map((c) => {
-            const hasSubs = settings.subcategoryEnabled && categories.some((x) => x.parentId === c._id && !x.deletedAt);
-            return (
-              <button key={c._id} type="button" onClick={() => pickMain(c._id)} className={cn("rounded-md border px-2 py-2 text-sm text-left truncate hover:bg-accent", hasSubs && "after:content-['›'] after:float-right after:text-muted-foreground")}>{c.name}</button>
-            );
-          })}
+          {mains.map((c) => (
+            <button key={c._id} type="button" onClick={() => pickMain(c._id)} className={cn(tile, hasSubs(c._id) && "after:content-['›'] after:float-right after:text-muted-foreground")}>{c.name}</button>
+          ))}
         </div>
       )}
       {!mains.length ? <div className="text-sm text-muted-foreground p-4 text-center">No {type} categories. Add some in Settings.</div> : null}
+      {mains.length && q && !(main ? shownSubs.length : results.length) ? (
+        <div className="text-sm text-muted-foreground p-4 text-center">No categories match “{query.trim()}”.</div>
+      ) : null}
     </BottomSheet>
   );
+}
+
+const SORT_KEY = "unmoney:categorySortDesc";
+function readSortDesc() {
+  try { return localStorage.getItem(SORT_KEY) === "1"; } catch { return false; }
+}
+function writeSortDesc(desc: boolean) {
+  try { localStorage.setItem(SORT_KEY, desc ? "1" : "0"); } catch { /* storage unavailable: the order still applies for this visit */ }
 }
