@@ -79,6 +79,20 @@ export const apply = mutation({
   },
 });
 
+/**
+ * After a wipe or restore done in chunks: delete the user's entries created before it that the
+ * chunks did not reach (made on another device, or by the repeats job, before the device knew).
+ * A page at a time, rescheduling itself.
+ */
+export const sweepEntries = internalMutation({
+  args: { userId: v.id("users"), before: v.number(), cursor: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, { userId, before, cursor = null }) => {
+    const res = await ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).paginate({ numItems: 1000, cursor });
+    for (const t of res.page) if (t._creationTime < before) await ctx.db.delete(t._id);
+    if (!res.isDone) await ctx.scheduler.runAfter(0, internal.sync.sweepEntries, { userId, before, cursor: res.continueCursor });
+  },
+});
+
 /** A client only resends ops it has not seen acknowledged, so a month of history is plenty. */
 const SYNC_OP_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PRUNE_BATCH = 500;
