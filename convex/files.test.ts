@@ -49,3 +49,12 @@ test("the backfill gives photos from before owners existed to the user whose ent
   expect((await asB.query(api.files.urls, { ids: [id] }))[id]).toBeNull();
   vi.useRealTimers();
 });
+
+test("a file from before owners were recorded cannot be claimed by someone else", async () => {
+  vi.useFakeTimers();
+  const { asB, store } = await twoUsers();
+  const id = await store();
+  vi.advanceTimersByTime(2 * 60 * 60 * 1000);
+  await expect(asB.mutation(api.files.claim, { storageId: id })).rejects.toThrow(/no longer be claimed/);
+  vi.useRealTimers();
+});

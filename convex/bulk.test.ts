@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
@@ -45,7 +45,9 @@ async function setup() {
     return snap;
   };
   const count = async () => (await snapshot()).transactions.length;
-  return { as, op, send, snapshot, count, userId };
+  /** Run what the server scheduled (the sweep after a chunked wipe or restore). */
+  const finish = () => t.finishAllScheduledFunctions(vi.runAllTimers);
+  return { as, op, send, snapshot, count, userId, finish };
 }
 
 const chunk = <T,>(xs: T[]) => Array.from({ length: Math.ceil(xs.length / CHUNK) }, (_, i) => xs.slice(i * CHUNK, (i + 1) * CHUNK));
@@ -82,4 +84,16 @@ test("deleting all of 20,000 entries and rescaling them work in chunks", async (
   for (const part of chunk(ids)) expect((await send([op("transactions.bulkRemove", { ids: part })]))[0].status).toBe("applied");
   expect((await send([op("backup.wipeAll", { confirm: "DELETE", entries: false })]))[0].status).toBe("applied");
   expect(await count()).toBe(0);
+}, 300_000);
+
+test("a chunked wipe also removes entries the device never saw", async () => {
+  const { op, send, snapshot, count, finish } = await setup();
+  vi.useFakeTimers();
+  // the device knows only some of the entries: the others were made elsewhere before the wipe arrived
+  const known = (await snapshot()).transactions.map((t) => t._id).slice(0, 1000);
+  for (const part of chunk(known)) expect((await send([op("transactions.bulkRemove", { ids: part })]))[0].status).toBe("applied");
+  expect((await send([op("backup.wipeAll", { confirm: "DELETE", entries: false })]))[0].status).toBe("applied");
+  await finish();
+  expect(await count()).toBe(0);
+  vi.useRealTimers();
 }, 300_000);

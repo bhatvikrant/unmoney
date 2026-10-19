@@ -5,6 +5,7 @@
  */
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { internal } from "../_generated/api";
 import {
   applyOp, clean, emptySnapshot, isTmpId, mergeTxScopes, OP_TABLES, rewriteIds, tmpIdsIn, txScope, type Op, type OpKind, type Snapshot, type Table, type TxScope,
 } from "../../shared/ops";
@@ -138,6 +139,9 @@ export async function runOps(ctx: MutationCtx, userId: Id<"users">, ops: Op[]): 
     }
   }
   const idMap = await writeDiff(ctx, userId, before, snap, tables);
+  // A wipe or restore done in chunks named only the entries the device knew; sweep the rest away.
+  const sweep = applied.some((op) => (op.kind === "backup.wipeAll" || op.kind === "backup.restore") && (op.args as { entries?: boolean }).entries === false);
+  if (sweep) await ctx.scheduler.runAfter(0, internal.sync.sweepEntries, { userId, before: Date.now() });
   for (const o of outcomes) {
     if (o.status !== "applied") continue;
     const prefix = `tmp_${o.id}_`;

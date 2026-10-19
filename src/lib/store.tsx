@@ -143,6 +143,25 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
+  // ---- outcomes, for callers that wait for the server (imports, restores) ----
+  const settled = useRef(new Map<string, string | null>()); // op id -> null when applied, else the error
+  const waiters = useRef(new Set<() => void>());
+  const settle = useCallback((id: string, error: string | null) => {
+    settled.current.set(id, error);
+    for (const w of [...waiters.current]) w();
+  }, []);
+  const whenSynced = useCallback((opIds: string[]) => new Promise<{ rejected: { id: string; error: string }[] }>((resolve) => {
+    const check = () => {
+      if (!opIds.every((id) => settled.current.has(id))) return;
+      waiters.current.delete(check);
+      const rejected = opIds.flatMap((id) => { const error = settled.current.get(id); return error ? [{ id, error }] : []; });
+      for (const id of opIds) settled.current.delete(id);
+      resolve({ rejected });
+    };
+    waiters.current.add(check);
+    check();
+  }), []);
+
   // ---- adopt the live snapshot ----
   const allLive = ready && me != null && TABLES.every((t) => live[t] != null);
   const liveSnapshot = useMemo<Snapshot | null>(() => {
@@ -161,6 +180,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     (async () => {
       if (metaRef.current.userId && metaRef.current.userId !== me.userId) {
         // Someone else signed in on this device: their predecessor's queue must not be replayed.
+        for (const op of opsRef.current) settle(op.id, "Discarded: someone else signed in");
         await local.wipe();
         opsRef.current = [];
         setOps([]);
@@ -179,7 +199,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         await local.writeMeta("user", me.user);
       }
     })();
-  }, [liveSnapshot, me]);
+  }, [liveSnapshot, me, settle]);
 
   const effectiveBase = liveSnapshot ?? base;
   const view = useMemo(() => (effectiveBase ? replay(effectiveBase, ops, meta.idMap, meta.userId ?? "") : emptySnapshot()), [effectiveBase, ops, meta.idMap, meta.userId]);
@@ -201,25 +221,6 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   const effectiveBaseRef = useRef<Snapshot | null>(null);
   effectiveBaseRef.current = effectiveBase;
-
-  // ---- outcomes, for callers that wait for the server (imports, restores) ----
-  const settled = useRef(new Map<string, string | null>()); // op id -> null when applied, else the error
-  const waiters = useRef(new Set<() => void>());
-  const settle = useCallback((id: string, error: string | null) => {
-    settled.current.set(id, error);
-    for (const w of [...waiters.current]) w();
-  }, []);
-  const whenSynced = useCallback((opIds: string[]) => new Promise<{ rejected: { id: string; error: string }[] }>((resolve) => {
-    const check = () => {
-      if (!opIds.every((id) => settled.current.has(id))) return;
-      waiters.current.delete(check);
-      const rejected = opIds.flatMap((id) => { const error = settled.current.get(id); return error ? [{ id, error }] : []; });
-      for (const id of opIds) settled.current.delete(id);
-      resolve({ rejected });
-    };
-    waiters.current.add(check);
-    check();
-  }), []);
 
   const dispatchTracked = useCallback(async <K extends OpKind>(kind: K, args: OpArgs<K>): Promise<{ id: string; result: OpResult<K> }> => {
     const op: Op = { id: uuid(), kind, args, at: Date.now() };
@@ -362,6 +363,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearLocal = useCallback(async () => {
+    // anyone waiting on these changes (an import, a restore) hears that they will not arrive
+    for (const op of opsRef.current) settle(op.id, "Discarded: signed out");
     await local.wipe();
     setQueue([]);
     setBase(null);
@@ -369,7 +372,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     metaRef.current = fresh;
     setMeta(fresh);
     setBlobUrls({});
-  }, [setQueue]);
+  }, [setQueue, settle]);
 
   const value = useMemo<Store>(() => ({
     ready,

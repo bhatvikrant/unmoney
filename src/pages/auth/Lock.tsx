@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { clearFailures, hashPin, lockoutRemaining, markUnlocked, recordFailure, requestPasscodeReset } from "@/lib/passcode";
+import { useMutation } from "convex/react";
+import { toast } from "sonner";
+import { api } from "../../../convex/_generated/api";
+import { clearFailures, hashPin, lockoutRemaining, markUnlocked, recordFailure } from "@/lib/passcode";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Delete } from "lucide-react";
@@ -62,8 +65,11 @@ function useLockout(): [number, () => void] {
   return [Math.ceil(left / 1000), () => setLeft(lockoutRemaining())];
 }
 
-export default function Lock({ hash, salt, userId, onUnlock }: { hash: string; salt: string; userId: string | null; onUnlock: () => void }) {
+export default function Lock({ hash, salt, resetRequested, onUnlock }: { hash: string; salt: string; resetRequested: boolean; onUnlock: () => void }) {
   const { signOut } = useAuthActions();
+  const requestReset = useMutation(api.passcode.requestReset);
+  const cancelReset = useMutation(api.passcode.cancelReset);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const [forgot, setForgot] = useState(false);
   const [wait, refreshWait] = useLockout();
@@ -78,6 +84,7 @@ export default function Lock({ hash, salt, userId, onUnlock }: { hash: string; s
           if ((await hashPin(pin, salt)) === hash) {
             clearFailures();
             markUnlocked();
+            if (resetRequested) void cancelReset().catch(() => {});
             onUnlock();
           } else {
             recordFailure();
@@ -92,7 +99,12 @@ export default function Lock({ hash, salt, userId, onUnlock }: { hash: string; s
           <p className="text-sm text-muted-foreground">Sign in with Google again and the passcode is removed, on every device. Changes not yet synced stay on this device.</p>
           <div className="mt-4 flex justify-center gap-2">
             <Button variant="ghost" onClick={() => setForgot(false)}>Cancel</Button>
-            <Button disabled={!userId} onClick={() => { requestPasscodeReset(userId!); void signOut(); }}>Sign out to reset</Button>
+            <Button disabled={busy} onClick={async () => {
+              // the server records the request, so only a real new sign-in can act on it
+              setBusy(true);
+              try { await requestReset(); } catch { toast.error("Resetting the passcode needs a connection."); setBusy(false); return; }
+              await signOut();
+            }}>Sign out to reset</Button>
           </div>
         </div>
       ) : (
