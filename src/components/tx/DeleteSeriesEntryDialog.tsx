@@ -16,8 +16,8 @@ export function DeleteSeriesEntryDialog({ open, onOpenChange, onPick }: {
         </AlertDialogHeader>
         <AlertDialogFooter className="flex-col sm:flex-row">
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => onPick("future")}>This and future</AlertDialogAction>
-          <AlertDialogAction onClick={() => onPick("one")}>Only this one</AlertDialogAction>
+          <AlertDialogAction variant="destructive" onClick={() => onPick("future")}>This and future</AlertDialogAction>
+          <AlertDialogAction variant="destructive" onClick={() => onPick("one")}>Only this one</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

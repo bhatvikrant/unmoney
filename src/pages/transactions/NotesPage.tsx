@@ -12,6 +12,7 @@ import { MonthNav } from "@/components/shell/MonthNav";
 import { Fab, EmptyState } from "@/components/shell/misc";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,7 @@ export default function NotesPage() {
   const notes = useMemo(() => notesRange(view, range.from, range.to), [view, range.from, range.to]);
   const upsert = useOp("notes.upsert");
   const undoable = useUndoableDelete();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState<{ id?: Id<"notes">; date: string; text: string; color: string } | null>(null);
 
   useEffect(() => {
@@ -67,7 +69,7 @@ export default function NotesPage() {
             </div>
           ) : null}
           <DialogFooter>
-            {editing?.id ? <Button variant="destructive" onClick={() => { const n = view.notes.find((x) => x._id === editing.id); if (n) void undoable.note(n); setEditing(null); }}>Delete</Button> : null}
+            {editing?.id ? <Button variant="destructive" onClick={async () => { const n = view.notes.find((x) => x._id === editing.id); if (!n || !(await confirm({ title: "Delete this note?", description: "You can undo this for a few seconds afterwards." }))) return; void undoable.note(n); setEditing(null); }}>Delete</Button> : null}
             <Button disabled={!editing?.text.trim()} onClick={async () => { if (!editing) return; await upsert({ id: editing.id, date: editing.date, text: editing.text.trim(), color: editing.color }); setEditing(null); }}>Save</Button>
           </DialogFooter>
         </DialogContent>

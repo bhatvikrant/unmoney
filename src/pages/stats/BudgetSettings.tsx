@@ -10,6 +10,7 @@ import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SegmentedTabs, EmptyState, Row } from "@/components/shell/misc";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -29,6 +30,7 @@ export default function BudgetSettings() {
   const upsert = useOp("budgets.upsert");
   const setOverride = useOp("budgets.setOverride");
   const remove = useOp("budgets.remove");
+  const confirm = useConfirm();
   const list = budgets.filter((b) => b.period === period).sort((a, b) => (a.categoryId ? 1 : 0) - (b.categoryId ? 1 : 0));
   const [dialog, setDialog] = useState<null | { id?: Id<"budgets">; categoryId: string; amount: string; override: string }>(null);
   const today = todayISO();
@@ -87,7 +89,7 @@ export default function BudgetSettings() {
             </div>
           ) : null}
           <DialogFooter>
-            {dialog?.id ? <Button variant="destructive" onClick={() => { remove({ id: dialog.id! }); setDialog(null); }}>Delete</Button> : null}
+            {dialog?.id ? <Button variant="destructive" onClick={async () => { if (!(await confirm({ title: "Delete this budget?", description: "Spending in this category will no longer be tracked against a limit." }))) return; remove({ id: dialog!.id! }); setDialog(null); }}>Delete</Button> : null}
             <Button onClick={save} disabled={!dialog?.categoryId || !dialog.amount}>Save</Button>
           </DialogFooter>
         </DialogContent>
