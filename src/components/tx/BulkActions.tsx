@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Bookmark, CalendarDays, Landmark, StickyNote, Tag, Trash2, X } from "lucide-react";
+import { useLocation } from "react-router";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useOp, useView } from "@/lib/store";
@@ -11,6 +12,7 @@ import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import type { Tx } from "@/components/tx/TransactionList";
 import type { BulkSelect } from "@/components/tx/useBulkSelect";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,6 +25,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   const view = useView();
   const bulkUpdate = useOp("transactions.bulkUpdate");
   const undoable = useUndoableDelete();
+  const { pathname } = useLocation();
   const addBookmark = useOp("bookmarks.create");
   const removeBookmark = useOp("bookmarks.remove");
   const [edit, setEdit] = useState<Edit>(null);
@@ -86,10 +89,12 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   });
 
   if (!bulk.active) return null;
+  const entryOpen = pathname.startsWith("/t/");
   const off = n === 0 || busy;
   return (
     <>
-      <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
+      {/* beside an open entry (wide screens) it spans the list only, not the entry's own bar */}
+      <div className={cn("fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom", entryOpen && "lg:right-[440px]")}>
         <div className="mx-auto max-w-3xl">
           <div className="flex items-center gap-2 px-3 pt-2 text-sm">
             <Button variant="outline" size="sm" onClick={() => (n === txs.length ? bulk.clear() : bulk.selectAll(txs))}>{n === txs.length && n > 0 ? "Clear" : "Select all"}</Button>

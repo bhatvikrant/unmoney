@@ -12,7 +12,10 @@ import TransactionEditor from "./TransactionEditor";
  */
 export default function LedgerRoute() {
   const wide = useMediaQuery(WIDE);
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  // a new entry for another day (or from another bookmark) is a different form
+  const sp = new URLSearchParams(search);
+  const formKey = `${pathname}|${sp.get("date") ?? ""}|${sp.get("bookmark") ?? ""}|${sp.get("type") ?? ""}`;
   const entry = pathname.startsWith("/t/");
   if (!wide) return entry ? <TransactionEditor /> : <TransactionsPage />;
   return (
@@ -21,7 +24,7 @@ export default function LedgerRoute() {
       {entry ? (
         <aside className="sticky top-0 h-dvh overflow-y-auto border-l bg-background" aria-label="Entry">
           {/* a fresh form for each entry opened from the list */}
-          <TransactionEditor key={pathname} panel />
+          <TransactionEditor key={formKey} panel />
         </aside>
       ) : null}
     </div>
