@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 import { MoveToGroupSheet } from "./MoveToGroupSheet";
 import { CardThumb } from "@/components/CardFace";
 import { cardColorOf } from "../../../shared/defaults";
+import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
+import { DeletePaymentMethodDialog } from "./DeletePaymentMethodDialog";
 
 export default function AccountsPage() {
   const nav = useNavigate();
@@ -23,9 +25,13 @@ export default function AccountsPage() {
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moving, setMoving] = useState(false);
+  /** The row swiped open to show Delete, and the method waiting on the delete confirmation. */
+  const [swiped, setSwiped] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<{ _id: Id<"accounts">; name: string } | null>(null);
   const toggle = (id: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const pick = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const exit = () => { setSelecting(false); setSelected(new Set()); };
+  const startSelecting = () => { setSwiped(null); setSelecting(true); };
   const shown = accountGroups.flatMap((g) => g.accounts.filter((a) => !a.hidden));
   const chosen = shown.filter((a) => selected.has(a._id));
   // Tick the group in the sheet only when every chosen method is already in it.
@@ -42,7 +48,7 @@ export default function AccountsPage() {
   return (
     <>
       <PageHeader title="Payment methods"
-        left={accounts.length ? <Button variant="ghost" size="icon" aria-label={selecting ? "Stop selecting" : "Select payment methods"} className={cn(selecting && "text-primary")} onClick={() => (selecting ? exit() : setSelecting(true))}><CheckSquare className="size-5" /></Button> : null}
+        left={accounts.length ? <Button variant="ghost" size="icon" aria-label={selecting ? "Stop selecting" : "Select payment methods"} className={cn(selecting && "text-primary")} onClick={() => (selecting ? exit() : startSelecting())}><CheckSquare className="size-5" /></Button> : null}
         right={<><Button variant="ghost" size="icon" aria-label="Order and visibility" onClick={() => nav("/payment-methods/order")}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label="Add payment method" onClick={() => nav("/payment-methods/new")}><Plus className="size-5" /></Button></>}
         sub={
           <div className="mx-auto max-w-3xl grid grid-cols-3 text-center py-2 text-sm">
@@ -72,7 +78,7 @@ export default function AccountsPage() {
               {open ? (
                 <div className="bg-card border-y">
                   {visible.map((a) => {
-                    const row = cn("w-full flex items-center gap-3 px-4 py-3 border-b last:border-b-0 text-sm hover:bg-accent/40 text-left", selected.has(a._id) && "bg-primary/10");
+                    const row = cn("w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-accent/40 text-left", selected.has(a._id) && "bg-primary/10");
                     const body = (
                       <>
                         {a.kind === "card" || a.kind === "debitCard" ? <CardThumb color={cardColorOf(a)} /> : null}
@@ -93,10 +99,15 @@ export default function AccountsPage() {
                         )}
                       </>
                     );
-                    return selecting ? (
-                      <label key={a._id} className={cn(row, "cursor-pointer")}><Checkbox checked={selected.has(a._id)} onCheckedChange={() => pick(a._id)} aria-label={`Select ${a.name}`} />{body}</label>
-                    ) : (
-                      <button key={a._id} type="button" onClick={() => nav(`/payment-methods/${a._id}`)} className={row}>{body}</button>
+                    return (
+                      <SwipeToDelete key={a._id} className="border-b last:border-b-0" disabled={selecting}
+                        open={swiped === a._id} onOpenChange={(o) => setSwiped(o ? a._id : null)} onDelete={() => setDeleting(a)}>
+                        {selecting ? (
+                          <label className={cn(row, "cursor-pointer")}><Checkbox checked={selected.has(a._id)} onCheckedChange={() => pick(a._id)} aria-label={`Select ${a.name}`} />{body}</label>
+                        ) : (
+                          <button type="button" onClick={() => nav(`/payment-methods/${a._id}`)} className={row}>{body}</button>
+                        )}
+                      </SwipeToDelete>
                     );
                   })}
                 </div>
@@ -116,6 +127,7 @@ export default function AccountsPage() {
           </div>
         </div>
       ) : null}
+      <DeletePaymentMethodDialog method={deleting} onOpenChange={(o) => { if (!o) { setDeleting(null); setSwiped(null); } }} />
       <MoveToGroupSheet open={moving} onOpenChange={setMoving} onPick={(id) => void moveTo(id)} current={current} title={`Move ${chosen.length} ${chosen.length === 1 ? "payment method" : "payment methods"} to`} />
     </>
   );
