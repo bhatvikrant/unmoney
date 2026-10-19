@@ -5,7 +5,9 @@ import { AppDataProvider } from "@/lib/app";
 import { useStore } from "@/lib/store";
 import { settingsOf } from "../shared/views";
 import { toast } from "sonner";
-import { awayTooLong, clearPasscodeReset, clearUnlock, isLocked, markHidden, markUnlocked, passcodeResetPendingFor } from "@/lib/passcode";
+import { awayTooLong, clearFailures, clearUnlock, isLocked, markHidden, markUnlocked } from "@/lib/passcode";
+import { useMutation } from "convex/react";
+import { api } from "../convex/_generated/api";
 import SignIn from "@/pages/auth/SignIn";
 import Onboarding from "@/pages/auth/Onboarding";
 import Lock from "@/pages/auth/Lock";
@@ -58,30 +60,29 @@ function FirstFetch() {
  * signed in with Google again (see Lock).
  */
 function usePasscodeLock(settings: ReturnType<typeof settingsOf>) {
-  const { userId, status, dispatch } = useStore();
+  const { status } = useStore();
   const [unlocked, setUnlocked] = useState(false);
   const hasPin = !!(settings?.passcodeHash && settings.passcodeSalt);
   const lockAfter = settings?.lockAfter ?? "always";
-  // `live` means the signed-in user's own data has arrived, so `userId` is theirs, not a predecessor's
-  const resetting = hasPin && status.live && passcodeResetPendingFor(userId);
+  const resetRequested = hasPin && !!settings?.passcodeResetRequestedAt;
 
-  const resetStarted = useRef(false);
+  // "Forgot it?": the server removes the passcode once this is a session begun after the request,
+  // i.e. after a real Google sign-in. The lock stays until then; nothing here unlocks on its own.
+  const resetPasscode = useMutation(api.passcode.resetAfterSignIn);
+  const asked = useRef(false);
   useEffect(() => {
-    if (!resetting || resetStarted.current) return;
-    resetStarted.current = true;
-    markUnlocked();
-    // The request is forgotten only once the removal is queued on this device, so nothing can lose it.
-    dispatch("settings.setPasscode", {}).then(
-      () => {
-        clearPasscodeReset();
+    if (!resetRequested || !status.live || asked.current) return;
+    asked.current = true;
+    resetPasscode().then(
+      (r) => {
+        if (r !== "reset") return;
+        clearFailures();
+        markUnlocked();
         toast.success("Passcode removed. You can set a new one in Settings › Passcode.");
       },
-      (e: unknown) => {
-        resetStarted.current = false;
-        toast.error(`Could not remove the passcode: ${e instanceof Error ? e.message : String(e)}`);
-      },
+      () => { asked.current = false; },
     );
-  }, [resetting, dispatch]);
+  }, [resetRequested, status.live, resetPasscode]);
 
   useEffect(() => {
     if (!hasPin) return;
@@ -96,8 +97,8 @@ function usePasscodeLock(settings: ReturnType<typeof settingsOf>) {
     return () => document.removeEventListener("visibilitychange", onChange);
   }, [hasPin, lockAfter]);
 
-  const locked = hasPin && !resetting && !unlocked && isLocked(lockAfter);
-  return { locked, unlock: () => setUnlocked(true), userId };
+  const locked = hasPin && !unlocked && isLocked(lockAfter);
+  return { locked, unlock: () => setUnlocked(true), resetRequested };
 }
 
 function Gate() {
@@ -107,7 +108,7 @@ function Gate() {
   if (!settings?.onboarded) return <Onboarding />;
   const s = settings;
   // Replaces the app rather than covering it: an open dialog would otherwise sit on top of the lock.
-  if (lock.locked) return <Lock hash={s.passcodeHash!} salt={s.passcodeSalt!} userId={lock.userId} onUnlock={lock.unlock} />;
+  if (lock.locked) return <Lock hash={s.passcodeHash!} salt={s.passcodeSalt!} resetRequested={lock.resetRequested} onUnlock={lock.unlock} />;
   return (
     <AppDataProvider settings={s} user={user}>
       <ScrollToTop />

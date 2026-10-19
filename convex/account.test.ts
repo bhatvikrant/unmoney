@@ -31,7 +31,15 @@ test("deleting an account removes every document, file and sign-in of that user,
   const me = await makeUser("me@x", 1_200);
   const other = await makeUser("other@x", 3);
 
+  // an entry of mine holding someone else's photo (a backup restored from their account)
+  await t.run(async (ctx) => {
+    const mine = await ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", me.userId)).first();
+    await ctx.db.patch(mine!._id, { photoIds: [other.photo] });
+  });
+
   await me.as.mutation(api.account.deleteMyAccount, { confirm: "DELETE" });
+  // a device still holding the old token cannot write while the purge runs
+  await expect(me.as.mutation(api.sync.apply, { ops: [{ id: "late", kind: "notes.upsert", args: { date: "2026-01-02", text: "late", color: "#000" }, at: 1 }] })).rejects.toThrow(/Not signed in/);
   await t.finishAllScheduledFunctions(vi.runAllTimers);
 
   const left = await t.run(async (ctx) => {

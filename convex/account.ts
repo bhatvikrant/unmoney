@@ -18,12 +18,13 @@ async function deleteFile(ctx: MutationCtx, id: Id<"_storage">) {
   }
 }
 
-type Doc = { _id: string; storageId?: Id<"_storage">; photoIds?: Id<"_storage">[] };
+type Doc = { _id: string; storageId?: Id<"_storage"> };
 
 /** Each step: up to BATCH of the user's documents, and what else to remove with each. */
 const STEPS: { name: string; take: (ctx: MutationCtx, userId: Id<"users">) => Promise<Doc[]>; also?: (ctx: MutationCtx, doc: Doc) => Promise<void> }[] = [
-  { name: "transactions", take: (ctx, u) => ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", u)).take(BATCH),
-    also: async (ctx, d) => { for (const id of d.photoIds ?? []) await deleteFile(ctx, id); } },
+  // photos go with fileOwners below: an entry's photoIds may name someone else's file (a backup
+  // restored from another account), so only files this user owns are deleted
+  { name: "transactions", take: (ctx, u) => ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "notes", take: (ctx, u) => ctx.db.query("notes").withIndex("by_user_date", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "categories", take: (ctx, u) => ctx.db.query("categories").withIndex("by_user_type", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "syncOps", take: (ctx, u) => ctx.db.query("syncOps").withIndex("by_user_op", (q) => q.eq("userId", u)).take(BATCH) },
@@ -48,6 +49,8 @@ export const deleteMyAccount = mutation({
   args: { confirm: v.literal("DELETE") },
   handler: async (ctx) => {
     const userId = await requireUser(ctx);
+    // gone at once: from now every call with this user's token is refused (lib/auth currentUserId)
+    await ctx.db.delete(userId);
     await ctx.scheduler.runAfter(0, internal.account.purge, { userId, step: 0 });
   },
 });
