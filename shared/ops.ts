@@ -171,6 +171,11 @@ export interface Ops {
   "accounts.adoptKinds": { args: Record<string, never>; result: number };
   /** Archives (or brings back) methods no longer in use. Entries on them are left untouched. */
   "accounts.setArchived": { args: { ids: Id<"accounts">[]; archived: boolean }; result: void };
+  /**
+   * Folds `sourceIds` into `targetId`: their entries, schedules, bookmarks and opening balances move
+   * to it and they are removed. Transfers between them are dropped (a fee on one stays as an expense).
+   */
+  "accounts.merge": { args: { sourceIds: Id<"accounts">[]; targetId: Id<"accounts"> }; result: { moved: number; droppedTransfers: number } };
   "accounts.payCard": { args: { id: Id<"accounts">; amount: number; date: string; fromAccountId?: Id<"accounts"> }; result: Id<"transactions"> };
 
   "categories.create": { args: { type: "income" | "expense"; name: string; parentId?: Id<"categories"> }; result: Id<"categories"> };
@@ -281,6 +286,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "accounts.move": ["accountGroups", "accounts"],
   "accounts.adoptKinds": ["accountGroups", "accounts"],
   "accounts.setArchived": ["settings", "accounts"],
+  "accounts.merge": ["settings", "accounts", "categories", "transactions", "repeats", "bookmarks"],
   "accounts.payCard": ["accounts", "transactions"],
   "categories.create": ["categories"],
   "categories.update": ["categories"],
@@ -355,6 +361,8 @@ export function txScope(op: Op): TxScope {
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
     case "repeats.remove": return { repeatIds: [id] };
     case "accounts.permanentlyDelete": return { accountIds: [id] };
+    // a merge moves every entry from or to the methods being merged
+    case "accounts.merge": return { accountIds: [a.targetId as string, ...(a.sourceIds as string[])] };
     // duplicates can only be entries on the same day
     case "transactions.importRows": {
       if (!a.skipDuplicates) return {};
@@ -1129,6 +1137,79 @@ const handlers: Handlers = {
       if (a.groupId === groupId) continue;
       w.patch("accounts", a._id, { groupId, order: order++, kind: resolveKind(a, w.snap.accountGroups) as AccountKind });
     }
+  },
+  "accounts.merge": (w, { sourceIds, targetId }) => {
+    const target = w.must("accounts", targetId, "The payment method to keep is gone");
+    if (target.deletedAt) throw new Error("The payment method to keep is deleted");
+    const sources = [...new Set(sourceIds)].filter((id) => id !== targetId).map((id) => w.must("accounts", id, "A payment method to merge is gone"));
+    if (!sources.length) throw new Error("Pick at least two payment methods to merge");
+    const merging = new Set<string>([targetId, ...sources.map((a) => a._id)]);
+    const into = (id: Id<"accounts"> | undefined) => (id && merging.has(id) ? targetId : id);
+    // The kept method cannot end up billing or drawing from itself.
+    if (target.billingAccountId && merging.has(target.billingAccountId)) throw new Error(`${target.name} is billed to one of these. Keep that one instead.`);
+    if (target.linkedAccountId && merging.has(target.linkedAccountId)) throw new Error(`${target.name} draws from one of these. Keep that one instead.`);
+    // Money must stay where it is: a debit card (or linked UPI) spends from its bank, so it can only
+    // join that bank or another method drawing from the same bank, and nothing else can join one.
+    const kindOfAcc = (a: Doc<"accounts">) => resolveKind(a, w.snap.accountGroups);
+    const drawsFrom = (a: Doc<"accounts">) => (drawsFromLinked({ kind: kindOfAcc(a), linkedAccountId: a.linkedAccountId }) ? a.linkedAccountId : undefined);
+    const targetFrom = drawsFrom(target);
+    for (const a of sources) {
+      const from = drawsFrom(a);
+      if (targetFrom ? from !== targetFrom : from && from !== targetId) {
+        const bank = w.get("accounts", from ?? targetFrom)?.name ?? "its bank";
+        throw new Error(from ? `${a.name} spends from ${bank}, so it can only be merged into ${bank} or a card drawing from it` : `${target.name} spends from ${bank}; merge ${a.name} into a method that holds its own money`);
+      }
+    }
+
+    // Transfers between the methods being merged mean nothing afterwards: drop them, keeping a fee as an expense.
+    let droppedTransfers = 0;
+    let moved = 0;
+    let feeCat: Id<"categories"> | undefined;
+    const feeCategory = () => feeCat ??= (w.snap.categories.find((c) => c.type === "expense" && !c.parentId && !c.deletedAt && c.name.trim().toLowerCase() === "transfer fee")?._id
+      ?? w.insert("categories", { type: "expense", name: "Transfer Fee", order: nextOrder(w.snap.categories.filter((c) => c.type === "expense")) }));
+    for (const t of [...w.snap.transactions]) {
+      const touches = merging.has(t.accountId) || (t.toAccountId !== undefined && merging.has(t.toAccountId));
+      if (!touches) continue;
+      if (t.type === "transfer" && t.toAccountId && merging.has(t.accountId) && merging.has(t.toAccountId)) {
+        if (t.feeAmount) {
+          w.insert("transactions", {
+            type: "expense", date: t.date, time: t.time, accountId: targetId, categoryId: feeCategory(), amount: t.feeAmount,
+            note: t.note ? `Fee: ${t.note}` : "Transfer fee", description: t.description, tags: t.tags, photoIds: [],
+          });
+        }
+        w.delete("transactions", t._id);
+        droppedTransfers++;
+        continue;
+      }
+      if (t.accountId === targetId && (t.toAccountId === undefined || t.toAccountId === into(t.toAccountId))) continue;
+      w.patch("transactions", t._id, { accountId: into(t.accountId)!, toAccountId: into(t.toAccountId) });
+      moved++;
+    }
+    // Schedules and bookmarks follow; one that would transfer to itself goes, like its entries did.
+    for (const table of ["repeats", "bookmarks"] as const) {
+      for (const d of [...w.snap[table]]) {
+        const tpl = d.template;
+        if (!merging.has(tpl.accountId) && !(tpl.toAccountId && merging.has(tpl.toAccountId))) continue;
+        const next = { ...tpl, accountId: into(tpl.accountId)!, toAccountId: into(tpl.toAccountId) };
+        if (next.type === "transfer" && next.toAccountId === next.accountId) {
+          if (table === "repeats") for (const t of w.snap.transactions) if (t.repeatId === d._id) w.patch("transactions", t._id, { repeatId: undefined });
+          w.delete(table, d._id as never);
+        } else w.patch(table, d._id as never, { template: clean(next) } as never);
+      }
+    }
+    // Other cards billed to, or drawing from, a merged method now point at the kept one.
+    for (const a of [...w.snap.accounts]) {
+      if (merging.has(a._id)) continue;
+      if ((a.billingAccountId && merging.has(a.billingAccountId)) || (a.linkedAccountId && merging.has(a.linkedAccountId))) {
+        w.patch("accounts", a._id, { billingAccountId: into(a.billingAccountId), linkedAccountId: into(a.linkedAccountId) });
+      }
+    }
+    // Opening balances add up, so the kept method ends with the combined balance.
+    w.patch("accounts", targetId, { initialBalance: target.initialBalance + sources.reduce((s, a) => s + a.initialBalance, 0) });
+    const s = w.settings();
+    if (s?.defaultAccountId && merging.has(s.defaultAccountId)) w.patch("settings", s._id, { defaultAccountId: targetId });
+    for (const a of sources) w.delete("accounts", a._id);
+    return { moved, droppedTransfers };
   },
   "accounts.setArchived": (w, { ids, archived }) => {
     if (!ids.length) throw new Error("Pick at least one payment method");
