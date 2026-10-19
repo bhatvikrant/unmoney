@@ -1,9 +1,9 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useCallback } from "react";
-import { BookOpen, ChartPie, Landmark, Settings } from "lucide-react";
+import { BookOpen, ChartPie, Settings, WalletCards } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { todayISO } from "../../../shared/dates";
-import { useApp, useAutoRefreshRates, useCatchUpRepeats } from "@/lib/app";
+import { useAdoptAccountKinds, useApp, useAutoRefreshRates, useCatchUpRepeats } from "@/lib/app";
 import { Avatar } from "./Avatar";
 import { SyncDot, SyncLine } from "./SyncStatus";
 import { useIosInstallHint } from "@/lib/pwa";
@@ -12,7 +12,7 @@ import { MoneyManagerPrompt, usePendingImportToasts } from "@/components/MoneyMa
 const tabs = [
   { to: "/", icon: BookOpen, label: "Trans." },
   { to: "/stats", icon: ChartPie, label: "Stats" },
-  { to: "/accounts", icon: Landmark, label: "Accounts" },
+  { to: "/payment-methods", icon: WalletCards, label: "Payment methods" },
   { to: "/settings", icon: Settings, label: "More" },
 ];
 
@@ -24,6 +24,7 @@ function isActive(pathname: string, to: string) {
 
 export default function AppShell() {
   useCatchUpRepeats();
+  useAdoptAccountKinds();
   useAutoRefreshRates();
   const nav = useNavigate();
   useIosInstallHint(useCallback(() => nav("/settings"), [nav]));

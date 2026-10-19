@@ -106,6 +106,19 @@ export function useCatchUpRepeats() {
 }
 
 /**
+ * Payment methods used to take their type from their group. Copy it onto any that still lack
+ * one, once, as an ordinary op: it works offline and the server runs the same change.
+ */
+export function useAdoptAccountKinds() {
+  const { dispatch, view } = useStore();
+  const needed = view.accounts.some((a) => !a.kind);
+  useEffect(() => {
+    if (needed) dispatch("accounts.adoptKinds", {}).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needed]);
+}
+
+/**
  * Fetch the latest rates (reusing a recent fetch) and store the ones that moved on the sub currencies,
  * so new entries pick them up. Custom currencies are never touched, and neither are saved entries:
  * each keeps the rate it was saved with.
