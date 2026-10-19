@@ -363,7 +363,7 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
           <div className="px-4 py-3 space-y-1 text-sm">
             <div><b className="tabular">{ready}</b> {ready === 1 ? "entry" : "entries"} ready to import.</div>
             {dry.duplicates.length ? <div className="text-muted-foreground">{dry.duplicates.length} {dry.duplicates.length === 1 ? "entry is" : "entries are"} already in UnMoney and will be left out.</div> : null}
-            {dry.createdAccounts.length ? <div className="text-muted-foreground">New accounts, in Others: {dry.createdAccounts.join(", ")}</div> : null}
+            {dry.createdAccounts.length ? <div className="text-muted-foreground">New payment methods, outside any group: {dry.createdAccounts.join(", ")}</div> : null}
             {skipped ? (
               <details className="text-muted-foreground">
                 <summary className="cursor-pointer text-destructive">{skipped} {skipped === 1 ? "row" : "rows"} will be skipped</summary>
@@ -386,13 +386,13 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
       </Section>
       <Section title="Options">
         <label className="flex items-center gap-3 px-4 py-3 border-b text-sm"><Checkbox checked={createMissing} onCheckedChange={(v) => setCreateMissing(!!v)} />Create categories that don't exist yet</label>
-        <label className="flex items-center gap-3 px-4 py-3 text-sm"><Checkbox checked={createAccounts} onCheckedChange={(v) => setCreateAccounts(!!v)} />Create accounts that don't exist yet</label>
+        <label className="flex items-center gap-3 px-4 py-3 text-sm"><Checkbox checked={createAccounts} onCheckedChange={(v) => setCreateAccounts(!!v)} />Create payment methods that don't exist yet</label>
       </Section>
       <Section title="First rows">
         <div className="overflow-x-auto max-h-64">
           <table className="text-xs w-full">
             <thead className="bg-muted sticky top-0">
-              <tr>{["Date", "Account", "Category", "Note", "Amount", "Type"].map((h) => <th key={h} className="text-left px-2 py-1 font-medium">{h}</th>)}</tr>
+              <tr>{["Date", "Payment method", "Category", "Note", "Amount", "Type"].map((h) => <th key={h} className="text-left px-2 py-1 font-medium">{h}</th>)}</tr>
             </thead>
             <tbody>
               {loaded.rows.slice(0, 50).map((r, i) => (
