@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { DeletePaymentMethodDialog } from "./DeletePaymentMethodDialog";
 import { amountInput, LOCALE_DECIMAL } from "@/lib/format";
 import { toMinor } from "../../../shared/money";
 import { ACCOUNT_KINDS, cardColorOf, type AccountKind } from "../../../shared/defaults";
@@ -49,7 +49,6 @@ export default function AccountEditor() {
   const [confirm, setConfirm] = useState(false);
   const create = useOp("accounts.create");
   const update = useOp("accounts.update");
-  const remove = useOp("accounts.remove");
   const kind = f.kind;
   const isCard = kind === "card" || kind === "debitCard";
   const transferable = !["cash", "bank", "card", "debitCard", "upi"].includes(kind);
@@ -131,12 +130,7 @@ export default function AccountEditor() {
         <div className="space-y-1.5"><Label>Description</Label><Input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></div>
         {id ? <Button variant="outline" className="w-full text-destructive" onClick={() => setConfirm(true)}>Delete payment method</Button> : null}
       </Page>
-      <AlertDialog open={confirm} onOpenChange={setConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Delete {f.name}?</AlertDialogTitle><AlertDialogDescription>Its transactions are kept. You can restore it from Settings › Deleted payment methods.</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={async () => { await remove({ id: id as Id<"accounts"> }); nav("/payment-methods"); }}>Delete</AlertDialogAction></AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeletePaymentMethodDialog method={confirm ? { _id: id as Id<"accounts">, name: f.name } : null} onOpenChange={setConfirm} onDeleted={() => nav("/payment-methods")} />
     </>
   );
 }
