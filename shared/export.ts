@@ -5,13 +5,25 @@ import { toMajor } from "./money";
 import { kindLabel } from "./defaults";
 import { resolveKind } from "./ledger";
 
-export type Cell = string | number | boolean | Date | null;
+/** A calendar day with no time of day: written as a date-only cell, so it reads back without one. */
+export class Day {
+  readonly date: Date;
+  constructor(date: Date) {
+    this.date = date;
+  }
+}
+
+export type Cell = string | number | boolean | Date | Day | null;
 export type SheetRows = Cell[][];
 
-/** A date + optional time as a wall-clock Date (UTC fields hold the local wall time, as Excel has no zone). */
-function when(date: string, time?: string): Date {
+/**
+ * A date as a wall-clock cell (UTC fields hold the local wall time, as Excel has no zone): with its time
+ * when it has one, else a Day, so an entry without a time does not come back at 00:00.
+ */
+function when(date: string, time?: string): Date | Day {
   const [y, m, d] = date.split("-").map(Number);
-  const [hh, mm] = (time ?? "00:00").split(":").map(Number);
+  if (!time) return new Day(new Date(Date.UTC(y, m - 1, d)));
+  const [hh, mm] = time.split(":").map(Number);
   return new Date(Date.UTC(y, m - 1, d, hh || 0, mm || 0, 0));
 }
 
