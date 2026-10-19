@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowLeftRight, Calculator, Globe, Repeat, Star, Copy, Trash2 } from "lucide-react";
+import { ArrowLeftRight, Calculator, Globe, Repeat, Star, Copy, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
@@ -11,7 +11,7 @@ import { amountInput, localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { todayISO } from "../../../shared/dates";
 import { evaluateExpression, formatRate, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
-import { useGoBack } from "@/lib/nav";
+import { useCloseEntry, useOpenEntry } from "@/lib/nav";
 import { useUndoableDelete } from "@/lib/undo";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
@@ -56,7 +56,8 @@ type Form = {
   repeat: RepeatChoice;
 };
 
-export default function TransactionEditor() {
+/** `panel`: shown beside the ledger on a wide screen (EntryRoute) rather than as its own screen. */
+export default function TransactionEditor({ panel = false }: { panel?: boolean }) {
   const { id } = useParams();
   const [sp] = useSearchParams();
   const view = useView();
@@ -124,14 +125,15 @@ export default function TransactionEditor() {
   }, [id, existing, bookmarks, sp]);
 
   if (!initial) return <div className="p-8 text-center text-sm text-muted-foreground">{id ? "Entry not found" : "Loading…"}</div>;
-  return <Editor key={realId ?? "new"} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} />;
+  return <Editor key={realId ?? "new"} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} panel={panel} />;
 }
 
 type Existing = TxDetail;
 
-function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transactions">; existing?: Existing }) {
+function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"transactions">; existing?: Existing; panel: boolean }) {
   const nav = useNavigate();
-  const goBack = useGoBack();
+  const closeEntry = useCloseEntry();
+  const openEntry = useOpenEntry();
   const undoable = useUndoableDelete();
   const { settings, accountName, categoryLabel, currencies, fmt, accounts } = useApp();
   const [f, setF] = useState<Form>(initial);
@@ -210,12 +212,14 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
     const h = (e: KeyboardEvent) => {
       if (e.defaultPrevented || busy || sheet || confirm) return;
       const t = e.target as HTMLElement;
+      // beside the ledger, keys meant for the list or one of its dialogs are not the form's
+      if (panel && (document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]') || !(t === document.body || t.closest('[aria-label="Entry"]')))) return;
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey || (t.tagName === "INPUT" && !e.shiftKey))) { e.preventDefault(); void saveRef.current("save"); }
-      else if (e.key === "Escape" && !(t.tagName === "INPUT" || t.tagName === "TEXTAREA")) goBack();
+      else if (e.key === "Escape" && !(t.tagName === "INPUT" || t.tagName === "TEXTAREA")) closeEntry();
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [busy, sheet, confirm, goBack]);
+  }, [busy, sheet, confirm, closeEntry, panel]);
 
   function buildArgs() {
     const amountMajor = evaluateExpression(f.amount, LOCALE_DECIMAL);
@@ -255,7 +259,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
       if (isEdit) {
         if (inSeries && !scope) { setConfirm("scope"); setBusy(false); return; }
         await update({ id: id!, ...args, scope });
-        goBack();
+        closeEntry();
       } else {
         await create({
           ...args,
@@ -265,7 +269,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         if (mode === "continue") {
           setF((p) => ({ ...p, amount: "", subAmount: "", note: "", description: "", tags: [], photoIds: [], fee: "", feeOn: false, repeat: { kind: "none" } }));
         } else {
-          goBack();
+          closeEntry();
         }
       }
     } catch (e) {
@@ -293,8 +297,8 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
 
   return (
     <>
-      <PageHeader back title={title} />
-      <Page className={isEdit ? "pb-36" : "pb-24"}>
+      <PageHeader back={!panel} title={title} right={panel ? <Button variant="ghost" size="icon" aria-label="Close" title="Close (Esc)" onClick={() => closeEntry()}><X className="size-4" /></Button> : undefined} />
+      <Page className={panel ? "pb-4" : isEdit ? "pb-36" : "pb-24"}>
         <div className="grid grid-cols-3 gap-2 p-4">
           {(["income", "expense", "transfer"] as const).map((t) => (
             <button
@@ -414,11 +418,11 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
 
       </Page>
 
-      <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
+      <div className={cn("z-30 bg-background/95 backdrop-blur border-t", panel ? "sticky bottom-0" : "fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 md:safe-bottom")}>
         <div className="mx-auto max-w-3xl space-y-2 p-3">
           {isEdit ? (
             <div className="grid grid-cols-3 gap-2">
-              <Button variant="outline" className="h-10 text-destructive hover:text-destructive" onClick={() => (inSeries ? setConfirm("delete") : void undoable.entry(id!).then(() => goBack()))}><Trash2 className="size-4" />Delete</Button>
+              <Button variant="outline" className="h-10 text-destructive hover:text-destructive" onClick={() => (inSeries ? setConfirm("delete") : void undoable.entry(id!).then(() => closeEntry()))}><Trash2 className="size-4" />Delete</Button>
               <Button variant="outline" className="h-10" onClick={() => setConfirm("copy")}><Copy className="size-4" />Copy</Button>
               <Button variant="outline" className={cn("h-10", bookmarked && "border-amber-400/60 text-amber-500 hover:text-amber-500")} aria-pressed={!!bookmarked} onClick={toggleBookmark}>
                 <Star key={bookmarked ? "on" : "off"} className={cn("size-4", bookmarked && "fill-current animate-in zoom-in-50 duration-300")} />
@@ -463,8 +467,8 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => undoable.entry(id!, "future").then(() => goBack())}>This and future</AlertDialogAction>
-            <AlertDialogAction onClick={() => undoable.entry(id!, "one").then(() => goBack())}>Only this one</AlertDialogAction>
+            <AlertDialogAction onClick={() => undoable.entry(id!, "future").then(() => closeEntry())}>This and future</AlertDialogAction>
+            <AlertDialogAction onClick={() => undoable.entry(id!, "one").then(() => closeEntry())}>Only this one</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -473,8 +477,8 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           <AlertDialogHeader><AlertDialogTitle>Copy this entry</AlertDialogTitle><AlertDialogDescription>Which date should the copy use?</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => copy({ id: id!, useToday: false }).then((nid) => { nav(`/t/${nid}`, { replace: true }); })}>Date of entry</AlertDialogAction>
-            <AlertDialogAction onClick={() => copy({ id: id!, useToday: true, today: todayISO() }).then((nid) => { nav(`/t/${nid}`, { replace: true }); })}>Today's date</AlertDialogAction>
+            <AlertDialogAction onClick={() => copy({ id: id!, useToday: false }).then((nid) => openEntry(nid))}>Date of entry</AlertDialogAction>
+            <AlertDialogAction onClick={() => copy({ id: id!, useToday: true, today: todayISO() }).then((nid) => openEntry(nid))}>Today's date</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

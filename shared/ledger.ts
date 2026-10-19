@@ -119,12 +119,19 @@ export function holderOf(ctx: Ctx, accountId: string): string {
   return accountId;
 }
 
-/** Balance of every account from its initial balance plus all transactions. */
-export function computeBalances(txs: TxLike[], ctx: Ctx): Map<string, number> {
+/**
+ * Balance of every account from its initial balance plus its transactions, up to and including
+ * `upTo` when given: entries dated later (installments, a scheduled entry already added) have not
+ * happened yet. With `from`, only entries after that date count and no initial balance does, which
+ * gives what is still to come.
+ */
+export function computeBalances(txs: TxLike[], ctx: Ctx, upTo?: ISODate, from?: ISODate): Map<string, number> {
   const bal = new Map<string, number>();
-  for (const a of ctx.accounts.values()) bal.set(a._id, a.initialBalance);
+  for (const a of ctx.accounts.values()) bal.set(a._id, from ? 0 : a.initialBalance);
   const add = (id: string, delta: number) => bal.set(id, (bal.get(id) ?? 0) + delta);
   for (const tx of txs) {
+    if (upTo && tx.date > upTo) continue;
+    if (from && tx.date <= from) continue;
     if (tx.type === "income") add(holderOf(ctx, tx.accountId), tx.amount);
     else if (tx.type === "expense") add(holderOf(ctx, tx.accountId), -tx.amount);
     else {
@@ -170,7 +177,8 @@ export function cardStatus(
   const start = cycleStart(account.settlementDay ?? 1, today);
   let outstanding = 0;
   for (const tx of txs) {
-    if (tx.accountId !== account._id || tx.date < start) continue;
+    // charges dated after today (later installments) are upcoming, not outstanding
+    if (tx.accountId !== account._id || tx.date < start || tx.date > today) continue;
     if (tx.type === "expense") outstanding += tx.amount;
     if (tx.type === "transfer") outstanding += tx.amount + (tx.feeAmount ?? 0);
   }
