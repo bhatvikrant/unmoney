@@ -63,7 +63,7 @@ export default function SettingsPage() {
           {link(<Bookmark />, "Bookmarks", "/bookmarks", { hint: "Entries you save to add again" })}
         </Section>
         <Section title="Look back">
-          {link(<Sparkles />, "Monthly recaps", "/recaps", { hint: "Every month's spending as a short story", under: ["/recap"] })}
+          {link(<Sparkles />, "Recaps", "/recaps", { hint: "Every month and year as a short story", under: ["/recap"] })}
         </Section>
         <Section title="Preferences">
           {link(<SlidersHorizontal />, "Preferences", "/settings/preferences", { hint: "Period, start screen, entry form", under: ["/settings/period"] })}
