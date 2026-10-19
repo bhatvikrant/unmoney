@@ -22,7 +22,7 @@ export default function DeletedAccounts() {
       .then(async (ok) => { if (ok) await purge({ id: a._id }); }).finally(swipe.close);
   return (
     <>
-      <PageHeader back="/settings" title="Deleted payment methods" />
+      <PageHeader back="/settings/payment-methods" title="Deleted payment methods" />
       <Page>
         {data && !data.accounts.length && !data.groups.length ? <EmptyState title="Nothing deleted" /> : null}
         {data?.accounts.length ? (
