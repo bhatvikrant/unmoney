@@ -156,7 +156,9 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
   // A rate from the feed follows the latest one while it is current (say, back online with the
   // editor open); when it is not, the stored rate is used and its age is shown.
   const rate = (sub && f.rateFromFeed && !rateAge ? fx.rates?.rates[sub.code] : undefined) ?? f.rate;
-  const ratesAge = staleLabel(fx, "Rates");
+  // Custom currencies (gold, points) never come from the feed: with only those, say nothing about it.
+  const usesFeed = currencies.some((c) => !c.isCustom);
+  const ratesAge = usesFeed ? staleLabel(fx, "Rates") : null;
 
   /** Use the latest rate for a newly picked currency; an entry keeps the rate it was saved with. */
   function pickCurrency(c: (typeof currencies)[number]) {
@@ -327,7 +329,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
                 </>
               )}
               <Button variant="ghost" size="icon" className="size-8" aria-label="Calculator" onClick={() => setSheet("keypad")}><Calculator className="size-4" /></Button>
-              {currencies.length ? <Button variant="ghost" size="icon" className={cn("size-8", sub && "text-primary")} aria-label="Currency" onClick={() => { setSheet("currency"); void refreshRates(); }}><Globe className="size-4" /></Button> : null}
+              {currencies.length ? <Button variant="ghost" size="icon" className={cn("size-8", sub && "text-primary")} aria-label="Currency" onClick={() => { setSheet("currency"); if (usesFeed) void refreshRates(); }}><Globe className="size-4" /></Button> : null}
             </div>
           </Field>
           {sub ? (

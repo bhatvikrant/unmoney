@@ -28,9 +28,12 @@ async function fetchFromSource(base: string): Promise<Record<string, number>> {
   return j.rates as Record<string, number>;
 }
 
+/** The saved rates, keeping only well-formed entries: storage is ours, but can be edited or cut short. */
 function load(): Record<string, FxRates> {
   try {
-    return JSON.parse(localStorage.getItem(KEY) ?? "{}") ?? {};
+    const all: unknown = JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    if (!all || typeof all !== "object") return {};
+    return Object.fromEntries(Object.entries(all).filter(([, r]) => r && typeof r.rates === "object" && r.rates && typeof r.fetchedAt === "number"));
   } catch {
     return {};
   }
