@@ -30,7 +30,7 @@ export function StatsHeaderBar() {
       {p.period === "custom" ? (
         <div className="flex gap-2 px-3 pb-2"><Input type="date" value={p.from} onChange={(e) => p.set({ from: e.target.value })} /><Input type="date" value={p.to} onChange={(e) => p.set({ to: e.target.value })} /></div>
       ) : (
-        <MonthNav label={p.label} onPrev={() => p.shift(-1)} onNext={() => p.shift(1)} />
+        <MonthNav label={p.label} onPrev={() => p.shift(-1)} onNext={() => p.shift(1)} month={p.period === "monthly" ? p.month : undefined} onPick={(m) => p.set({ month: m })} />
       )}
     </div>
   );
