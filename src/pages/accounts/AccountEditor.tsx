@@ -2,6 +2,7 @@ import { useOp } from "@/lib/store";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { Archive, ArchiveRestore } from "lucide-react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -53,7 +54,15 @@ export default function AccountEditor() {
   const isCard = kind === "card" || kind === "debitCard";
   const transferable = !["cash", "bank", "card", "debitCard", "upi"].includes(kind);
   // Something a card can bill or a linked method can draw from: not a card, and not itself drawing from another account.
-  const others = accounts.filter((a) => a._id !== id && a.kind !== "card" && !a.linked);
+  // Archived methods are not offered, unless one is already the billing or linked account.
+  const others = accounts.filter((a) => a._id !== id && a.kind !== "card" && !a.linked && (!a.archivedAt || a._id === f.billingAccountId || a._id === f.linkedAccountId));
+  const setArchived = useOp("accounts.setArchived");
+  async function toggleArchived() {
+    try {
+      await setArchived({ ids: [id as Id<"accounts">], archived: !existing?.archivedAt });
+      nav("/payment-methods");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not change it"); }
+  }
 
   async function save() {
     try {
@@ -128,7 +137,13 @@ export default function AccountEditor() {
           {transferable ? <label className="flex items-center justify-between px-3 py-2.5 text-sm"><span>Count transfers in as expenses<div className="text-xs text-muted-foreground">For savings, insurance, investments and loans</div></span><Switch checked={f.transferAsExpense} onCheckedChange={(v) => setF({ ...f, transferAsExpense: v })} /></label> : null}
         </div>
         <div className="space-y-1.5"><Label>Description</Label><Input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></div>
-        {id ? <Button variant="outline" className="w-full text-destructive" onClick={() => setConfirm(true)}>Delete payment method</Button> : null}
+        {id ? (
+          <div className="space-y-2">
+            <Button variant="outline" className="w-full" onClick={() => void toggleArchived()}>{existing?.archivedAt ? <><ArchiveRestore className="size-4" />Unarchive payment method</> : <><Archive className="size-4" />Archive payment method</>}</Button>
+            {!existing?.archivedAt ? <p className="text-center text-xs text-muted-foreground">For a method you no longer use: it stops showing when you add entries, and its entries and balance stay as they are.</p> : null}
+            <Button variant="outline" className="w-full text-destructive" onClick={() => setConfirm(true)}>Delete payment method</Button>
+          </div>
+        ) : null}
       </Page>
       <DeletePaymentMethodDialog method={confirm ? { _id: id as Id<"accounts">, name: f.name } : null} onOpenChange={setConfirm} onDeleted={() => nav("/payment-methods")} />
     </>
