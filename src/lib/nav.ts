@@ -26,8 +26,8 @@ function listQuery(search: string): string {
 }
 
 /**
- * Open an entry (an id, or "new" with its own params) keeping the list's month, view and filters in
- * the URL. On a wide screen an entry opened from the ledger shows beside it, so it takes the
+ * Open an entry (an id, or "new" with its own params), keeping the ledger's month, view and filters in
+ * the URL when opened from the ledger. On a wide screen an entry opened from the ledger shows beside it, so it takes the
  * ledger's place in history rather than adding a step, and says so with `from=ledger` (in the URL,
  * because changing the ledger's month or filters rewrites the query and drops history state).
  * Elsewhere it is a new screen, and Back returns.
@@ -38,7 +38,10 @@ export function useOpenEntry() {
   const wide = useMediaQuery(WIDE);
   return useCallback((id: string, extra: Record<string, string> = {}) => {
     const besideLedger = wide && (pathname === "/" || (pathname.startsWith("/t/") && new URLSearchParams(search).get("from") === "ledger"));
-    const params = new URLSearchParams(listQuery(search));
+    // Only the ledger's params are worth carrying (an entry from Search or Stats goes back by history, and their
+    // filters would only clutter its URL); an entry's own URL holds nothing but the ledger's, so it passes them on.
+    const fromLedger = pathname === "/" || pathname.startsWith("/t/");
+    const params = new URLSearchParams(fromLedger ? listQuery(search) : "");
     for (const [k, v] of Object.entries(extra)) params.set(k, v);
     if (besideLedger) params.set("from", "ledger");
     const query = params.toString();
