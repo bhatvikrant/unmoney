@@ -14,15 +14,16 @@ import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_I
 import { nextOccurrence, type Frequency } from "./repeat";
 import { monthKeyForDate, monthRange } from "./period";
 import { toMinor } from "./money";
+import { normName, normNote } from "./categoryLint";
 
 export const TABLES = [
-  "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies",
+  "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies", "categoryCleanups",
 ] as const;
 export type Table = (typeof TABLES)[number];
 export type Snapshot = { [T in Table]: Doc<T>[] };
 
 export function emptySnapshot(): Snapshot {
-  return { settings: [], accountGroups: [], accounts: [], categories: [], transactions: [], repeats: [], bookmarks: [], budgets: [], notes: [], currencies: [] };
+  return { settings: [], accountGroups: [], accounts: [], categories: [], transactions: [], repeats: [], bookmarks: [], budgets: [], notes: [], currencies: [], categoryCleanups: [] };
 }
 
 export type Op = { id: string; kind: OpKind; args: unknown; at: number };
@@ -105,6 +106,29 @@ export type ImportRow = {
   time?: string;
 };
 export type NewImportAccount = { name: string; groupKind: Doc<"accountGroups">["kind"] };
+export type CatType = "income" | "expense";
+/** A category in a tidy-up plan: an existing one, or one that a "create" step earlier in the plan makes. */
+export type CatRef = { id: Id<"categories"> } | { newKey: string };
+/** One change in a tidy-up plan. `label` is the line the undo banner shows when it goes through. */
+export type CleanupStep = { label?: string } & (
+  | { kind: "create"; key: string; type: CatType; name: string; parent?: CatRef }
+  | { kind: "rename"; id: Id<"categories">; name: string }
+  | { kind: "nest"; id: Id<"categories">; parent: CatRef }
+  | { kind: "merge"; sourceIds: Id<"categories">[]; target: CatRef }
+  | { kind: "refile"; fromId: Id<"categories">; notes: string[]; target: CatRef }
+  | { kind: "remove"; id: Id<"categories"> }
+);
+export type CleanupResult = {
+  cleanupId?: Id<"categoryCleanups">;
+  changedEntries: number;
+  /** Indexes of the steps that went through, and of those that did not, with why. */
+  applied: number[];
+  skipped: { step: number; reason: string }[];
+};
+/** How long a tidy-up can be undone. */
+export const CLEANUP_UNDO_MS = 30 * 24 * 60 * 60 * 1000;
+/** Most entries one tidy-up may move, so its undo record stays well under Convex's document size limit. */
+export const CLEANUP_MAX_ENTRIES = 10_000;
 
 export interface Ops {
   "settings.completeOnboarding": { args: { currency: string; symbolPosition?: "before" | "after" }; result: void };
@@ -132,6 +156,9 @@ export interface Ops {
   "categories.update": { args: { id: Id<"categories">; name?: string; parentId?: Id<"categories"> | null }; result: void };
   "categories.remove": { args: { id: Id<"categories"> }; result: void };
   "categories.reorder": { args: { ids: Id<"categories">[] }; result: void };
+  /** Tidy up: run a plan of category changes, moving every affected entry, and keep a record to undo it. */
+  "categories.applyCleanup": { args: { steps: CleanupStep[] }; result: CleanupResult };
+  "categories.undoCleanup": { args: { id: Id<"categoryCleanups"> }; result: { restoredEntries: number } };
 
   "transactions.create": { args: TxFields & { repeat?: { frequency: Frequency; endDate?: string }; installment?: { count: number } }; result: Id<"transactions"> };
   "transactions.update": { args: TxFields & { id: Id<"transactions">; scope?: "one" | "future" }; result: void };
@@ -220,6 +247,8 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "categories.update": ["categories"],
   "categories.remove": ["categories"],
   "categories.reorder": ["categories"],
+  "categories.applyCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups"],
+  "categories.undoCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups"],
   "transactions.create": ["accounts", "categories", "transactions", "repeats"],
   "transactions.update": ["accounts", "categories", "transactions", "repeats"],
   "transactions.remove": ["transactions", "repeats"],
@@ -245,7 +274,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "currencies.reorder": ["currencies"],
   "currencies.setRates": ["currencies"],
   "backup.restore": ALL,
-  "backup.wipeAll": ["transactions", "notes", "repeats", "bookmarks", "budgets"],
+  "backup.wipeAll": ["transactions", "notes", "repeats", "bookmarks", "budgets", "categoryCleanups"],
   "files.upload": [],
 };
 
@@ -256,6 +285,8 @@ type Insertable<T extends Table> = Omit<Doc<T>, "_id" | "_creationTime" | "userI
 class Work {
   snap: Snapshot;
   private copied = new Set<Table>();
+  /** Position of each document in its (copied) table, so bulk patches don't scan the table each time. */
+  private idx = new Map<Table, Map<string, number>>();
   private n = 0;
   private op: Op;
   private ctx: OpCtx;
@@ -272,6 +303,18 @@ class Work {
     }
     return this.snap[table];
   }
+  /** When the op was made; use it instead of Date.now() so client and server agree. */
+  get at(): number {
+    return this.op.at;
+  }
+  private index(table: Table): Map<string, number> {
+    let m = this.idx.get(table);
+    if (!m) {
+      m = new Map(this.t(table).map((d, i) => [d._id as string, i]));
+      this.idx.set(table, m);
+    }
+    return m;
+  }
   get<T extends Table>(table: T, id: string | undefined): Doc<T> | undefined {
     return id === undefined ? undefined : this.snap[table].find((d) => d._id === id);
   }
@@ -283,12 +326,14 @@ class Work {
   insert<T extends Table>(table: T, doc: Insertable<T>): Id<T> {
     this.n++;
     const _id = `${TMP_PREFIX}${this.op.id}_${this.n}` as Id<T>;
-    this.t(table).push(clean({ ...doc, _id, _creationTime: this.op.at + this.n, userId: this.ctx.userId } as unknown as Doc<T>));
+    const arr = this.t(table);
+    arr.push(clean({ ...doc, _id, _creationTime: this.op.at + this.n, userId: this.ctx.userId } as unknown as Doc<T>));
+    this.idx.get(table)?.set(_id, arr.length - 1);
     return _id;
   }
   patch<T extends Table>(table: T, id: Id<T>, patch: Partial<Doc<T>>): void {
     const arr = this.t(table);
-    const i = arr.findIndex((d) => d._id === id);
+    const i = this.index(table).get(id) ?? -1;
     if (i < 0) throw new Error("Not found");
     arr[i] = clean({ ...arr[i], ...patch });
   }
@@ -296,9 +341,11 @@ class Work {
     const arr = this.t(table);
     const i = arr.findIndex((d) => d._id === id);
     if (i >= 0) arr.splice(i, 1);
+    this.idx.delete(table);
   }
   clear(table: Table): void {
     this.t(table).length = 0;
+    this.idx.delete(table);
   }
   settings(): Doc<"settings"> | null {
     return this.snap.settings[0] ?? null;
@@ -392,6 +439,268 @@ function horizonFor(s: Doc<"settings"> | null, today: string): string {
 export function dueRepeats(snap: Snapshot, today: string): Doc<"repeats">[] {
   const h = horizonFor(snap.settings[0] ?? null, today);
   return snap.repeats.filter((r) => r.active && r.nextDate <= h);
+}
+
+// ---------- tidy-up ----------
+
+type CatId = Id<"categories">;
+type Pair = [CatId | undefined, CatId | undefined];
+type StoredPair = (CatId | null)[];
+type HasCats = { categoryId?: CatId; subcategoryId?: CatId };
+const pairOf = (x: HasCats): Pair => [x.categoryId, x.subcategoryId];
+const samePair = (a: Pair, b: Pair) => a[0] === b[0] && a[1] === b[1];
+const storePair = (p: Pair): StoredPair => [p[0] ?? null, p[1] ?? null];
+const loadPair = (p: StoredPair): Pair => [p[0] ?? undefined, p[1] ?? undefined];
+/** Where an entry filed under `c` points: a main category alone, or a subcategory with its parent. */
+const placeOf = (c: Doc<"categories">): Pair => (c.parentId ? [c.parentId, c._id] : [c._id, undefined]);
+const MAX_NAME = 40;
+
+function liveSubs(w: Work, id: string): Doc<"categories">[] {
+  return w.snap.categories.filter((c) => c.parentId === id && !c.deletedAt);
+}
+
+/** Anything still points at the category: an entry, a budget, a repeat or a bookmark. */
+function categoryInUse(w: Work, id: string): boolean {
+  const refs = (x: HasCats) => x.categoryId === id || x.subcategoryId === id;
+  return w.snap.transactions.some(refs) || w.snap.budgets.some((b) => b.categoryId === id)
+    || w.snap.repeats.some((r) => refs(r.template)) || w.snap.bookmarks.some((b) => refs(b.template));
+}
+
+function applyCleanup(w: Work, steps: CleanupStep[]): CleanupResult {
+  const at = w.at;
+  type Rec = Doc<"categoryCleanups">;
+  const catsBefore = new Map<string, Rec["categoriesBefore"][number]>();
+  const budgetsBefore = new Map<string, Rec["budgetsBefore"][number]>();
+  const entryFrom = new Map<string, Pair>();
+  const tplFrom = new Map<string, { table: "repeats" | "bookmarks"; id: string; from: Pair }>();
+  const created: CatId[] = [];
+  const keys = new Map<string, CatId>();
+  const labels: string[] = [];
+  const applied: number[] = [];
+  const skipped: CleanupResult["skipped"] = [];
+
+  const live = (id: string | undefined) => {
+    const c = w.get("categories", id);
+    return c && !c.deletedAt ? c : undefined;
+  };
+  const resolve = (ref: CatRef | undefined) => (!ref ? undefined : "id" in ref ? live(ref.id) : live(keys.get(ref.newKey)));
+  const patchCat = (id: CatId, patch: Partial<Doc<"categories">>) => {
+    const c = w.must("categories", id);
+    if (!catsBefore.has(id) && !created.includes(id)) catsBefore.set(id, clean({ id, name: c.name, parentId: c.parentId, deletedAt: c.deletedAt, order: c.order }));
+    w.patch("categories", id, patch);
+  };
+  const rememberBudget = (b: Doc<"budgets">) => {
+    if (!budgetsBefore.has(b._id)) budgetsBefore.set(b._id, clean({ id: b._id, categoryId: b.categoryId, period: b.period, amount: b.amount, overrides: b.overrides }));
+  };
+  /** Re-file every entry (and, unless told otherwise, every repeat and bookmark) of `type` that `fn` maps somewhere new. */
+  const remap = (type: CatType, fn: (p: Pair, note: string) => Pair | null, templates = true) => {
+    for (const tx of w.snap.transactions) {
+      if (tx.type !== type) continue;
+      const cur = pairOf(tx);
+      const next = fn(cur, tx.note);
+      if (!next || samePair(cur, next)) continue;
+      if (!entryFrom.has(tx._id)) entryFrom.set(tx._id, cur);
+      w.patch("transactions", tx._id, { categoryId: next[0], subcategoryId: next[1] });
+    }
+    if (!templates) return;
+    for (const table of ["repeats", "bookmarks"] as const) {
+      for (const d of w.snap[table]) {
+        if (d.template.type !== type) continue;
+        const cur = pairOf(d.template);
+        const next = fn(cur, d.template.note);
+        if (!next || samePair(cur, next)) continue;
+        const key = `${table}:${d._id}`;
+        if (!tplFrom.has(key)) tplFrom.set(key, { table, id: d._id, from: cur });
+        w.patch(table, d._id as never, { template: clean({ ...d.template, categoryId: next[0], subcategoryId: next[1] }) } as never);
+      }
+    }
+  };
+  /** A category's budgets follow it into `toId`: summed into a budget of the same period there, dropped if `toId` already budgets another period. */
+  const moveBudgets = (fromId: CatId, toId: CatId) => {
+    for (const b of w.snap.budgets.filter((x) => x.categoryId === fromId)) {
+      rememberBudget(b);
+      const twin = w.snap.budgets.find((x) => x.categoryId === toId && x.period === b.period);
+      if (twin) {
+        rememberBudget(twin);
+        const overrides = { ...twin.overrides };
+        for (const [k, v] of Object.entries(b.overrides)) overrides[k] = (overrides[k] ?? twin.amount) + v;
+        for (const k of Object.keys(twin.overrides)) if (!(k in b.overrides)) overrides[k] = twin.overrides[k] + b.amount;
+        w.patch("budgets", twin._id, { amount: twin.amount + b.amount, overrides });
+        w.delete("budgets", b._id);
+      } else if (w.snap.budgets.some((x) => x.categoryId === toId)) {
+        w.delete("budgets", b._id);
+      } else {
+        w.patch("budgets", b._id, { categoryId: toId });
+      }
+    }
+  };
+  const mergeInto = (s: Doc<"categories">, t: Doc<"categories">) => {
+    if (!s.parentId) {
+      // A main category: its subcategories move under the target, joining a same-named one there.
+      const subMap = new Map<string, CatId>();
+      if (!t.parentId) {
+        for (const sub of liveSubs(w, s._id)) {
+          const twin = liveSubs(w, t._id).find((x) => normName(x.name) === normName(sub.name));
+          if (twin) {
+            subMap.set(sub._id, twin._id);
+            moveBudgets(sub._id, twin._id);
+            patchCat(sub._id, { deletedAt: at });
+          } else {
+            subMap.set(sub._id, sub._id);
+            patchCat(sub._id, { parentId: t._id });
+          }
+        }
+      }
+      remap(s.type, ([c, sc]) => {
+        if (c !== s._id) return null;
+        if (t.parentId) return [t.parentId, t._id];
+        // a subcategory that did not come along (it was deleted) is dropped
+        return [t._id, sc ? subMap.get(sc) : undefined];
+      });
+    } else {
+      remap(s.type, ([, sc]) => (sc === s._id ? placeOf(t) : null));
+    }
+    moveBudgets(s._id, t._id);
+    if (!s.deletedAt) patchCat(s._id, { deletedAt: at });
+  };
+  const nameTaken = (type: CatType, parentId: string | undefined, name: string, selfId?: string) =>
+    w.snap.categories.some((c) => !c.deletedAt && c.type === type && c.parentId === parentId && c._id !== selfId && c.name.trim().toLowerCase() === name.toLowerCase());
+
+  /** Runs one step: checks everything first and returns why it cannot go through, or changes things and returns nothing. */
+  const run = (step: CleanupStep): string | void => {
+    switch (step.kind) {
+      case "create": {
+        const name = step.name.trim();
+        if (!name || name.length > MAX_NAME) return "Name must be 1 to 40 characters";
+        const parent = resolve(step.parent);
+        if (step.parent && !parent) return "Its parent category is gone";
+        if (parent && (parent.type !== step.type || parent.parentId)) return "Cannot go under that category";
+        const existing = w.snap.categories.find((c) => !c.deletedAt && c.type === step.type && c.parentId === parent?._id && c.name.trim().toLowerCase() === name.toLowerCase());
+        if (existing) { keys.set(step.key, existing._id); return; }
+        const id = w.insert("categories", { type: step.type, name, parentId: parent?._id, order: nextOrder(w.snap.categories.filter((c) => c.type === step.type)) });
+        created.push(id);
+        keys.set(step.key, id);
+        return;
+      }
+      case "rename": {
+        const c = live(step.id);
+        const name = step.name.trim();
+        if (!c) return "The category is gone";
+        if (!name || name.length > MAX_NAME) return "Name must be 1 to 40 characters";
+        if (nameTaken(c.type, c.parentId, name, c._id)) return `There is already a category called "${name}"`;
+        patchCat(c._id, { name });
+        return;
+      }
+      case "nest": {
+        const c = live(step.id);
+        const p = resolve(step.parent);
+        if (!c || !p) return "The category is gone";
+        if (c.type !== p.type) return "Mixes income and expense";
+        if (c._id === p._id || c.parentId || p.parentId) return "Only one level of subcategories";
+        if (liveSubs(w, c._id).length) return "It has subcategories of its own";
+        if (nameTaken(c.type, p._id, c.name)) return `${p.name} already has a subcategory called "${c.name}"`;
+        patchCat(c._id, { parentId: p._id });
+        remap(c.type, ([cc]) => (cc === c._id ? [p._id, c._id] : null));
+        return;
+      }
+      case "merge": {
+        const t = resolve(step.target);
+        if (!t) return "The category to merge into is gone";
+        const sources = [...new Set(step.sourceIds)].filter((id) => id !== t._id).map((id) => w.get("categories", id));
+        if (!sources.length) return "Nothing to merge";
+        if (sources.some((x) => !x)) return "A category in it is gone";
+        const list = sources as Doc<"categories">[];
+        if (list.some((x) => x.type !== t.type)) return "Mixes income and expense";
+        if (t.parentId && list.some((x) => !x.parentId && liveSubs(w, x._id).length)) return "Has subcategories, so it cannot become one";
+        if (t.parentId && list.some((x) => x._id === t.parentId)) return "Cannot merge a category into its own subcategory";
+        for (const x of list) mergeInto(x, t);
+        return;
+      }
+      case "refile": {
+        const from = w.get("categories", step.fromId);
+        const t = resolve(step.target);
+        if (!from || !t) return "The category is gone";
+        if (from.type !== t.type) return "Mixes income and expense";
+        const notes = new Set(step.notes.map(normNote).filter(Boolean));
+        if (!notes.size) return "No notes to match";
+        const dest = placeOf(t);
+        remap(t.type, ([c, sc], note) => ((from.parentId ? sc === from._id : c === from._id) && notes.has(normNote(note)) ? dest : null), false);
+        return;
+      }
+      case "remove": {
+        const c = live(step.id);
+        if (!c) return "It is already gone";
+        if (liveSubs(w, c._id).length) return "It has subcategories";
+        if (categoryInUse(w, c._id)) return "It is in use now";
+        patchCat(c._id, { deletedAt: at });
+        return;
+      }
+    }
+  };
+
+  steps.forEach((step, i) => {
+    const reason = run(step);
+    if (reason) skipped.push({ step: i, reason });
+    else {
+      applied.push(i);
+      if (step.label) labels.push(step.label);
+    }
+  });
+  if (!applied.some((i) => steps[i].kind !== "create")) throw new Error(skipped[0] ? `Nothing could be changed: ${skipped[0].reason}` : "Nothing to change");
+
+  const txById = new Map(w.snap.transactions.map((t) => [t._id as string, t]));
+  const entries = [...entryFrom].flatMap(([id, from]) => {
+    const to = pairOf(txById.get(id)!);
+    return samePair(from, to) ? [] : [{ id: id as Id<"transactions">, from: storePair(from), to: storePair(to) }];
+  });
+  if (entries.length > CLEANUP_MAX_ENTRIES) throw new Error(`Too many entries for one tidy-up (${entries.length}). Apply fewer changes at a time.`);
+  const templates = [...tplFrom.values()].flatMap(({ table, id, from }) => {
+    const d = w.get(table, id)!;
+    const to = pairOf(d.template);
+    return samePair(from, to) ? [] : [{ table, id, from: storePair(from), to: storePair(to) }];
+  });
+  // Only the latest tidy-up can be undone, so older records go.
+  for (const r of [...w.snap.categoryCleanups]) w.delete("categoryCleanups", r._id);
+  const cleanupId = w.insert("categoryCleanups", {
+    at, label: labels, createdCategoryIds: created,
+    categoriesBefore: [...catsBefore.values()], budgetsBefore: [...budgetsBefore.values()], entries, templates,
+  });
+  return { cleanupId, changedEntries: entries.length, applied, skipped };
+}
+
+function undoCleanup(w: Work, id: Id<"categoryCleanups">): { restoredEntries: number } {
+  const r = w.must("categoryCleanups", id, "Nothing to undo");
+  if (r.undoneAt) throw new Error("This tidy-up was already undone");
+  if (w.at - r.at > CLEANUP_UNDO_MS) throw new Error("This tidy-up is too old to undo");
+  for (const c of r.categoriesBefore) {
+    if (w.get("categories", c.id)) w.patch("categories", c.id, { name: c.name, parentId: c.parentId, deletedAt: c.deletedAt, order: c.order });
+  }
+  // Entries edited by hand since keep the edit: only those still where the tidy-up put them go back.
+  const txById = new Map(w.snap.transactions.map((t) => [t._id as string, t]));
+  let restoredEntries = 0;
+  for (const e of r.entries) {
+    const tx = txById.get(e.id);
+    if (!tx || !samePair(pairOf(tx), loadPair(e.to))) continue;
+    const [categoryId, subcategoryId] = loadPair(e.from);
+    w.patch("transactions", e.id, { categoryId, subcategoryId });
+    restoredEntries++;
+  }
+  for (const t of r.templates) {
+    const d = w.get(t.table, t.id);
+    if (!d || !samePair(pairOf(d.template), loadPair(t.to))) continue;
+    const [categoryId, subcategoryId] = loadPair(t.from);
+    w.patch(t.table, d._id as never, { template: clean({ ...d.template, categoryId, subcategoryId }) } as never);
+  }
+  for (const { id: budgetId, ...fields } of r.budgetsBefore) {
+    if (w.get("budgets", budgetId)) w.patch("budgets", budgetId, { categoryId: undefined, ...fields });
+    else w.insert("budgets", fields);
+  }
+  for (const cid of r.createdCategoryIds) {
+    const c = w.get("categories", cid);
+    if (c && !c.deletedAt && !liveSubs(w, cid).length && !categoryInUse(w, cid)) w.patch("categories", cid, { deletedAt: w.at });
+  }
+  w.patch("categoryCleanups", id, { undoneAt: w.at });
+  return { restoredEntries };
 }
 
 const strip = (d: Record<string, unknown>) => {
@@ -575,6 +884,8 @@ const handlers: Handlers = {
   "categories.reorder": (w, { ids }) => {
     ids.forEach((id, i) => { w.must("categories", id); w.patch("categories", id, { order: i }); });
   },
+  "categories.applyCleanup": (w, { steps }) => applyCleanup(w, steps),
+  "categories.undoCleanup": (w, { id }) => undoCleanup(w, id),
 
   "transactions.create": (w, { repeat, installment, ...input }) => {
     const t = validateTx(w, input);
@@ -1051,7 +1362,7 @@ const handlers: Handlers = {
 
   "backup.wipeAll": (w, { confirm }) => {
     if (confirm !== "DELETE") throw new Error("Not confirmed");
-    for (const t of ["transactions", "notes", "repeats", "bookmarks", "budgets"] as const) w.clear(t);
+    for (const t of ["transactions", "notes", "repeats", "bookmarks", "budgets", "categoryCleanups"] as const) w.clear(t);
   },
 
   "files.upload": () => {

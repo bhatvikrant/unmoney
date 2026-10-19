@@ -25,6 +25,9 @@ export const frequency = v.union(
 );
 export const budgetPeriod = v.union(v.literal("weekly"), v.literal("monthly"), v.literal("yearly"));
 
+/** [categoryId, subcategoryId] of an entry or template, null where unset. */
+const catPair = v.array(v.union(v.id("categories"), v.null()));
+
 /** Shape shared by bookmarks and repeat schedules. */
 export const template = v.object({
   type: txType,
@@ -190,6 +193,36 @@ export default defineSchema({
     storageId: v.id("_storage"),
     name: v.string(),
     size: v.number(),
+  }).index("by_user", ["userId"]),
+
+  /**
+   * The last "Tidy up" of a user's categories, with what it changed, so it can be undone for 30
+   * days. Only the most recent one is kept. Missing subcategories are null (arrays cannot hold
+   * undefined).
+   */
+  categoryCleanups: defineTable({
+    userId: v.id("users"),
+    at: v.number(),
+    /** One line per change that went through, e.g. "Merged Cafe into Coffee". */
+    label: v.array(v.string()),
+    undoneAt: v.optional(v.number()),
+    createdCategoryIds: v.array(v.id("categories")),
+    categoriesBefore: v.array(v.object({
+      id: v.id("categories"),
+      name: v.string(),
+      parentId: v.optional(v.id("categories")),
+      deletedAt: v.optional(v.number()),
+      order: v.number(),
+    })),
+    budgetsBefore: v.array(v.object({
+      id: v.id("budgets"),
+      categoryId: v.optional(v.id("categories")),
+      period: budgetPeriod,
+      amount: v.number(),
+      overrides: v.record(v.string(), v.number()),
+    })),
+    entries: v.array(v.object({ id: v.id("transactions"), from: catPair, to: catPair })),
+    templates: v.array(v.object({ table: v.union(v.literal("repeats"), v.literal("bookmarks")), id: v.string(), from: catPair, to: catPair })),
   }).index("by_user", ["userId"]),
 
   /** Ops the client has synced, for idempotent retries. */

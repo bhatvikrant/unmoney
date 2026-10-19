@@ -42,6 +42,7 @@ type Store = {
 const Ctx = createContext<Store | null>(null);
 
 const BATCH = 25;
+const SEND_ALONE = new Set<OpKind>(["transactions.importRows", "categories.applyCleanup", "categories.undoCleanup"]);
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
 const isAuthError = (e: unknown) => /not signed in|unauthenticated|authentication/i.test(e instanceof Error ? e.message : String(e));
 
@@ -59,7 +60,8 @@ function useLiveTables(): Live {
   const budgets = useQuery(api.sync.table, { table: "budgets" });
   const notes = useQuery(api.sync.table, { table: "notes" });
   const currencies = useQuery(api.sync.table, { table: "currencies" });
-  return { settings, accountGroups, accounts, categories, transactions, repeats, bookmarks, budgets, notes, currencies } as Live;
+  const categoryCleanups = useQuery(api.sync.table, { table: "categoryCleanups" });
+  return { settings, accountGroups, accounts, categories, transactions, repeats, bookmarks, budgets, notes, currencies, categoryCleanups } as Live;
 }
 
 /** The base snapshot with every queued op replayed on top. Ops that no longer apply are skipped. */
@@ -130,7 +132,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     for (const t of TABLES) (s as Record<Table, unknown[]>)[t] = live[t] as unknown[];
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allLive, live.settings, live.accountGroups, live.accounts, live.categories, live.transactions, live.repeats, live.bookmarks, live.budgets, live.notes, live.currencies]);
+  }, [allLive, live.settings, live.accountGroups, live.accounts, live.categories, live.transactions, live.repeats, live.bookmarks, live.budgets, live.notes, live.currencies, live.categoryCleanups]);
 
   liveRef.current = allLive;
   connectedRef.current = conn.isWebSocketConnected;
@@ -245,10 +247,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         const batch: QueuedOp[] = [];
         for (const op of queue) {
           if (op.kind === "files.upload" || batch.length >= limit) break;
-          // An import writes hundreds of documents; send it alone so one server transaction stays small
-          if (op.kind === "transactions.importRows" && batch.length) break;
+          // An import or a tidy-up can write hundreds of documents; send it alone so one server transaction stays small
+          if (SEND_ALONE.has(op.kind) && batch.length) break;
           batch.push(op);
-          if (op.kind === "transactions.importRows") break;
+          if (SEND_ALONE.has(op.kind)) break;
         }
         const sent: Op[] = [];
         let skipped = false;
