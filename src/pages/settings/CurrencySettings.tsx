@@ -1,4 +1,6 @@
 import { useOp } from "@/lib/store";
+import { useLocation, useNavigate } from "react-router";
+import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useBulkOps } from "@/lib/bulk";
 import { useApp } from "@/lib/app";
@@ -13,7 +15,9 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { cn } from "@/lib/utils";
 
 export default function CurrencySettings() {
-  const { settings: s, fmt } = useApp();
+  const { settings: s, fmt, currencies } = useApp();
+  const nav = useNavigate();
+  const { pathname } = useLocation();
   const update = useOp("settings.update");
   const bulk = useBulkOps();
   const [q, setQ] = useState("");
@@ -24,13 +28,16 @@ export default function CurrencySettings() {
   const list = useMemo(() => { const l = q.toLowerCase(); return CURRENCIES.filter((c) => c.code !== s.mainCurrency && (!l || c.code.toLowerCase().includes(l) || c.name.toLowerCase().includes(l))); }, [q, s.mainCurrency]);
   return (
     <>
-      <PageHeader back="/settings" title="Main currency" />
+      <PageHeader back="/settings" title="Currencies" />
       <Page className="pb-8">
-        <Section title="Current">
+        <Section title="Main currency">
           <Row label={s.mainCurrency} value={fmt(123456)} />
           <Row label="Symbol" right={<Input className="h-8 w-24" value={s.symbol} onChange={(e) => update({ patch: { symbol: e.target.value } })} />} />
           <Row label="Symbol position" right={<Select value={s.symbolPosition} onValueChange={(v) => update({ patch: { symbolPosition: v as "before" | "after" } })}><SelectTrigger className="h-8 w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="before">Before</SelectItem><SelectItem value="after">After</SelectItem></SelectContent></Select>} />
           <Row label="Decimal places" hint="How many digits after the point amounts keep" right={<Select value={String(s.decimals)} onValueChange={(v) => setDecimals(Number(v))}><SelectTrigger className="h-8 w-20"><SelectValue /></SelectTrigger><SelectContent>{[0, 1, 2, 3, 4].map((d) => <SelectItem key={d} value={String(d)}>{d}</SelectItem>)}</SelectContent></Select>} />
+        </Section>
+        <Section>
+          <Row label="Sub currencies" value={currencies.length ? currencies.map((c) => c.code).join(", ") : "None"} info="Extra currencies you spend in. Each has a rate against your main currency, and amounts are converted with the rate in force when you entered them." active={pathname.startsWith("/settings/sub-currencies")} onClick={() => nav("/settings/sub-currencies")} right={<ChevronRight className="size-4 text-muted-foreground" />} />
         </Section>
         <AlertDialog open={fewer !== null} onOpenChange={(o) => !o && setFewer(null)}>
           <AlertDialogContent>

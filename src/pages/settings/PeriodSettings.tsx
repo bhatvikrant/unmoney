@@ -10,7 +10,7 @@ export default function PeriodSettings() {
   const update = useOp("settings.update");
   return (
     <>
-      <PageHeader back="/settings" title="Period" />
+      <PageHeader back="/settings/preferences" title="Period" />
       <Page>
         <Section>
           <Row label="Monthly start date" hint="Match it to your pay day; months then run pay day to pay day" right={
