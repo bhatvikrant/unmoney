@@ -215,7 +215,6 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
       if (isEdit) {
         if (inSeries && !scope) { setConfirm("scope"); setBusy(false); return; }
         await update({ id: id!, ...args, scope });
-        toast.success("Saved");
         goBack();
       } else {
         await create({
@@ -223,7 +222,6 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           repeat: f.repeat.kind === "repeat" ? { frequency: f.repeat.frequency, endDate: f.repeat.endDate } : undefined,
           installment: f.repeat.kind === "installment" ? { count: f.repeat.count } : undefined,
         });
-        toast.success("Saved");
         if (mode === "continue") {
           setF((p) => ({ ...p, amount: "", subAmount: "", note: "", description: "", tags: [], photoIds: [], fee: "", feeOn: false, repeat: { kind: "none" } }));
         } else {
@@ -241,12 +239,10 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
     try {
       if (bookmarked) {
         await removeBookmark({ id: bookmarked._id });
-        toast("Bookmark removed");
         return;
       }
       const a = buildArgs();
       await addBookmark({ transactionId: id, template: { type: a.type, accountId: a.accountId, toAccountId: a.toAccountId, categoryId: a.categoryId, subcategoryId: a.subcategoryId, amount: a.amount, note: a.note, description: a.description, tags: a.tags, feeAmount: a.feeAmount } });
-      toast.success("Bookmarked", { description: "Find it under the star on the Transactions tab." });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not bookmark");
     }
@@ -433,8 +429,8 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           <AlertDialogHeader><AlertDialogTitle>Copy this entry</AlertDialogTitle><AlertDialogDescription>Which date should the copy use?</AlertDialogDescription></AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => copy({ id: id!, useToday: false }).then((nid) => { toast.success("Copied"); nav(`/t/${nid}`, { replace: true }); })}>Date of entry</AlertDialogAction>
-            <AlertDialogAction onClick={() => copy({ id: id!, useToday: true }).then((nid) => { toast.success("Copied"); nav(`/t/${nid}`, { replace: true }); })}>Today's date</AlertDialogAction>
+            <AlertDialogAction onClick={() => copy({ id: id!, useToday: false }).then((nid) => { nav(`/t/${nid}`, { replace: true }); })}>Date of entry</AlertDialogAction>
+            <AlertDialogAction onClick={() => copy({ id: id!, useToday: true }).then((nid) => { nav(`/t/${nid}`, { replace: true }); })}>Today's date</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -40,15 +40,16 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
     if (busy) return;
     setBusy(true);
     try {
+      // Only a partial result (some entries left alone) is worth saying out loud; the list itself shows the rest.
       const msg = await fn();
-      toast.success(msg || "Done");
+      if (msg) toast(msg);
       bulk.exit(); setEdit(null); setVal("");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
     finally { setBusy(false); }
   }
 
   const applyDialog = () => run(async () => {
-    if (edit === "delete") { await bulkRemove({ ids: ids() }); return `Deleted ${n} ${n === 1 ? "entry" : "entries"}`; }
+    if (edit === "delete") { await bulkRemove({ ids: ids() }); return; }
     if (edit === "date") await bulkUpdate({ ids: ids(), date: val });
     if (edit === "note") await bulkUpdate({ ids: ids(), note: val });
   });
@@ -72,7 +73,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   const toggleBookmarks = () => run(async () => {
     if (allMarked) {
       for (const t of chosen) await removeBookmark({ id: bookmarkOf.get(t._id)! });
-      return `Removed ${n} bookmark${n === 1 ? "" : "s"}`;
+      return;
     }
     const todo = chosen.filter((t) => !bookmarkOf.has(t._id));
     for (const t of todo) {
@@ -81,7 +82,6 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
         template: { type: t.type, accountId: t.accountId, toAccountId: t.toAccountId, categoryId: t.categoryId, subcategoryId: t.subcategoryId, amount: t.amount, note: t.note, description: t.description, tags: t.tags, feeAmount: t.feeAmount },
       });
     }
-    return `Bookmarked ${todo.length} ${todo.length === 1 ? "entry" : "entries"}`;
   });
 
   if (!bulk.active) return null;

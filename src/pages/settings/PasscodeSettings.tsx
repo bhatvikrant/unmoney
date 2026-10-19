@@ -1,6 +1,5 @@
 import { useOp } from "@/lib/store";
 import { useState } from "react";
-import { toast } from "sonner";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -31,7 +30,6 @@ export default function PasscodeSettings() {
                 if (stage.verify === "change") { setStage("enter"); return; }
                 await setPasscode({});
                 setStage(null);
-                toast.success("Passcode removed");
                 return;
               }
               if (stage === "enter") { setFirst(pin); setStage("confirm"); return; }
@@ -40,7 +38,6 @@ export default function PasscodeSettings() {
               await setPasscode({ hash: await hashPin(pin, salt), salt });
               markUnlocked();
               setStage(null);
-              toast.success("Passcode set");
             }} />
             <div className="text-center mt-6"><Button variant="ghost" onClick={() => setStage(null)}>Cancel</Button></div>
           </div>
