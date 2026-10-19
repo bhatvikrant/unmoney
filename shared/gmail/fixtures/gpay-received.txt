@@ -1,0 +1,12 @@
+From: Google Pay <payments-noreply@google.com>
+Subject: You received ₹500.00 from Rahul V
+Received: 2026-10-17T11:20:00Z
+
+Money received
+
+You received ₹500.00 from Rahul V
+rahul.v@okicici
+
+17 Oct 2026, 4:50 PM
+UPI transaction ID 529312345689
+Credited to HDFC Bank ••1234

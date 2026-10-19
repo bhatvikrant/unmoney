@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "amazon",
+    "type": "refund",
+    "amount": 1849,
+    "currency": "INR",
+    "date": "2026-10-21",
+    "dateSource": "mail",
+    "last4": "4521",
+    "bankName": "HDFC",
+    "channel": "card",
+    "merchantRaw": "Amazon"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "sbi",
+    "type": "credit",
+    "amount": 50000,
+    "currency": "INR",
+    "date": "2026-10-01",
+    "dateSource": "mail",
+    "last4": "2233",
+    "bankName": "SBI",
+    "channel": "netbanking",
+    "merchantRaw": "ACME TECH PVT LTD"
+  }
+}

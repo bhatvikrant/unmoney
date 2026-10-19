@@ -1,0 +1,11 @@
+From: State Bank of India <alerts@sbi.co.in>
+Subject: Transaction Alert from SBI
+Received: 2026-10-18T08:15:00Z
+
+Dear Customer,
+
+Your A/C XXXXX112233 Debited INR 1,500.00 on 18/10/26 -transfer to Mr RAVI KUMAR Ref No 529412345682.
+
+If not done by you, forward this SMS to 7400000000 to block UPI.
+
+-SBI

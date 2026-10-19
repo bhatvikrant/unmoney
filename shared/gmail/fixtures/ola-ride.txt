@@ -1,0 +1,16 @@
+From: Ola <noreply@olacabs.com>
+Subject: Your Ola ride receipt
+Received: 2026-10-18T18:00:00Z
+
+Hi Arjun,
+
+Thanks for riding with Ola. CRN 1234567890
+
+Ride on 18 Oct 2026, 11:20 PM
+Mini · Indiranagar to Koramangala
+
+Base Fare ₹150
+Distance Fare ₹40
+
+Total Fare ₹190
+Paid via Ola Money

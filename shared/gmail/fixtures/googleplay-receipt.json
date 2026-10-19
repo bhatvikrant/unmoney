@@ -1,0 +1,17 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "google-play",
+    "type": "debit",
+    "amount": 149,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "11:02",
+    "last4": "4521",
+    "bankName": "HDFC",
+    "channel": "card",
+    "merchantRaw": "Google Play",
+    "item": "YouTube Premium (YouTube)"
+  }
+}

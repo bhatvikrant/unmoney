@@ -1,0 +1,11 @@
+From: ICICI Bank <alert@icicibank.com>
+Subject: Transaction alert for your ICICI Bank Account
+Received: 2026-10-18T13:30:00Z
+
+Dear Customer,
+
+Your account XX5566 has been debited with INR 540.00 on 18-Oct-26 and an amount of INR 540.00 has been credited to zomato@ptybl. UPI Ref No 529412345679.
+
+Available balance is INR 18,240.75.
+
+Call 18001080 if this was not done by you.

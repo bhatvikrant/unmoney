@@ -1,0 +1,11 @@
+From: HDFC Bank InstaAlerts <alerts@hdfcbank.net>
+Subject: Alert: NEFT transaction from your account
+Received: 2026-10-18T06:20:00Z
+
+Dear Customer,
+
+Rs. 15000.00 is debited from a/c XX1234 on 18-10-26 to Vikram Enterprises (NEFT Ref N291262345678901).
+
+Available balance: Rs. 42,310.50.
+
+Not you? Call 18002586161.

@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "kotak",
+    "type": "debit",
+    "amount": 800,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "last4": "7788",
+    "bankName": "Kotak",
+    "channel": "upi",
+    "merchantRaw": "petrol.pump",
+    "vpa": "petrol.pump@okaxis"
+  }
+}

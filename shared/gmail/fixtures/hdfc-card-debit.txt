@@ -1,0 +1,12 @@
+From: HDFC Bank InstaAlerts <alerts@hdfcbank.net>
+Subject: Alert : Update on your HDFC Bank Credit Card
+Received: 2026-10-18T09:03:00Z
+
+Dear Customer,
+
+Thank you for using HDFC Bank Credit Card ending 4521 for Rs 2,499.00 at AMAZON PAY INDIA on 18-10-2026 14:32:11.
+
+Your available credit limit is Rs 1,47,501.00. If this transaction was not done by you, call 18002586161 to block your card.
+
+Warm Regards,
+HDFC Bank

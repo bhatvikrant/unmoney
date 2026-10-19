@@ -1,0 +1,7 @@
+From: ICICI Bank <credit_cards@icicibank.com>
+Subject: Transaction declined on your ICICI Bank Credit Card
+Received: 2026-10-18T12:00:00Z
+
+Dear Customer,
+
+A transaction of INR 5,600.00 at MAKEMYTRIP on your ICICI Bank Credit Card XX7001 was declined on 18-Oct-26 due to insufficient limit.

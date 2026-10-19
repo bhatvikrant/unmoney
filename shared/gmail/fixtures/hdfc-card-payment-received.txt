@@ -1,0 +1,9 @@
+From: HDFC Bank InstaAlerts <alerts@hdfcbank.net>
+Subject: Payment received on your HDFC Bank Credit Card
+Received: 2026-10-10T07:00:00Z
+
+Dear Customer,
+
+Payment of Rs 23,450.00 has been received towards your HDFC Bank Credit Card ending 4521 on 10-10-26. It will reflect in your next statement.
+
+Thank you for banking with us.

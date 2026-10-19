@@ -1,0 +1,13 @@
+From: PhonePe <noreply@phonepe.com>
+Subject: Payment Successful
+Received: 2026-10-18T05:11:30Z
+
+Payment Successful
+
+₹1,200
+Paid to Zomato
+
+Transaction ID T2610181041123456789
+18 Oct 2026, 10:41 AM
+Debited from HDFC Bank ****1234
+UPI Ref 529412345687

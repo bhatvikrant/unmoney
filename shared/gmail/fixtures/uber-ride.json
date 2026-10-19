@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "uber",
+    "type": "debit",
+    "amount": 286,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "18:52",
+    "last4": "4521",
+    "bankName": "HDFC",
+    "channel": "card",
+    "merchantRaw": "Uber"
+  }
+}

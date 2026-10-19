@@ -1,0 +1,18 @@
+From: Amazon.in <auto-confirm@amazon.in>
+Subject: Your Amazon.in order #403-1234567-1234567 of 1 item
+Received: 2026-10-18T09:03:40Z
+
+Hello Arjun,
+
+Thank you for your order. We'll send a confirmation when your item ships.
+
+Order #403-1234567-1234567
+Order placed: 18 October 2026
+
+Logitech MX Keys Mini Keyboard, Graphite
+Qty: 1  ₹1,849.00
+
+Order Total: ₹1,849.00
+Payment method: HDFC Bank Credit Card ending in 4521
+
+Arriving: Monday, October 20
