@@ -23,7 +23,13 @@ export default function SearchPage() {
   const [sp, setSp] = useSearchParams();
   const param = <T extends string>(key: string, fallback: T) => [
     (sp.get(key) ?? fallback) as T,
-    (v: string) => setSp((p) => { const n = new URLSearchParams(p); if (v && v !== fallback) n.set(key, v); else n.delete(key); return n; }, { replace: true }),
+    (v: string) => {
+      // Start from the live URL, not the last render's params (which setSp's updater gets): two
+      // changes in one frame (From and To) would otherwise each start from the old URL and the second would drop the first.
+      const n = new URLSearchParams(window.location.search);
+      if (v && v !== fallback) n.set(key, v); else n.delete(key);
+      setSp(n, { replace: true });
+    },
   ] as const;
   // The box keeps its own state: the router updates the URL inside a transition, and an input
   // driven from there would lose keystrokes and its caret. The URL just mirrors it.
