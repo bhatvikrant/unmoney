@@ -25,6 +25,7 @@ import AccountEditor from "@/pages/accounts/AccountEditor";
 import AccountOrder from "@/pages/accounts/AccountOrder";
 import SettingsPage from "@/pages/settings/SettingsPage";
 import CategoriesSettings from "@/pages/settings/CategoriesSettings";
+import CategoryTidyUp from "@/pages/settings/CategoryTidyUp";
 import CurrencySettings from "@/pages/settings/CurrencySettings";
 import SubCurrencySettings from "@/pages/settings/SubCurrencySettings";
 import RepeatSettings from "@/pages/settings/RepeatSettings";
@@ -129,6 +130,7 @@ function Gate() {
           <Route path="accounts/:id/edit" element={<AccountEditor />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/categories" element={<CategoriesSettings />} />
+          <Route path="settings/categories/tidy" element={<CategoryTidyUp />} />
           <Route path="settings/currency" element={<CurrencySettings />} />
           <Route path="settings/sub-currencies" element={<SubCurrencySettings />} />
           <Route path="settings/repeats" element={<RepeatSettings />} />

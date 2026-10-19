@@ -49,7 +49,6 @@ export default function BudgetSettings() {
         await setOverride({ id, key, amount: dialog.override.trim() ? toMinor(dialog.override, settings.decimals, LOCALE_DECIMAL) : null });
       }
       setDialog(null);
-      toast.success("Budget saved");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   }
 

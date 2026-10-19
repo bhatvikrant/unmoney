@@ -239,7 +239,6 @@ function IosSteps() {
         await navigator.clipboard.writeText(await made);
       }
       setCopied(true);
-      toast.success("Import link copied");
     } catch {
       // clipboard refused: the link is shown below to copy by hand
     }
@@ -261,7 +260,7 @@ function IosSteps() {
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}{status ? "Copy a new link" : "Copy import link"}
             </Button>
             {status ? (
-              <Button size="sm" variant="ghost" onClick={async () => { await revoke({}); setLink(null); setCopied(false); toast.success("Import link turned off"); }}>Turn off link</Button>
+              <Button size="sm" variant="ghost" onClick={async () => { await revoke({}); setLink(null); setCopied(false); }}>Turn off link</Button>
             ) : null}
           </div>
           {link ? <Input readOnly value={link} onFocus={(e) => e.currentTarget.select()} className="h-8 text-xs" aria-label="Import link" /> : null}
