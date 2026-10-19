@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { useView } from "@/lib/store";
-import { statsByCategory, statsTrend, txSearch } from "../../../shared/views";
+import { statsByCategory, statsEntries, statsTrend } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { TrendBars } from "./charts";
@@ -22,10 +22,9 @@ export default function CategoryDetail() {
   const trend = useMemo(() => statsTrend(view, type, id, ranges), [view, type, id, rangeKey]);
   const breakdown = useMemo(() => statsByCategory(view, p.range.from, p.range.to, type), [view, p.range.from, p.range.to, type]);
   const isTransfer = id.startsWith("transfer:");
-  const txs = useMemo(() => txSearch(view, !isTransfer && id !== "none" && id !== "fees" ? { from: p.range.from, to: p.range.to, type, categoryIds: [id] } : { from: p.range.from, to: p.range.to, type: isTransfer ? "transfer" : type }), [view, isTransfer, id, p.range.from, p.range.to, type]);
+  const list = useMemo(() => statsEntries(view, p.range.from, p.range.to, type).filter((e) => e.bucket === id).map((e) => e.t).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b._creationTime - a._creationTime)), [view, id, p.range.from, p.range.to, type]);
   const item = breakdown?.items.find((i) => i.id === id);
   const name = isTransfer ? `Transfer to ${accountName(id.slice(9))}` : categoryById.get(id)?.name ?? item?.name ?? "Category";
-  const list = (txs ?? []).filter((t) => !isTransfer || `transfer:${t.toAccountId ?? ""}` === id);
   return (
     <>
       <PageHeader back title={name} />
