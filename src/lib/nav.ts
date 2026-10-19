@@ -15,11 +15,11 @@ export function useGoBack() {
 }
 
 /** Lists other than the ledger that show an entry beside them on a wide screen, at <list>/t/<id>. */
-const ENTRY_LISTS = ["/search", "/bookmarks"];
+const ENTRY_LISTS = ["/search", "/bookmarks", "/gmail"];
 const entryListOf = (pathname: string) => ENTRY_LISTS.find((l) => pathname === l || pathname.startsWith(`${l}/t/`));
 
 /** Params that belong to the entry form rather than to the list it was opened from. */
-const ENTRY_PARAMS = ["date", "bookmark", "type", "from"];
+const ENTRY_PARAMS = ["date", "bookmark", "type", "from", "draft"];
 
 /** The list's own params (month, view, filters) from a URL's query string. */
 function listQuery(search: string): string {

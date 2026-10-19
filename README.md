@@ -119,6 +119,20 @@ UnMoney is a PWA: installed, it opens full screen from the home screen with its 
 
 Icons in `public/` are generated from `public/icon.svg` with `npm run icons` (`pwa-assets.config.ts`); the manifest is configured in `vite.config.ts`, the service worker is `src/sw.ts`, and `src/lib/pwa.ts` registers the worker and tracks install state.
 
+## Gmail sync
+
+More › Gmail connects a mailbox (a second Google consent, separate from sign-in, with the read-only Gmail scope). An hourly cron and "Check now" search it for money mail, read each new one with the rules in `shared/gmail/` (and Claude for the rest), and write draft entries that show as faded rows on their days in the ledger. Tapping one opens the entry form filled in; "Save entry" makes it a real entry, "Not an entry" dismisses it; `/gmail` lists everything waiting. Nothing counts in balances or stats until saved. Tokens are stored encrypted; mail bodies are never stored. The design is in [docs/specs/gmail-sync.md](docs/specs/gmail-sync.md).
+
+Setup, once per deployment:
+
+```bash
+npx convex env set GMAIL_TOKEN_KEY "$(openssl rand -base64 32)"        # add --prod for production
+```
+
+and in Google Cloud add a second redirect URI to the same OAuth client: `https://<deployment>.convex.site/gmail/callback`. The Gmail scope is a restricted one: until the consent screen passes Google's verification (privacy policy, demo video, CASA assessment), Google shows an "unverified app" warning that Advanced › Continue gets past, and caps the app at 100 users. Keep the consent screen's publishing status at "In production", not "Testing": in Testing, refresh tokens expire after 7 days.
+
+To see what a check would make of your own inbox without writing anything: `npx convex run gmail:dryRun '{"userId":"<your users id>"}'`.
+
 ## Import from Money Manager
 
 More › Import from Money Manager reads Money Manager's Excel export (Settings › Backup › Export to Excel), as well as CSV and TSV. Every file goes through the same review: a dry run shows what will be added, which accounts and categories get created, which rows are skipped and which entries are already there.

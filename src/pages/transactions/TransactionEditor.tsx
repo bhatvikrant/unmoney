@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowLeftRight, Calculator, ChevronRight, ExternalLink, Globe, Repeat, Star, Copy, Trash2, Users, X } from "lucide-react";
+import { ArrowLeftRight, Calculator, ChevronRight, ExternalLink, Globe, Mail, Repeat, Star, Copy, Trash2, Users, X } from "lucide-react";
 import { toast } from "sonner";
-import type { Id } from "../../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
-import { bookmarksList, noteSuggestions, txGet, txTags, type TxDetail } from "../../../shared/views";
+import { bookmarksList, draftGet, noteSuggestions, txGet, txTags, type TxDetail } from "../../../shared/views";
+import { senderAddress } from "../../../shared/gmail/mail";
+import { gmailUrl } from "@/lib/gmail";
 import { useApp, useRefreshRates } from "@/lib/app";
 import { staleLabel, useFxState } from "@/lib/fxRates";
 import { amountInput, localNumber, LOCALE_DECIMAL } from "@/lib/format";
@@ -71,6 +73,9 @@ export default function TransactionEditor(props: { panel?: boolean }) {
   const { resolveId } = useStore();
   const realId = id ? resolveId(id) : undefined;
   const existing = useMemo(() => (realId ? txGet(view, realId) : undefined), [view, realId]);
+  // a draft from Gmail: the form starts from what the mail said, and Save turns it into the entry
+  const draftId = sp.get("draft");
+  const draft = useMemo(() => (draftId ? draftGet(view, draftId) : null), [view, draftId]);
   const bookmarks = useMemo(() => (sp.get("bookmark") ? bookmarksList(view) : undefined), [view, sp]);
   const { settings, accounts, currencies } = useApp();
 
@@ -106,6 +111,28 @@ export default function TransactionEditor(props: { panel?: boolean }) {
         photoIds: existing.photoIds,
       };
     }
+    if (draftId) {
+      if (!draft || draft.status !== "open") return null;
+      const p = draft.proposal;
+      const cur = p.subCurrency ? currencies.find((c) => c.code === p.subCurrency) : undefined;
+      const rate = cur && p.subAmount && p.amount ? (p.subAmount / 10 ** cur.decimals) / (p.amount / 10 ** settings.decimals) : undefined;
+      return {
+        ...base,
+        type: p.type,
+        date: p.date,
+        time: p.time ?? "",
+        accountId: p.accountId,
+        toAccountId: p.toAccountId,
+        categoryId: p.categoryId,
+        subcategoryId: p.subcategoryId,
+        amount: p.amount ? amountInput(p.amount, settings.decimals) : "",
+        subCurrency: cur ? cur.code : "",
+        subAmount: p.subAmount !== undefined && cur ? amountInput(p.subAmount, cur.decimals) : "",
+        rate,
+        note: p.note,
+        description: p.description ?? "",
+      };
+    }
     const bm = sp.get("bookmark");
     if (bm) {
       if (!bookmarks) return null;
@@ -129,15 +156,15 @@ export default function TransactionEditor(props: { panel?: boolean }) {
     }
     return base;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, existing, bookmarks, sp]);
+  }, [id, existing, bookmarks, sp, draftId, draft]);
 
-  if (!initial) return <div className="p-8 text-center text-sm text-muted-foreground">{id ? "Entry not found" : "Loading…"}</div>;
-  return <Editor key={realId ?? "new"} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} panel={panel} />;
+  if (!initial) return <div className="p-8 text-center text-sm text-muted-foreground">{id ? "Entry not found" : draftId ? "This draft was already saved or dismissed." : "Loading…"}</div>;
+  return <Editor key={realId ?? (draftId ? `draft:${draftId}` : "new")} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} draft={draftId && draft ? draft : undefined} panel={panel} />;
 }
 
 type Existing = TxDetail;
 
-function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"transactions">; existing?: Existing; panel: boolean }) {
+function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: Id<"transactions">; existing?: Existing; draft?: Doc<"drafts">; panel: boolean }) {
   const nav = useNavigate();
   const closeEntry = useCloseEntry();
   const openEntry = useOpenEntry();
@@ -159,6 +186,8 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
   const addBookmark = useOp("bookmarks.create");
   const removeBookmark = useOp("bookmarks.remove");
   const setSplit = useOp("transactions.setSplit");
+  const acceptDraft = useOp("drafts.accept");
+  const dismissDrafts = useOp("drafts.dismiss");
   // the saved entry, for the split: only an expense that is saved can be shared, and the link lives on it
   const saved = useMemo(() => (id ? view.transactions.find((t) => t._id === id) : undefined), [view, id]);
   const bookmarked = useMemo(() => (id ? view.bookmarks.find((b) => b.transactionId === id) : undefined), [view, id]);
@@ -205,8 +234,9 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
 
   // Accounts can arrive after the form is created on a fresh load: fill the default then.
   useEffect(() => {
-    if (!f.accountId && accounts.length) set("accountId", defaultAccount(accounts, settings.defaultAccountId));
-  }, [accounts, f.accountId, settings.defaultAccountId]);
+    // a draft whose mail named no known method stays empty, so the user picks rather than the default slipping in
+    if (!draft && !f.accountId && accounts.length) set("accountId", defaultAccount(accounts, settings.defaultAccountId));
+  }, [accounts, f.accountId, settings.defaultAccountId, draft]);
 
   // New entries start with the cursor in the amount, and go back there after "Continue". The tap
   // that opened this screen primed the iOS keyboard (primeKeyboard); take focus over before paint.
@@ -271,6 +301,9 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
         if (inSeries && !scope) { setConfirm("scope"); setBusy(false); return; }
         await update({ id: id!, ...args, scope });
         closeEntry();
+      } else if (draft) {
+        await acceptDraft({ id: draft._id, ...args });
+        closeEntry();
       } else {
         await create({
           ...args,
@@ -285,6 +318,21 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** "Not an entry": the draft goes, the mail is not offered again. */
+  async function notAnEntry() {
+    if (!draft) return;
+    setBusy(true);
+    try {
+      await dismissDrafts({ ids: [draft._id] });
+      toast("Dismissed. This mail won't be offered again.");
+      closeEntry();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not dismiss");
     } finally {
       setBusy(false);
     }
@@ -310,6 +358,7 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
     <>
       <PageHeader back={!panel} title={title} right={panel ? <Button variant="ghost" size="icon" aria-label="Close" title="Close (Esc)" onClick={() => closeEntry()}><X className="size-4" /></Button> : undefined} />
       <Page className={panel ? "pb-4" : isEdit ? "pb-36" : "pb-24"}>
+        {draft ? <GmailBanner from={draft.from} receivedAt={draft.receivedAt} subject={draft.subject} messageId={draft.messageId} /> : existing?.source ? <GmailBanner messageId={existing.source.messageId} /> : null}
         <div className="grid grid-cols-3 gap-2 p-4">
           {(["income", "expense", "transfer"] as const).map((t) => (
             <button
@@ -328,7 +377,7 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <Input type="date" value={f.date} onChange={(e) => set("date", e.target.value)} className="h-8 w-auto min-w-0 flex-[3] px-2" />
               {settings.timeInputEnabled ? <Input type="time" value={f.time} onChange={(e) => set("time", e.target.value)} className="h-8 w-auto min-w-0 flex-[2] px-2" /> : null}
-              {!isEdit ? (
+              {!isEdit && !draft ? (
                 <button type="button" onClick={() => setSheet("repeat")} className={cn("flex flex-col items-center shrink-0 text-[10px] text-muted-foreground px-1", f.repeat.kind !== "none" && "text-primary")}>
                   <Repeat className="size-4" />
                   <span className="max-w-24 truncate">{f.repeat.kind === "none" ? "Repeat" : repeatLabel(f.repeat)}</span>
@@ -461,8 +510,9 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
             </div>
           ) : null}
           <div className="flex gap-2">
-            <Button className="h-11 flex-1 text-base" disabled={busy} onClick={() => save("save")}>Save</Button>
-            {!isEdit ? <Button variant="outline" className="h-11 flex-1 text-base" disabled={busy} onClick={() => save("continue")}>Continue</Button> : null}
+            <Button className="h-11 flex-1 text-base" disabled={busy} onClick={() => save("save")}>{draft ? "Save entry" : "Save"}</Button>
+            {draft ? <Button variant="outline" className="h-11 flex-1 text-base" disabled={busy} onClick={() => void notAnEntry()}>Not an entry</Button>
+              : !isEdit ? <Button variant="outline" className="h-11 flex-1 text-base" disabled={busy} onClick={() => save("continue")}>Continue</Button> : null}
           </div>
         </div>
       </div>
@@ -512,6 +562,26 @@ function Editor({ initial, id, existing, panel }: { initial: Form; id?: Id<"tran
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+/** Where an entry came from: the mail, with a way to open it in Gmail. On a draft it also says who sent it and when. */
+function GmailBanner({ from, receivedAt, subject, messageId }: { from?: string; receivedAt?: number; subject?: string; messageId: string }) {
+  const who = from ? from.replace(/<[^>]*>/, "").replace(/"/g, "").trim() || senderAddress(from) : "";
+  const when = receivedAt ? new Date(receivedAt).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  return (
+    <div className="mx-4 mt-3 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+      <Mail className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="min-w-0 flex-1">
+        {who ? (
+          <>
+            <div className="truncate">From <span className="font-medium">{who}</span>{when ? <span className="text-muted-foreground"> · {when}</span> : null}</div>
+            {subject ? <div className="truncate text-muted-foreground">{subject}</div> : null}
+          </>
+        ) : <div>Read from Gmail</div>}
+      </div>
+      <a href={gmailUrl(messageId)} target="_blank" rel="noopener" className="flex shrink-0 items-center gap-1 hover:underline underline-offset-4">Open in Gmail <ExternalLink className="size-3" /></a>
+    </div>
   );
 }
 

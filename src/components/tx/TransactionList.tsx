@@ -1,7 +1,8 @@
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { useLocation } from "react-router";
 import { useOpenEntry } from "@/lib/nav";
-import { ArrowRight, Camera, Repeat, Star, Users } from "lucide-react";
+import { ArrowRight, Camera, Mail, Repeat, Star, Users } from "lucide-react";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { useView } from "@/lib/store";
@@ -17,6 +18,7 @@ import { useUndoableDelete } from "@/lib/undo";
 import { DeleteSeriesEntryDialog } from "./DeleteSeriesEntryDialog";
 
 export type Tx = Doc<"transactions">;
+export type Draft = Doc<"drafts">;
 
 /** Ids of the entries that have been bookmarked, for the star in each row. */
 function useBookmarkedIds(): Set<string> {
@@ -93,11 +95,56 @@ export function DayHeader({ date, income, expense }: { date: string; income: num
 }
 
 /**
- * Entries grouped by day. Every row slides left to uncover Delete (off while selecting), wherever
- * the list is shown: the month, a day, a search, a payment method, a category.
+ * A draft read from Gmail, on its day in the ledger: the same shape of row, faded, until it is
+ * saved. Not selectable, not swipeable (that would read as deleting an entry); dismissing happens
+ * in the form or on the review page.
  */
-export function TransactionList({ txs, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className }: {
-  txs: Tx[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void;
+export function DraftRow({ draft, onClick, className }: { draft: Draft; onClick?: () => void; className?: string }) {
+  const { accountName, categoryLabel, fmtSub } = useApp();
+  const p = draft.proposal;
+  const isTransfer = p.type === "transfer";
+  const label = isTransfer ? "Transfer" : categoryLabel(p) || "—";
+  const method = p.accountId ? (isTransfer ? `${accountName(p.accountId)} → ${accountName(p.toAccountId)}` : accountName(p.accountId)) : "";
+  return (
+    <div
+      className={cn("flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm", onClick && "cursor-pointer hover:bg-accent/40 active:bg-accent", className)}
+      role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined} aria-label={`Unsaved entry from Gmail: ${p.note || label}`}
+      onClick={onClick} onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+    >
+      <div className="w-20 shrink-0 text-xs text-muted-foreground leading-tight line-clamp-2">{label}</div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate flex items-center gap-1.5">
+          <Mail className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="truncate">{p.note || label}</span>
+        </div>
+        <div className="text-xs text-muted-foreground truncate">
+          Unsaved{method ? ` · ${method}` : ""}{!p.accountId ? <span className="text-amber-600 dark:text-amber-400"> · Pick payment method</span> : null}
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <Money amount={p.amount} kind={p.type === "income" ? "income" : p.type === "expense" ? "expense" : "transfer"} />
+        {p.subAmount && p.subCurrency ? <div className="text-[11px] text-muted-foreground">{fmtSub(p.subAmount, p.subCurrency)}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+/** A row's key: a draft and the entry it becomes share one, so the row fades up in place instead of remounting. */
+const rowKey = (t: Tx) => (t.source ? `g:${t.source.messageId}` : t._id);
+
+/** Faded while the row is a draft, solid once saved; a 300 ms fade between the two, none under reduced motion. */
+function Fade({ faded, children }: { faded: boolean; children: ReactNode }) {
+  const reduced = useReducedMotion();
+  return <motion.div initial={false} animate={{ opacity: faded ? 0.55 : 1 }} transition={{ duration: reduced ? 0 : 0.3 }}>{children}</motion.div>;
+}
+
+/**
+ * Entries grouped by day, with any drafts from Gmail at the end of their day. Every entry row
+ * slides left to uncover Delete (off while selecting), wherever the list is shown: the month, a
+ * day, a search, a payment method, a category. Day totals count entries only.
+ */
+export function TransactionList({ txs, drafts, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className }: {
+  txs: Tx[]; drafts?: Draft[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void;
   emptyText?: string; className?: string;
 }) {
   const undoable = useUndoableDelete();
@@ -117,35 +164,44 @@ export function TransactionList({ txs, selectable, selected, onToggle, onLongPre
   const { ledger } = useApp();
   const bookmarked = useBookmarkedIds();
   const groups = useMemo(() => {
-    const map = new Map<string, Tx[]>();
-    for (const t of txs) {
-      const arr = map.get(t.date) ?? [];
-      arr.push(t);
-      map.set(t.date, arr);
-    }
+    const map = new Map<string, { txs: Tx[]; drafts: Draft[] }>();
+    const day = (date: string) => {
+      let g = map.get(date);
+      if (!g) { g = { txs: [], drafts: [] }; map.set(date, g); }
+      return g;
+    };
+    for (const t of txs) day(t.date).txs.push(t);
+    for (const d of drafts ?? []) day(d.proposal.date).drafts.push(d);
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [txs]);
-  if (!txs.length) return <div className="py-12 text-center text-sm text-muted-foreground">{emptyText}</div>;
+  }, [txs, drafts]);
+  if (!txs.length && !drafts?.length) return <div className="py-12 text-center text-sm text-muted-foreground">{emptyText}</div>;
   return (
     <div className={className}>
-      {groups.map(([date, list]) => {
+      {groups.map(([date, { txs: list, drafts: dayDrafts }]) => {
         const k = sumKinds(list, ledger);
         return (
           <Fragment key={date}>
             <DayHeader date={date} income={k.income} expense={k.expense} />
             {list.map((t) => (
-              <SwipeToDelete key={t._id} className="border-b last:border-b-0" disabled={selectable} {...swipe.row(t._id)} onDelete={() => remove(t)}>
-                <TransactionRow
-                  tx={t}
-                  onClick={selectable ? () => onToggle?.(t._id, !selected?.has(t._id)) : () => openEntry(t._id)}
-                  open={t._id === openId}
-                  onLongPress={!selectable && onLongPress ? () => onLongPress(t._id) : undefined}
-                  selected={selected?.has(t._id)}
-                  bookmarked={bookmarked.has(t._id)}
-                  onSelect={selectable ? (v) => onToggle?.(t._id, v) : undefined}
-                  className="border-b-0"
-                />
-              </SwipeToDelete>
+              <Fade key={rowKey(t)} faded={false}>
+                <SwipeToDelete className="border-b last:border-b-0" disabled={selectable} {...swipe.row(t._id)} onDelete={() => remove(t)}>
+                  <TransactionRow
+                    tx={t}
+                    onClick={selectable ? () => onToggle?.(t._id, !selected?.has(t._id)) : () => openEntry(t._id)}
+                    open={t._id === openId}
+                    onLongPress={!selectable && onLongPress ? () => onLongPress(t._id) : undefined}
+                    selected={selected?.has(t._id)}
+                    bookmarked={bookmarked.has(t._id)}
+                    onSelect={selectable ? (v) => onToggle?.(t._id, v) : undefined}
+                    className="border-b-0"
+                  />
+                </SwipeToDelete>
+              </Fade>
+            ))}
+            {dayDrafts.map((d) => (
+              <Fade key={`g:${d.messageId}`} faded>
+                <DraftRow draft={d} onClick={selectable ? undefined : () => openEntry("new", { draft: d._id })} />
+              </Fade>
             ))}
           </Fragment>
         );
