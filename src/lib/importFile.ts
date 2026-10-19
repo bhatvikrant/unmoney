@@ -31,7 +31,7 @@ async function looksLikeSheet(file: Blob): Promise<boolean> {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** First worksheet as header-keyed string rows. Date cells become "YYYY-MM-DD HH:MM". */
+/** First worksheet as header-keyed string rows. Date cells become "YYYY-MM-DD HH:MM", or "YYYY-MM-DD" when formatted without a time. */
 async function readSheet(file: Blob): Promise<{ headers: string[]; rows: Record<string, string>[] }> {
   const XLSX = await import("xlsx");
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellNF: true });
@@ -50,7 +50,9 @@ async function readSheet(file: Blob): Promise<{ headers: string[]; rows: Record<
       if (cell.z && XLSX.SSF.is_date(cell.z)) {
         // round to the minute first: serials like 46310.37847… sit a hair under 09:05
         const p = XLSX.SSF.parse_date_code(Math.round(cell.v * 1440) / 1440);
-        return `${p.y}-${pad(p.m)}-${pad(p.d)} ${pad(p.H)}:${pad(p.M)}`;
+        const day = `${p.y}-${pad(p.m)}-${pad(p.d)}`;
+        // a date-only format (an entry saved without a time) has no hours; quoted text is not a token
+        return /h/i.test(cell.z.replace(/"[^"]*"/g, "")) ? `${day} ${pad(p.H)}:${pad(p.M)}` : day;
       }
       return String(cell.v);
     }
