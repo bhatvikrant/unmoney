@@ -13,7 +13,7 @@ import { currencyInfo } from "./currencies";
 import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_INCOME_CATEGORIES } from "./defaults";
 import { nextOccurrence, type Frequency } from "./repeat";
 import { monthKeyForDate, monthRange } from "./period";
-import { toMinor } from "./money";
+import { parseNumber, toMinor, type DecimalMark } from "./money";
 
 export const TABLES = [
   "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies",
@@ -142,9 +142,9 @@ export interface Ops {
     /**
      * createMissing: categories · createAccounts: accounts, in the Others group · skipInvalid: import the good rows, report the rest ·
      * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry ·
-     * rowOffset: numbering of the first row, for chunked imports
+     * rowOffset: numbering of the first row, for chunked imports · format: how the whole file writes dates and numbers
      */
-    args: { rows: ImportRow[]; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
+    args: { rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
     result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
   };
   "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean }; result: Id<"transactions"> };
@@ -283,7 +283,8 @@ export function txScope(op: Op): TxScope {
     // duplicates can only be entries on the same day
     case "transactions.importRows": {
       if (!a.skipDuplicates) return {};
-      const dates = (a.rows as ImportRow[]).map((r) => parseImportDate(r.date ?? "")).filter((d): d is string => d !== null);
+      const order = (a.format as ImportFormat | undefined)?.dateOrder;
+      const dates = (a.rows as ImportRow[]).map((r) => parseImportDate(r.date ?? "", order)).filter((d): d is string => d !== null);
       return { dates: [...new Set(dates)] };
     }
     case "settings.changeMainCurrency":
@@ -304,16 +305,48 @@ export function mergeTxScopes(scopes: TxScope[]): TxScope {
   return out;
 }
 
-/** A date from an imported row: YYYY-MM-DD, MM/DD/YYYY or DD.MM.YYYY. Null when unreadable. */
-export function parseImportDate(s: string): string | null {
+/** How a file writes dates and numbers; decided once for the whole file (`detectImportFormat`). */
+export type ImportFormat = { dateOrder: "dmy" | "mdy"; decimal: DecimalMark };
+
+const SLASH_DATE = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/;
+
+/**
+ * A date from an imported row: YYYY-MM-DD (or with / or .), DD.MM.YYYY, and DD/MM/YYYY or
+ * MM/DD/YYYY as the file's `dateOrder` says. Null when unreadable or not a real date.
+ */
+export function parseImportDate(s: string, dateOrder: ImportFormat["dateOrder"] = "mdy"): string | null {
   const t = s.trim();
-  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
-  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
-  m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
-  return null;
+  let y: string, mo: string, d: string;
+  let m = t.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) [y, mo, d] = [m[1], m[2], m[3]];
+  else if ((m = t.match(SLASH_DATE))) [y, mo, d] = dateOrder === "dmy" ? [m[3], m[2], m[1]] : [m[3], m[1], m[2]];
+  else if ((m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/))) [y, mo, d] = [m[3], m[2], m[1]];
+  else return null;
+  const iso = `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  // 2026-02-30 and 2026-25-03 do not round-trip through a calendar date
+  const date = new Date(`${iso}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(iso) ? iso : null;
+}
+
+/**
+ * Read the file's own conventions from all of its rows: any day above 12 settles DD/MM against
+ * MM/DD, and any amount ending in a comma and one or two digits means a decimal comma. Where the
+ * file cannot tell, the user's locale (`fallback`) decides.
+ */
+export function detectImportFormat(rows: Pick<ImportRow, "date" | "amount">[], fallback: ImportFormat): ImportFormat {
+  let dmy = 0, mdy = 0, comma = 0, dot = 0;
+  for (const r of rows) {
+    const m = (r.date ?? "").trim().match(SLASH_DATE);
+    if (m && Number(m[1]) > 12) dmy++;
+    if (m && Number(m[2]) > 12) mdy++;
+    const a = (r.amount ?? "").trim();
+    if (/\d,\d{1,2}\)?$/.test(a)) comma++;
+    if (/\d\.\d{1,2}\)?$/.test(a)) dot++;
+  }
+  return {
+    dateOrder: dmy && !mdy ? "dmy" : mdy && !dmy ? "mdy" : fallback.dateOrder,
+    decimal: comma && !dot ? "," : dot && !comma ? "." : fallback.decimal,
+  };
 }
 
 // ---------- working copy ----------
@@ -738,7 +771,7 @@ const handlers: Handlers = {
     }
   },
 
-  "transactions.importRows": (w, { rows, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
+  "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
     const settings = w.requireSettings();
     const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
     // Accounts the import should create first. Cards need a bank to bill / link to, so non-card kinds go first.
@@ -785,15 +818,17 @@ const handlers: Handlers = {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const rowNo = rowOffset + i + 1;
-      const date = parseImportDate(r.date ?? "");
+      const date = parseImportDate(r.date ?? "", format?.dateOrder);
       if (!date) { errors.push({ row: rowNo, reason: `Bad date "${r.date}"` }); continue; }
       const tRaw = (r.type ?? "").trim().toLowerCase();
       const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;
       if (!type) { errors.push({ row: rowNo, reason: `Unknown type "${r.type}" (Income, Expenses or Transfer-Out)` }); continue; }
       const acc = accountName(r.account);
       if (!acc) { errors.push({ row: rowNo, reason: `Unknown account "${r.account}"` }); continue; }
-      const amountMajor = Math.abs(Number((r.amount ?? "").replace(/[^0-9.-]/g, "")));
-      if (!(r.amount ?? "").trim() || !Number.isFinite(amountMajor)) { errors.push({ row: rowNo, reason: `Bad amount "${r.amount}"` }); continue; }
+      // The Type column says income or expense; a sign on the amount is only the file's convention.
+      const parsed = parseNumber(r.amount ?? "", format?.decimal);
+      if (parsed === null) { errors.push({ row: rowNo, reason: `Bad amount "${r.amount}"` }); continue; }
+      const amountMajor = Math.abs(parsed);
       const time = r.time?.match(/^(\d{1,2}):(\d{2})/);
       const base: Prepared = {
         _row: rowNo, type, date, _acc: acc, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
@@ -804,7 +839,7 @@ const handlers: Handlers = {
         const cur = w.snap.currencies.find((c) => c.code.toLowerCase() === r.subCurrency!.trim().toLowerCase());
         if (cur && cur.code !== settings.mainCurrency) {
           base.subCurrency = cur.code;
-          base.subAmount = toMinor(Math.abs(Number(r.subAmount.replace(/[^0-9.-]/g, ""))), cur.decimals);
+          base.subAmount = toMinor(Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0), cur.decimals);
           base.exchangeRate = cur.rate;
         }
       }
