@@ -197,7 +197,9 @@ export default defineSchema({
   fileOwners: defineTable({
     userId: v.id("users"),
     storageId: v.id("_storage"),
-  }).index("by_storage", ["storageId"]),
+  })
+    .index("by_storage", ["storageId"])
+    .index("by_user", ["userId"]),
 
   /** Ops the client has synced, for idempotent retries. */
   syncOps: defineTable({
