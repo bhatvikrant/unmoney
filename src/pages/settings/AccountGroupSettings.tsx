@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +23,7 @@ export default function AccountGroupSettings() {
   const reorder = useOp("accountGroups.reorder");
   const [dialog, setDialog] = useState<null | { id?: Id<"accountGroups">; name: string }>(null);
   const [deleting, setDeleting] = useState<Doc<"accountGroups"> | null>(null);
+  const swipe = useSwipedRow();
   const inGroup = (id: string) => accounts.filter((a) => a.groupId === id).length;
   const move = (i: number, dir: -1 | 1) => { const ids = live.map((g) => g._id); const j = i + dir; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; reorder({ ids }); };
   async function save() {
@@ -36,13 +38,15 @@ export default function AccountGroupSettings() {
       <Page className="pb-8">
         <div className="bg-card border-y">
           {live.map((g, i) => (
-            <div key={g._id} className="flex items-center gap-1 px-2 py-1.5 border-b last:border-b-0 text-sm">
-              <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
-              <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
-              <div className="flex-1 px-1 min-w-0"><div className="truncate">{g.name}</div><div className="text-xs text-muted-foreground">{count(inGroup(g._id))}</div></div>
-              <Button variant="ghost" size="icon" className="size-7" aria-label={`Rename ${g.name}`} onClick={() => setDialog({ id: g._id, name: g.name })}><Pencil className="size-4" /></Button>
-              <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Delete ${g.name}`} onClick={() => setDeleting(g)}><Trash2 className="size-4" /></Button>
-            </div>
+            <SwipeToDelete key={g._id} className="border-b last:border-b-0" {...swipe.row(g._id)} onDelete={() => setDeleting(g)}>
+              <div className="flex items-center gap-1 px-2 py-1.5 text-sm">
+                <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
+                <div className="flex-1 px-1 min-w-0"><div className="truncate">{g.name}</div><div className="text-xs text-muted-foreground">{count(inGroup(g._id))}</div></div>
+                <Button variant="ghost" size="icon" className="size-7" aria-label={`Rename ${g.name}`} onClick={() => setDialog({ id: g._id, name: g.name })}><Pencil className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Delete ${g.name}`} onClick={() => setDeleting(g)}><Trash2 className="size-4" /></Button>
+              </div>
+            </SwipeToDelete>
           ))}
           {!live.length ? <div className="px-4 py-3 text-sm text-muted-foreground">No groups. Every payment method shows under "No group".</div> : null}
         </div>
@@ -59,7 +63,7 @@ export default function AccountGroupSettings() {
           <DialogFooter><Button disabled={!dialog?.name.trim()} onClick={() => void save()}>Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
+      <AlertDialog open={!!deleting} onOpenChange={(o) => { if (!o) { setDeleting(null); swipe.close(); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>

@@ -8,6 +8,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SegmentedTabs, EmptyState, Row } from "@/components/shell/misc";
+import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -33,6 +34,11 @@ export default function BudgetSettings() {
   const confirm = useConfirm();
   const list = budgets.filter((b) => b.period === period).sort((a, b) => (a.categoryId ? 1 : 0) - (b.categoryId ? 1 : 0));
   const [dialog, setDialog] = useState<null | { id?: Id<"budgets">; categoryId: string; amount: string; override: string }>(null);
+  const swipe = useSwipedRow();
+  // From a swiped row or the editor's button: asks first. Resolves true once the budget is gone.
+  const del = (id: Id<"budgets">) =>
+    confirm({ title: "Delete this budget?", description: "Spending in this category will no longer be tracked against a limit." })
+      .then((ok) => { if (ok) void remove({ id }); return ok; }).finally(swipe.close);
   const today = todayISO();
   // the period the user came from (overrides apply to it), else the current one
   const fromPage = sp.get("period") === period ? sp.get("key") ?? sp.get("month") : null;
@@ -64,8 +70,10 @@ export default function BudgetSettings() {
           {list.map((b) => {
             const ov = b.overrides[key];
             return (
-              <Row key={b._id} label={b.categoryId ? categoryById.get(b.categoryId)?.name ?? "(deleted)" : "Total budget"} hint={ov !== undefined ? <>{keyLabel}: <Money amount={ov} /></> : `default`} value={<Money amount={b.amount} />}
-                onClick={() => setDialog({ id: b._id, categoryId: b.categoryId ?? "total", amount: amountInput(b.amount, settings.decimals), override: ov !== undefined ? amountInput(ov, settings.decimals) : "" })} />
+              <SwipeToDelete key={b._id} className="border-b last:border-b-0" {...swipe.row(b._id)} onDelete={() => void del(b._id)}>
+                <Row label={b.categoryId ? categoryById.get(b.categoryId)?.name ?? "(deleted)" : "Total budget"} hint={ov !== undefined ? <>{keyLabel}: <Money amount={ov} /></> : `default`} value={<Money amount={b.amount} />}
+                  onClick={() => setDialog({ id: b._id, categoryId: b.categoryId ?? "total", amount: amountInput(b.amount, settings.decimals), override: ov !== undefined ? amountInput(ov, settings.decimals) : "" })} />
+              </SwipeToDelete>
             );
           })}
         </div>
@@ -89,7 +97,7 @@ export default function BudgetSettings() {
             </div>
           ) : null}
           <DialogFooter>
-            {dialog?.id ? <Button variant="destructive" onClick={async () => { if (!(await confirm({ title: "Delete this budget?", description: "Spending in this category will no longer be tracked against a limit." }))) return; remove({ id: dialog!.id! }); setDialog(null); }}>Delete</Button> : null}
+            {dialog?.id ? <Button variant="destructive" onClick={async () => { if (await del(dialog.id!)) setDialog(null); }}>Delete</Button> : null}
             <Button onClick={save} disabled={!dialog?.categoryId || !dialog.amount}>Save</Button>
           </DialogFooter>
         </DialogContent>

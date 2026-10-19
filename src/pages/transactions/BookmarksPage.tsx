@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Money } from "@/components/shell/Money";
 import { EmptyState } from "@/components/shell/misc";
+import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { cn } from "@/lib/utils";
 
 export default function BookmarksPage() {
@@ -25,6 +26,13 @@ export default function BookmarksPage() {
   const confirm = useConfirm();
   const reorder = useOp("bookmarks.reorder");
   const [edit, setEdit] = useState(false);
+  const swipe = useSwipedRow();
+  const remove = (id: string) => {
+    const doc = view.bookmarks.find((x) => x._id === id);
+    if (!doc) return;
+    void confirm({ title: "Delete this bookmark?", description: "The entry it was made from stays in the ledger." })
+      .then((ok) => (ok ? undoable.bookmark(doc) : undefined)).finally(swipe.close);
+  };
   const move = (i: number, dir: -1 | 1) => {
     if (!list) return;
     const ids = list.map((b) => b._id);
@@ -43,23 +51,25 @@ export default function BookmarksPage() {
             const t = b.template;
             const kind = t.type === "income" ? "income" : t.type === "expense" ? "expense" : "transfer";
             return (
-              <div key={b._id} aria-current={b._id === openBookmark || undefined} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm aria-[current]:bg-accent">
-                {edit ? (
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" className="size-7" aria-label="Move up" onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
-                    <Button variant="ghost" size="icon" className="size-7" aria-label="Move down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
-                  </div>
-                ) : null}
-                <button type="button" className="flex-1 min-w-0 flex items-center gap-3 text-left" onClick={(e) => { if (edit) return; primeKeyboard(e.currentTarget); openEntry("new", { bookmark: b._id }); }}>
-                  <div className="w-20 shrink-0 text-xs text-muted-foreground line-clamp-2">{t.type === "transfer" ? "Transfer" : categoryLabel(t)}</div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate">{t.note || (t.type === "transfer" ? `${accountName(t.accountId)} → ${accountName(t.toAccountId)}` : categoryLabel(t))}</div>
-                    <div className="text-xs text-muted-foreground truncate">{t.type === "transfer" ? `${accountName(t.accountId)} → ${accountName(t.toAccountId)}` : accountName(t.accountId)}</div>
-                  </div>
-                  <Money amount={t.amount} kind={kind} />
-                </button>
-                {edit ? <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={async () => { const doc = view.bookmarks.find((x) => x._id === b._id); if (doc && (await confirm({ title: "Delete this bookmark?", description: "The entry it was made from stays in the ledger." }))) void undoable.bookmark(doc); }}><Trash2 className="size-4" /></Button> : null}
-              </div>
+              <SwipeToDelete key={b._id} className="border-b last:border-b-0" disabled={edit} {...swipe.row(b._id)} onDelete={() => remove(b._id)}>
+                <div aria-current={b._id === openBookmark || undefined} className="flex items-center gap-3 px-4 py-2.5 text-sm aria-[current]:bg-accent">
+                  {edit ? (
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" className="size-7" aria-label="Move up" onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
+                      <Button variant="ghost" size="icon" className="size-7" aria-label="Move down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
+                    </div>
+                  ) : null}
+                  <button type="button" className="flex-1 min-w-0 flex items-center gap-3 text-left" onClick={(e) => { if (edit) return; primeKeyboard(e.currentTarget); openEntry("new", { bookmark: b._id }); }}>
+                    <div className="w-20 shrink-0 text-xs text-muted-foreground line-clamp-2">{t.type === "transfer" ? "Transfer" : categoryLabel(t)}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate">{t.note || (t.type === "transfer" ? `${accountName(t.accountId)} → ${accountName(t.toAccountId)}` : categoryLabel(t))}</div>
+                      <div className="text-xs text-muted-foreground truncate">{t.type === "transfer" ? `${accountName(t.accountId)} → ${accountName(t.toAccountId)}` : accountName(t.accountId)}</div>
+                    </div>
+                    <Money amount={t.amount} kind={kind} />
+                  </button>
+                  {edit ? <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => remove(b._id)}><Trash2 className="size-4" /></Button> : null}
+                </div>
+              </SwipeToDelete>
             );
           })}
         </div>

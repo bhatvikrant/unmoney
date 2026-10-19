@@ -127,7 +127,7 @@ export default function TransactionsPage() {
       <div {...swipe} className="min-h-[70dvh]">
       <Page className={cn(bulk.active && view === "daily" && "pb-40")}>
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
-        {raw && view === "daily" ? <TransactionList txs={txs} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} swipeToDelete emptyText="No transactions this month. Tap + to add one." /> : null}
+        {raw && view === "daily" ? <TransactionList txs={txs} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}
         {raw && view === "weekly" ? <WeeklyView txs={txs} range={range} /> : null}
         {view === "monthly" ? <MonthlyView month={month} onPick={(m) => { if (m > thisMonth) return; setMonth(m); setView("daily"); }} /> : null}
