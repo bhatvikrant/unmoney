@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AccountRow } from "@/lib/app";
 import { useNavigate } from "react-router";
-import { Archive, ArchiveRestore, CheckSquare, ChevronDown, FolderInput, Pencil, Plus, X } from "lucide-react";
+import { Archive, ArchiveRestore, CheckSquare, ChevronDown, FolderInput, Merge, Pencil, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
@@ -17,6 +17,10 @@ import { CardThumb } from "@/components/CardFace";
 import { cardColorOf } from "../../../shared/defaults";
 import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
 import { DeletePaymentMethodDialog } from "./DeletePaymentMethodDialog";
+import { MergePaymentMethodsDialog } from "./MergePaymentMethodsDialog";
+
+/** A section's header: a tinted band, so the rows under it read as its contents. */
+const sectionHead = "w-full flex items-center px-4 py-2 text-sm text-muted-foreground bg-muted/60";
 
 export default function AccountsPage() {
   const nav = useNavigate();
@@ -28,6 +32,7 @@ export default function AccountsPage() {
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moving, setMoving] = useState(false);
+  const [merging, setMerging] = useState<AccountRow[] | null>(null);
   /** The row swiped open to show Delete, and the method waiting on the delete confirmation. */
   const [swiped, setSwiped] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<{ _id: Id<"accounts">; name: string } | null>(null);
@@ -42,9 +47,9 @@ export default function AccountsPage() {
   const where = new Set(chosen.map((a) => a.groupId ?? null));
   const current = where.size === 1 ? [...where][0] : undefined;
 
-  /** One method's row; `dim` for archived ones. */
-  const renderRow = (a: AccountRow, dim = false) => {
-    const row = cn("w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-accent/40 text-left", selected.has(a._id) && "bg-primary/10", dim && "text-muted-foreground [&_.tabular]:opacity-70");
+  /** One method's row: indented under its group's name when it is in one, dimmed when archived. */
+  const renderRow = (a: AccountRow, { dim = false, indent = false } = {}) => {
+    const row = cn("w-full flex items-center gap-3 py-3 pr-4 text-sm hover:bg-accent/40 text-left", indent ? "pl-9" : "pl-4", selected.has(a._id) && "bg-primary/10", dim && "text-muted-foreground [&_.tabular]:opacity-70");
     const body = (
       <>
         {a.kind === "card" || a.kind === "debitCard" ? <CardThumb color={cardColorOf(a)} /> : null}
@@ -115,25 +120,25 @@ export default function AccountsPage() {
           const allCards = visible.every((a) => a.kind === "card");
           const open = selecting || !collapsed.has(g.id);
           return (
-            <div key={g.id} className="mt-3">
-              <button type="button" onClick={() => toggle(g.id)} disabled={selecting} className="w-full flex items-center px-4 py-1.5 text-sm text-muted-foreground">
+            <div key={g.id} className="mt-3 border-y">
+              <button type="button" onClick={() => toggle(g.id)} disabled={selecting} aria-expanded={open} className={sectionHead}>
                 <ChevronDown className={cn("size-4 mr-1 transition-transform", !open && "-rotate-90")} />
-                <span className={cn("flex-1 text-left", !g.group && "italic")}>{g.name}</span>
+                <span className={cn("flex-1 text-left", g.group ? "font-medium text-foreground/80" : "italic")}>{g.name}</span>
                 {allCards ? (
                   <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><div className="text-[10px]">Balance payable</div><Money amount={g.payable} kind="expense" /></span><span><div className="text-[10px]">Outst. balance</div><Money amount={g.outstanding} kind="expense" /></span></span>
                 ) : <Money amount={g.total} kind={g.total < 0 ? "expense" : "income"} />}
               </button>
               {open ? (
-                <div className="bg-card border-y">
-                  {visible.map((a) => renderRow(a))}
+                <div className="bg-card border-t">
+                  {visible.map((a) => renderRow(a, { indent: !!g.group }))}
                 </div>
               ) : null}
             </div>
           );
         })}
         {archivedAccounts.length ? (
-          <div className="mt-6">
-            <button type="button" onClick={() => setShowArchived(!showArchived)} aria-expanded={showArchived} className="w-full flex items-center px-4 py-1.5 text-sm text-muted-foreground">
+          <div className="mt-6 border-y">
+            <button type="button" onClick={() => setShowArchived(!showArchived)} aria-expanded={showArchived} className={sectionHead}>
               <ChevronDown className={cn("size-4 mr-1 transition-transform", !showArchived && "-rotate-90")} />
               <Archive className="size-3.5 mr-1.5" />
               <span className="flex-1 text-left">Archived</span>
@@ -141,8 +146,8 @@ export default function AccountsPage() {
             </button>
             {showArchived ? (
               <>
-                <div className="bg-card border-y">{archivedAccounts.map((a) => renderRow(a, true))}</div>
-                <p className="px-4 py-2 text-xs text-muted-foreground">Not offered when adding entries. Their entries and balances are kept and still count. Open one to unarchive it.</p>
+                <div className="bg-card border-t">{archivedAccounts.map((a) => renderRow(a, { dim: true }))}</div>
+                <p className="border-t px-4 py-2 text-xs text-muted-foreground">Not offered when adding entries. Their entries and balances are kept and still count. Open one to unarchive it.</p>
               </>
             ) : null}
           </div>
@@ -157,11 +162,15 @@ export default function AccountsPage() {
             <Button variant="outline" size="sm" disabled={!chosen.length} onClick={() => void archiveChosen()} aria-label={unarchiving ? "Unarchive" : "Archive"}>
               {unarchiving ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}<span className="hidden sm:inline">{unarchiving ? "Unarchive" : "Archive"}</span>
             </Button>
-            <Button size="sm" disabled={!chosen.length} onClick={() => setMoving(true)}><FolderInput className="size-4" />Move to…</Button>
+            <Button variant="outline" size="sm" disabled={chosen.length < 2} onClick={() => setMerging(chosen)} aria-label="Merge">
+              <Merge className="size-4" /><span className="hidden sm:inline">Merge</span>
+            </Button>
+            <Button size="sm" disabled={!chosen.length} onClick={() => setMoving(true)} aria-label="Move to group"><FolderInput className="size-4" /><span className="hidden sm:inline">Move to…</span></Button>
             <Button variant="ghost" size="icon" aria-label="Exit selection" onClick={exit}><X className="size-4" /></Button>
           </div>
         </div>
       ) : null}
+      <MergePaymentMethodsDialog methods={merging} onOpenChange={(o) => { if (!o) setMerging(null); }} onMerged={() => { setMerging(null); exit(); }} />
       <DeletePaymentMethodDialog method={deleting} onOpenChange={(o) => { if (!o) { setDeleting(null); setSwiped(null); } }} />
       <MoveToGroupSheet open={moving} onOpenChange={setMoving} onPick={(id) => void moveTo(id)} current={current} title={`Move ${chosen.length} ${chosen.length === 1 ? "payment method" : "payment methods"} to`} />
     </>
