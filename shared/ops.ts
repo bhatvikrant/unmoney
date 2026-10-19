@@ -154,7 +154,8 @@ export interface Ops {
     args: { rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
     result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
   };
-  "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean }; result: Id<"transactions"> };
+  /** today: the device's date, so the server (in UTC) puts the copy on the same day. */
+  "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean; today?: string }; result: Id<"transactions"> };
   /** Multiply amounts by `factor` (a change of main currency's decimals), a chunk of entries at a time. */
   "transactions.rescale": { args: { ids: Id<"transactions">[]; factor: number }; result: void };
   /** Entries from a backup, with ids already pointing at the restored accounts, categories and schedules (restoreRows). */
@@ -246,7 +247,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.restoreRows": ["accounts", "categories", "repeats", "transactions"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
-  "repeats.catchUp": ["settings", "repeats", "transactions"],
+  "repeats.catchUp": ["settings", "repeats", "transactions", "accounts", "categories"],
   "bookmarks.create": ["accounts", "transactions", "bookmarks"],
   "bookmarks.update": ["bookmarks"],
   "bookmarks.remove": ["bookmarks"],
@@ -462,8 +463,17 @@ const checkAmount = (n: number | undefined) => {
 const isDate = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const nextOrder = (docs: { order: number }[]) => Math.max(-1, ...docs.map((d) => d.order)) + 1;
 
-function validateTx(w: Work, t: TxFields): TxFields {
+/**
+ * `was`: the entry being edited. Its own account and category may have been deleted since; any
+ * other deleted account or category is refused, so nothing new lands where the user cannot see it.
+ */
+function validateTx(w: Work, t: TxFields, was?: Doc<"transactions">): TxFields {
   if (!isDate(t.date)) throw new Error("Bad date");
+  const kept = new Set([was?.accountId, was?.toAccountId, was?.categoryId, was?.subcategoryId].filter(Boolean));
+  for (const [table, id, what] of [["accounts", t.accountId, "account"], ["accounts", t.type === "transfer" ? t.toAccountId : undefined, "account"],
+    ["categories", t.type === "transfer" ? undefined : t.categoryId, "category"], ["categories", t.type === "transfer" ? undefined : t.subcategoryId, "category"]] as const) {
+    if (id && !kept.has(id) && w.get(table, id)?.deletedAt) throw new Error(`That ${what} has been deleted`);
+  }
   checkAmount(t.amount);
   checkAmount(t.feeAmount);
   w.must("accounts", t.accountId, "Pick an account");
@@ -781,7 +791,7 @@ const handlers: Handlers = {
 
   "transactions.update": (w, { id, scope, ...input }) => {
     const existing = w.must("transactions", id);
-    const t = validateTx(w, input);
+    const t = validateTx(w, input, existing);
     w.patch("transactions", id, { ...t });
     if (scope === "future" && existing.repeatId) {
       for (const s of [...w.snap.transactions]) {
@@ -1034,11 +1044,11 @@ const handlers: Handlers = {
     return inserted;
   },
 
-  "transactions.copy": (w, { id, useToday }) => {
+  "transactions.copy": (w, { id, useToday, today }) => {
     const t = w.must("transactions", id);
     const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, ...rest } = t;
     void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal;
-    return w.insert("transactions", { ...rest, date: useToday ? todayISO() : t.date });
+    return w.insert("transactions", { ...rest, date: useToday ? (today && isDate(today) ? today : todayISO()) : t.date });
   },
 
   "repeats.update": (w, { id, ...patch }) => {
@@ -1062,6 +1072,11 @@ const handlers: Handlers = {
     let created = 0;
     for (const rep of [...w.snap.repeats]) {
       if (!rep.active || rep.nextDate > horizon) continue;
+      // a schedule whose account or category was deleted stops instead of filling a hidden account
+      const tpl = rep.template;
+      const gone = [w.get("accounts", tpl.accountId), tpl.toAccountId ? w.get("accounts", tpl.toAccountId) : null, tpl.categoryId ? w.get("categories", tpl.categoryId) : null]
+        .some((d) => d === undefined || d?.deletedAt);
+      if (gone) { w.patch("repeats", rep._id, { active: false }); continue; }
       let next = rep.nextDate;
       let guard = 0;
       let stopped = false;
