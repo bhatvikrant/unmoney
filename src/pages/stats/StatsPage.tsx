@@ -52,7 +52,7 @@ export default function StatsPage() {
             <div className="bg-card border-y">
               {data?.items.map((it, i) => (
                 <button key={it.id} type="button" aria-current={pathname === `/stats/c/${encodeURIComponent(it.id)}` || undefined} onClick={() => nav(`/stats/c/${encodeURIComponent(it.id)}?type=${type}&from=${p.range.from}&to=${p.range.to}&period=${p.period}&month=${p.month}`)} className="w-full flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm hover:bg-accent/40 text-left aria-[current]:bg-accent">
-                  <span className="rounded px-1.5 py-0.5 text-[11px] font-medium text-white tabular w-12 text-center" style={{ background: colorAt(i) }}>{Math.round(it.pct * 100)}%</span>
+                  <span className="flex items-center gap-1.5 w-14 shrink-0 text-[11px] tabular text-muted-foreground"><span className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ background: colorAt(i, data.items.length) }} /><span>{Math.round(it.pct * 100)}%</span></span>
                   <span className="flex-1 truncate">{it.name}</span>
                   <Money amount={it.amount} kind={type} />
                 </button>
