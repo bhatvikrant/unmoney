@@ -9,6 +9,7 @@ import { type BackupData } from "../../../shared/ops";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { downloadText, toCSV } from "@/lib/csv";
 import { completeSheets, moneyManagerSheet } from "../../../shared/export";
 import { downloadWorkbook, downloadXlsx } from "@/lib/xlsx";
@@ -17,6 +18,7 @@ export default function BackupSettings() {
   const view = useView();
   const nav = useNavigate();
   const bulk = useBulkOps();
+  const confirm = useConfirm();
   const restoreRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,7 +40,7 @@ export default function BackupSettings() {
   }
   async function onRestoreFile(file: File | undefined) {
     if (!file) return;
-    if (!window.confirm("Restore replaces ALL current data with the backup. Continue?")) return;
+    if (!(await confirm({ title: "Restore this backup?", description: "Restore replaces ALL current data with the backup. This cannot be undone.", action: "Restore" }))) { if (restoreRef.current) restoreRef.current.value = ""; return; }
     setBusy(true);
     // the toast from bulk.restore reports how the sync ends
     try { await bulk.restore(JSON.parse(await file.text()) as BackupData); }
@@ -65,7 +67,7 @@ export default function BackupSettings() {
           <Row label="Import from Money Manager, Excel, CSV or TSV" hint="Review what will be added before anything is imported" onClick={() => nav("/import")} right={<ChevronRight className="size-4 text-muted-foreground" />} />
         </Section>
         <Section title="Danger zone">
-          <Row label="Delete all entries" hint="Removes transactions, notes, schedules, bookmarks and budgets. Payment methods and categories stay." right={<Button size="sm" variant="destructive" onClick={() => { if (window.confirm("Delete every transaction, note, schedule, bookmark and budget? This cannot be undone.")) void bulk.wipeAll().catch(() => {}); }}>Delete</Button>} />
+          <Row label="Delete all entries" hint="Removes transactions, notes, schedules, bookmarks and budgets. Payment methods and categories stay." right={<Button size="sm" variant="destructive" onClick={async () => { if (await confirm({ title: "Delete all entries?", description: "Removes every transaction, note, schedule, bookmark and budget. Payment methods and categories stay. This cannot be undone.", action: "Delete all" })) void bulk.wipeAll().catch(() => {}); }}>Delete</Button>} />
         </Section>
       </Page>
     </>

@@ -8,6 +8,7 @@ import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { EmptyState } from "@/components/shell/misc";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -24,6 +25,7 @@ export default function RepeatSettings() {
   const list = useMemo(() => repeatsList(view), [view]);
   const update = useOp("repeats.update");
   const remove = useOp("repeats.remove");
+  const confirm = useConfirm();
   const [edit, setEdit] = useState<null | { r: Doc<"repeats">; frequency: Doc<"repeats">["frequency"]; endDate: string; nextDate: string; amount: string; note: string; active: boolean }>(null);
   return (
     <>
@@ -63,7 +65,7 @@ export default function RepeatSettings() {
             </div>
           ) : edit ? <p className="text-sm text-muted-foreground">All {edit.r.installmentCount} entries were created when the plan was set. Edit or delete them from the ledger (use "This and future" to change the rest).</p> : null}
           <DialogFooter>
-            <Button variant="destructive" onClick={async () => { await remove({ id: edit!.r._id }); setEdit(null); }}>Delete schedule</Button>
+            <Button variant="destructive" onClick={async () => { if (!(await confirm({ title: "Delete this schedule?", description: "Entries it already created stay in the ledger. No new ones will be added." }))) return; await remove({ id: edit!.r._id }); setEdit(null); }}>Delete schedule</Button>
             {edit?.r.kind === "repeat" ? <Button onClick={async () => { try { await update({ id: edit.r._id, frequency: edit.frequency, endDate: edit.endDate || null, nextDate: edit.nextDate, active: edit.active, template: { ...edit.r.template, amount: toMinor(edit.amount, settings.decimals, LOCALE_DECIMAL), note: edit.note } }); setEdit(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Save</Button> : null}
           </DialogFooter>
         </DialogContent>
