@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useCallback } from "react";
 import { BookOpen, ChartPie, Landmark, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { todayISO } from "../../../shared/dates";
+import { MONTH_SHORT, parts, todayISO } from "../../../shared/dates";
 import { useApp, useCatchUpRepeats } from "@/lib/app";
 import { Avatar } from "./Avatar";
 import { SyncDot, SyncLine } from "./SyncStatus";
@@ -29,7 +29,8 @@ export default function AppShell() {
   usePendingImportToasts();
   const { pathname } = useLocation();
   const { user } = useApp();
-  const today = todayISO().slice(5).replace("-", "/");
+  const { d, m } = parts(todayISO());
+  const today = `${d} ${MONTH_SHORT[m - 1]}`;
   return (
     <div className="flex min-h-dvh bg-background">
       <aside className="hidden md:flex w-56 shrink-0 flex-col border-r bg-sidebar px-3 py-5 gap-1 sticky top-0 h-dvh self-start">
