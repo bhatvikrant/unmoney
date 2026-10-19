@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import { BookOpen, ChartPie, Settings, WalletCards } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { todayISO } from "../../../shared/dates";
-import { useAdoptAccountKinds, useApp, useCatchUpRepeats } from "@/lib/app";
+import { useAdoptAccountKinds, useApp, useAutoRefreshRates, useCatchUpRepeats } from "@/lib/app";
 import { Avatar } from "./Avatar";
 import { SyncDot, SyncLine } from "./SyncStatus";
 import { useIosInstallHint } from "@/lib/pwa";
@@ -25,6 +25,7 @@ function isActive(pathname: string, to: string) {
 export default function AppShell() {
   useCatchUpRepeats();
   useAdoptAccountKinds();
+  useAutoRefreshRates();
   const nav = useNavigate();
   useIosInstallHint(useCallback(() => nav("/settings"), [nav]));
   usePendingImportToasts();
