@@ -98,6 +98,10 @@ export type AccountFields = {
   settlementDay?: number;
   paymentDay?: number;
   linkedAccountId?: Id<"accounts">;
+  /** Cards only, all optional. */
+  bankName?: string;
+  last4?: string;
+  color?: string;
 };
 export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
@@ -415,6 +419,12 @@ function validateTx(w: Work, t: TxFields): TxFields {
   return c;
 }
 
+const isCardKind = (k: string) => k === "card" || k === "debitCard";
+/** The card-only fields, tidied, or all unset for a method that is not a card. */
+const cardFields = (kind: string, a: Pick<AccountFields, "bankName" | "last4" | "color">) => (isCardKind(kind)
+  ? { bankName: a.bankName?.trim() || undefined, last4: a.last4 || undefined, color: a.color?.toLowerCase() || undefined }
+  : { bankName: undefined, last4: undefined, color: undefined });
+
 /** Checks a payment method and returns its kind (an op from an older app may only name a group). */
 function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): AccountKind {
   if (!a.name.trim()) throw new Error("Name is required");
@@ -430,6 +440,11 @@ function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Ac
     }
   }
   if (kind === "debitCard" && !a.linkedAccountId) throw new Error("A debit card needs a linked bank account");
+  if (isCardKind(kind)) {
+    if (a.last4 && !/^\d{4}$/.test(a.last4)) throw new Error("The last 4 digits must be 4 numbers");
+    if (a.bankName && a.bankName.trim().length > MAX_NAME) throw new Error("Bank name must be at most 40 characters");
+    if (a.color && !/^#[0-9a-f]{6}$/i.test(a.color)) throw new Error("Pick a card colour");
+  }
   if ((kind === "debitCard" || kind === "upi") && a.linkedAccountId) {
     if (a.linkedAccountId === selfId) throw new Error("A payment method cannot link to itself");
     const linked = w.must("accounts", a.linkedAccountId, "Linked account not found");
@@ -814,7 +829,7 @@ const handlers: Handlers = {
 
   "accounts.create": (w, a) => {
     const kind = validateAccount(w, a);
-    return w.insert("accounts", { ...a, kind, name: a.name.trim(), order: nextOrder(w.snap.accounts) });
+    return w.insert("accounts", { ...a, kind, ...cardFields(kind, a), name: a.name.trim(), order: nextOrder(w.snap.accounts) });
   },
   "accounts.update": (w, { id, ...a }) => {
     w.must("accounts", id);
@@ -828,6 +843,7 @@ const handlers: Handlers = {
       settlementDay: kind === "card" ? a.settlementDay : undefined,
       paymentDay: kind === "card" ? a.paymentDay : undefined,
       linkedAccountId: kind === "debitCard" || kind === "upi" ? a.linkedAccountId : undefined,
+      ...cardFields(kind, a),
     });
   },
   "accounts.setHidden": (w, { id, hidden }) => {
@@ -1027,7 +1043,6 @@ const handlers: Handlers = {
     // Payment methods the import should create first, all outside any group. Cards need a bank to bill / link to, so other kinds go first.
     // (An older app sends the kind as groupKind.)
     const kindOfNew = (a: NewImportAccount) => a.kind ?? (a as unknown as { groupKind?: AccountKind }).groupKind ?? "other";
-    const isCardKind = (k: string) => k === "card" || k === "debitCard";
     const wanted = (newAccounts ?? []).filter((a) => a.name.trim() && !accByName.has(a.name.trim().toLowerCase()));
     wanted.sort((a, b) => Number(isCardKind(kindOfNew(a))) - Number(isCardKind(kindOfNew(b))));
     const kindOfAcc = (x: Doc<"accounts">) => resolveKind(x, w.snap.accountGroups);
