@@ -274,7 +274,7 @@ type CleanupStep =
   | { kind: "remove"; id: Id<"categories"> };
 
 "categories.applyCleanup": {
-  args: { steps: CleanupStep[]; label: string[] };   // label: one line per accepted card
+  args: { steps: CleanupStep[] };   // each step may carry a `label`: the banner line shown when it goes through
   result: { cleanupId: Id<"categoryCleanups">; changedEntries: number; skipped: { step: number; reason: string }[] };
 };
 "categories.undoCleanup": { args: { id: Id<"categoryCleanups"> }; result: { restoredEntries: number } };
@@ -333,7 +333,7 @@ categoryCleanups: defineTable({
 ```
 
 - Add it to `TABLES`, `emptySnapshot`, `loadTable` (`by_user`) and the client store, like the others. Leave it out of backup export.
-- Keep the 3 most recent records per user. `applyCleanup` deletes older ones.
+- Keep only the most recent record per user, since only it can be undone. `applyCleanup` deletes the older one.
 - Size: about 80 bytes per moved entry, so roughly 12k entries per record stays well under Convex's 1 MiB document limit. Above 10k moved entries, refuse with "Too many entries for one tidy-up. Apply fewer changes at a time."
 - `undoCleanup` reverts entries whose current `[categoryId, subcategoryId]` still equals `to`, restores `categoriesBefore` and `budgetsBefore`, restores templates, soft-deletes `createdCategoryIds` that nothing references, and sets `undoneAt`. Only the newest record that isn't undone, within 30 days, can be undone.
 

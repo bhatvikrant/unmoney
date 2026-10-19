@@ -1,8 +1,11 @@
-import { useOp } from "@/lib/store";
-import { useState } from "react";
-import { ArrowDown, ArrowUp, Plus, Pencil, Trash2, CornerDownRight } from "lucide-react";
+import { useOp, useView } from "@/lib/store";
+import { useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
+import { ArrowDown, ArrowUp, Plus, Pencil, Trash2, CornerDownRight, WandSparkles, ChevronRight, Check, X } from "lucide-react";
 import { toast } from "sonner";
-import type { Id } from "../../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
+import { CLEANUP_UNDO_MS } from "../../../shared/ops";
+import { lintCategories } from "../../../shared/categoryLint";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SegmentedTabs } from "@/components/shell/misc";
@@ -22,6 +25,7 @@ export default function CategoriesSettings() {
   const live = categories.filter((c) => c.type === type && !c.deletedAt);
   const mains = live.filter((c) => !c.parentId);
   const subsOf = (id: string) => live.filter((c) => c.parentId === id);
+  const tidy = useTidyUndo();
   const [dialog, setDialog] = useState<null | { id?: Id<"categories">; name: string; parentId: string }>(null);
   const move = (list: typeof mains, id: string, dir: -1 | 1) => {
     const ids = list.map((c) => c._id);
@@ -47,7 +51,9 @@ export default function CategoriesSettings() {
     <>
       <PageHeader back="/settings" title="Categories" right={<Button variant="ghost" size="icon" aria-label="Add" onClick={() => setDialog({ name: "", parentId: "main" })}><Plus className="size-5" /></Button>} />
       <Page className="pb-8">
+        <TidyBanner tidy={tidy} />
         <SegmentedTabs value={type} onChange={setType} items={[{ value: "expense", label: "Expenses" }, { value: "income", label: "Income" }]} />
+        <TidyRow />
         <div className="bg-card border-y">
           {mains.map((c) => (
             <div key={c._id} className="border-b last:border-b-0">
@@ -72,6 +78,7 @@ export default function CategoriesSettings() {
           ))}
         </div>
         <p className="px-4 py-3 text-xs text-muted-foreground">Subcategories need the Subcategories switch in Settings. Edit a subcategory and set its parent to "Main category" to promote it.</p>
+        <UndoLastTidy tidy={tidy} />
       </Page>
       <Dialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent>
@@ -90,5 +97,88 @@ export default function CategoriesSettings() {
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/** Opens Tidy up, with how many quick fixes are waiting. */
+function TidyRow() {
+  const view = useView();
+  const nav = useNavigate();
+  const n = useMemo(() => lintCategories(view).length, [view]);
+  return (
+    <button type="button" onClick={() => nav("/settings/categories/tidy")} className="flex w-full items-center gap-3 border-b bg-card px-4 py-3 text-left hover:bg-accent/50 active:bg-accent">
+      <WandSparkles className="size-5 shrink-0 text-primary" />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium">Tidy up</div>
+        <div className="text-xs text-muted-foreground">{n ? `${n} ${n === 1 ? "suggestion" : "suggestions"}: merge look-alikes, clear out unused` : "Merge look-alikes and clear out unused categories"}</div>
+      </div>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
+const DISMISSED_KEY = "unmoney:tidyBannerDismissed";
+function readDismissed(): number {
+  try { return Number(localStorage.getItem(DISMISSED_KEY)) || 0; } catch { return 0; }
+}
+
+type TidyUndo = { last: Doc<"categoryCleanups"> | undefined; bannerHidden: boolean; dismiss: () => void };
+
+/**
+ * The latest tidy-up while it can still be undone, and whether its banner was dismissed. The
+ * banner is keyed by when the tidy-up ran, which stays the same once it syncs (its id does not).
+ */
+function useTidyUndo(): TidyUndo {
+  const { categoryCleanups } = useView();
+  const [now] = useState(() => Date.now());
+  const [dismissed, setDismissed] = useState(readDismissed);
+  const last = categoryCleanups[0];
+  const undoable = last && !last.undoneAt && now - last.at < CLEANUP_UNDO_MS ? last : undefined;
+  return {
+    last: undoable,
+    bannerHidden: !!undoable && dismissed === undoable.at,
+    dismiss: () => {
+      if (!undoable) return;
+      setDismissed(undoable.at);
+      try { localStorage.setItem(DISMISSED_KEY, String(undoable.at)); } catch { /* private mode */ }
+    },
+  };
+}
+
+function useUndo() {
+  const undo = useOp("categories.undoCleanup");
+  return (id: Id<"categoryCleanups">) => undo({ id }).catch((e) => toast.error(e instanceof Error ? e.message : "Could not undo"));
+}
+
+/** After a tidy-up: what changed, with Undo, until dismissed. */
+function TidyBanner({ tidy: { last, bannerHidden, dismiss } }: { tidy: TidyUndo }) {
+  const undo = useUndo();
+  const location = useLocation();
+  if (!last || bannerHidden) return null;
+  const skipped = (location.state as { tidySkipped?: string[] } | null)?.tidySkipped ?? [];
+  const n = last.label.length;
+  return (
+    <div className="mx-4 my-3 flex items-start gap-3 rounded-lg border bg-card px-3 py-2.5 text-sm" role="status">
+      <Check className="mt-0.5 size-4 shrink-0 text-primary" />
+      <div className="min-w-0 flex-1">
+        <div>Tidied up {n} {n === 1 ? "change" : "changes"}</div>
+        <div className="text-xs text-muted-foreground line-clamp-2">{last.label.join(" · ")}</div>
+        {skipped.length ? <div className="text-xs text-muted-foreground">{skipped.length} skipped: {skipped[0]}</div> : null}
+      </div>
+      <Button variant="outline" size="sm" className="h-7" onClick={() => undo(last._id)}>Undo</Button>
+      <Button variant="ghost" size="icon" className="size-7" aria-label="Dismiss" onClick={dismiss}><X className="size-4" /></Button>
+    </div>
+  );
+}
+
+/** Undo stays reachable for 30 days after the banner is dismissed. */
+function UndoLastTidy({ tidy: { last, bannerHidden } }: { tidy: TidyUndo }) {
+  const undo = useUndo();
+  if (!last || !bannerHidden) return null;
+  const date = new Date(last.at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return (
+    <div className="px-4 pb-6">
+      <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => undo(last._id)}>Undo last tidy-up ({date})</Button>
+    </div>
   );
 }
