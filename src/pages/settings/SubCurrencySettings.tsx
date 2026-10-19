@@ -21,6 +21,17 @@ import { BottomSheet } from "@/components/shell/BottomSheet";
 const toStored = (text: string, flip: boolean) => (flip ? 1 / Number(text) : Number(text));
 const toShown = (rate: number, flip: boolean) => String(flip ? Number((1 / rate).toPrecision(6)) : rate);
 
+/**
+ * How finely a custom currency can be split, asked as its smallest amount rather than a number of
+ * decimals. Set once when it is added: entries store whole multiples of it, so it never changes later.
+ */
+const SMALLEST = [
+  { decimals: 0, amount: "1", hint: "whole units, like points or miles" },
+  { decimals: 2, amount: "0.01", hint: "like money" },
+  { decimals: 3, amount: "0.001", hint: "like grams of gold" },
+  { decimals: 8, amount: "0.00000001", hint: "like crypto" },
+];
+
 /** "S$1 = [ 73.9 ] INR": typed as one unit of the side shown first; the swap button turns it around. */
 function RateField({ main, sub, value, flip, onChange }: { main: RateSide; sub: RateSide; value: string; flip: boolean; onChange: (value: string, flip: boolean) => void }) {
   const [one, other] = flip ? [sub, main] : [main, sub];
@@ -48,7 +59,7 @@ export default function SubCurrencySettings() {
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState("");
   const [custom, setCustom] = useState<null | { code: string; name: string; symbol: string; rate: string; flip: boolean; decimals: string }>(null);
-  const [edit, setEdit] = useState<null | { id: Id<"currencies">; code: string; rate: string; flip: boolean; savedRate: number; decimals: string; symbolPosition: "before" | "after"; symbol: string; isCustom: boolean }>(null);
+  const [edit, setEdit] = useState<null | { id: Id<"currencies">; code: string; rate: string; flip: boolean; savedRate: number; symbolPosition: "before" | "after"; symbol: string; isCustom: boolean }>(null);
   const [busy, setBusy] = useState(false);
   const options = useMemo(() => { const l = q.toLowerCase(); return CURRENCIES.filter((c) => c.code !== s.mainCurrency && !currencies.some((x) => x.code === c.code) && (!l || c.code.toLowerCase().includes(l) || c.name.toLowerCase().includes(l))); }, [q, currencies, s.mainCurrency]);
 
@@ -72,7 +83,7 @@ export default function SubCurrencySettings() {
     const e = edit!;
     // Untouched, the rate is saved as it was, not rounded through the other direction.
     const rate = e.rate === toShown(e.savedRate, e.flip) ? e.savedRate : toStored(e.rate, e.flip);
-    try { await update({ id: e.id, rate, decimals: Number(e.decimals), symbolPosition: e.symbolPosition, symbol: e.symbol }); setEdit(null); }
+    try { await update({ id: e.id, rate, symbolPosition: e.symbolPosition, symbol: e.symbol }); setEdit(null); }
     catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
   }
   const move = (i: number, dir: -1 | 1) => { const ids = currencies.map((c) => c._id); const j = i + dir; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; reorder({ ids }); };
@@ -87,8 +98,8 @@ export default function SubCurrencySettings() {
             <div key={c._id} className="flex items-center gap-1 px-2 py-2 border-b last:border-b-0 text-sm">
               <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
               <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
-              <div className="flex-1 px-1 min-w-0"><div className="truncate">{c.code} · {c.name}{c.isCustom ? " (custom)" : ""}</div><div className="text-xs text-muted-foreground">{formatRate(mainSide, c, c.rate)} · {c.decimals} decimals</div></div>
-              <Button variant="ghost" size="icon" className="size-7" aria-label="Edit" onClick={() => setEdit({ id: c._id, code: c.code, rate: toShown(c.rate, c.rate < 1), flip: c.rate < 1, savedRate: c.rate, decimals: String(c.decimals), symbolPosition: c.symbolPosition, symbol: c.symbol, isCustom: c.isCustom })}><Pencil className="size-4" /></Button>
+              <div className="flex-1 px-1 min-w-0"><div className="truncate">{c.code} · {c.name}{c.isCustom ? " (custom)" : ""}</div><div className="text-xs text-muted-foreground">{formatRate(mainSide, c, c.rate)}</div></div>
+              <Button variant="ghost" size="icon" className="size-7" aria-label="Edit" onClick={() => setEdit({ id: c._id, code: c.code, rate: toShown(c.rate, c.rate < 1), flip: c.rate < 1, savedRate: c.rate, symbolPosition: c.symbolPosition, symbol: c.symbol, isCustom: c.isCustom })}><Pencil className="size-4" /></Button>
               <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => remove({ id: c._id })}><Trash2 className="size-4" /></Button>
             </div>
           ))}
@@ -113,7 +124,7 @@ export default function SubCurrencySettings() {
               <div className="space-y-1.5"><Label>Symbol</Label><Input value={custom.symbol} onChange={(e) => setCustom({ ...custom, symbol: e.target.value })} placeholder="oz" /></div>
               <div className="space-y-1.5 col-span-2"><Label>Name</Label><Input value={custom.name} onChange={(e) => setCustom({ ...custom, name: e.target.value })} placeholder="Gold" /></div>
               <div className="space-y-1.5 col-span-2"><Label>Rate</Label><RateField main={mainSide} sub={{ code: custom.code || "unit", symbol: custom.symbol || custom.code, symbolPosition: "after" }} value={custom.rate} flip={custom.flip} onChange={(rate, flip) => setCustom({ ...custom, rate, flip })} /></div>
-              <div className="space-y-1.5"><Label>Decimals</Label><Input type="number" min={0} max={8} value={custom.decimals} onChange={(e) => setCustom({ ...custom, decimals: e.target.value })} /></div>
+              <div className="space-y-1.5 col-span-2"><Label>Smallest amount</Label><Select value={custom.decimals} onValueChange={(v) => setCustom({ ...custom, decimals: v })}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{SMALLEST.map((o) => <SelectItem key={o.decimals} value={String(o.decimals)}>{o.amount} <span className="text-muted-foreground">· {o.hint}</span></SelectItem>)}</SelectContent></Select></div>
             </div>
           ) : null}
           <DialogFooter><Button disabled={!custom?.code || !custom.name || !(Number(custom.rate) > 0)} onClick={async () => { try { await add({ code: custom!.code, name: custom!.name, symbol: custom!.symbol || custom!.code, rate: toStored(custom!.rate, custom!.flip), decimals: Number(custom!.decimals), symbolPosition: "after", isCustom: true }); setCustom(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Add</Button></DialogFooter>
@@ -126,8 +137,7 @@ export default function SubCurrencySettings() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5 col-span-2"><Label>Rate</Label><RateField main={mainSide} sub={{ code: edit.code, symbol: edit.symbol, symbolPosition: edit.symbolPosition }} value={edit.rate} flip={edit.flip} onChange={(rate, flip) => setEdit({ ...edit, rate, flip })} />{edit.isCustom ? null : <p className="text-xs text-muted-foreground">Updates to the latest rate when online.</p>}</div>
               <div className="space-y-1.5"><Label>Symbol</Label><Input value={edit.symbol} onChange={(e) => setEdit({ ...edit, symbol: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Decimals</Label><Input type="number" min={0} max={8} value={edit.decimals} onChange={(e) => setEdit({ ...edit, decimals: e.target.value })} /></div>
-              <div className="space-y-1.5 col-span-2"><Label>Symbol position</Label><Select value={edit.symbolPosition} onValueChange={(v) => setEdit({ ...edit, symbolPosition: v as "before" | "after" })}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="before">Before</SelectItem><SelectItem value="after">After</SelectItem></SelectContent></Select></div>
+              <div className="space-y-1.5"><Label>Symbol position</Label><Select value={edit.symbolPosition} onValueChange={(v) => setEdit({ ...edit, symbolPosition: v as "before" | "after" })}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="before">Before</SelectItem><SelectItem value="after">After</SelectItem></SelectContent></Select></div>
             </div>
           ) : null}
           <DialogFooter><Button disabled={!(Number(edit?.rate) > 0)} onClick={saveEdit}>Save</Button></DialogFooter>

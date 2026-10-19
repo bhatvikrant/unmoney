@@ -107,6 +107,11 @@ export default defineSchema({
     settlementDay: v.optional(v.number()),
     paymentDay: v.optional(v.number()),
     linkedAccountId: v.optional(v.id("accounts")),
+    /** Cards only (credit and debit): what is printed on the card, for telling cards apart. */
+    bankName: v.optional(v.string()),
+    last4: v.optional(v.string()),
+    /** Cards only: background of the card in the app, "#rrggbb". */
+    color: v.optional(v.string()),
     deletedAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
