@@ -18,6 +18,7 @@ import { cardColorOf } from "../../../shared/defaults";
 import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
 import { DeletePaymentMethodDialog } from "./DeletePaymentMethodDialog";
 import { MergePaymentMethodsDialog } from "./MergePaymentMethodsDialog";
+import { HistorySection } from "@/components/HistorySection";
 
 /** A section's header: a tinted band, so the rows under it read as its contents. */
 const sectionHead = "w-full flex items-center px-4 py-2 text-sm text-muted-foreground bg-muted/60";
@@ -32,6 +33,8 @@ export default function AccountsPage() {
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moving, setMoving] = useState(false);
+  /** How many the Move to sheet is moving, set when it opens so its title holds while it closes (the selection clears first). */
+  const [moveCount, setMoveCount] = useState(0);
   const [merging, setMerging] = useState<AccountRow[] | null>(null);
   /** The row swiped open to show Delete, and the method waiting on the delete confirmation. */
   const [swiped, setSwiped] = useState<string | null>(null);
@@ -152,6 +155,7 @@ export default function AccountsPage() {
             ) : null}
           </div>
         ) : null}
+        <HistorySection scope="accounts" />
       </Page>
       {selecting ? (
         <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
@@ -165,14 +169,14 @@ export default function AccountsPage() {
             <Button variant="outline" size="sm" disabled={chosen.length < 2} onClick={() => setMerging(chosen)} aria-label="Merge">
               <Merge className="size-4" /><span className="hidden sm:inline">Merge</span>
             </Button>
-            <Button size="sm" disabled={!chosen.length} onClick={() => setMoving(true)} aria-label="Move to group"><FolderInput className="size-4" /><span className="hidden sm:inline">Move to…</span></Button>
+            <Button size="sm" disabled={!chosen.length} onClick={() => { setMoveCount(chosen.length); setMoving(true); }} aria-label="Move to group"><FolderInput className="size-4" /><span className="hidden sm:inline">Move to…</span></Button>
             <Button variant="ghost" size="icon" aria-label="Exit selection" onClick={exit}><X className="size-4" /></Button>
           </div>
         </div>
       ) : null}
       <MergePaymentMethodsDialog methods={merging} onOpenChange={(o) => { if (!o) setMerging(null); }} onMerged={() => { setMerging(null); exit(); }} />
       <DeletePaymentMethodDialog method={deleting} onOpenChange={(o) => { if (!o) { setDeleting(null); setSwiped(null); } }} />
-      <MoveToGroupSheet open={moving} onOpenChange={setMoving} onPick={(id) => void moveTo(id)} current={current} title={`Move ${chosen.length} ${chosen.length === 1 ? "payment method" : "payment methods"} to`} />
+      <MoveToGroupSheet open={moving} onOpenChange={setMoving} onPick={(id) => void moveTo(id)} current={current} title={`Move ${moveCount} ${moveCount === 1 ? "payment method" : "payment methods"} to`} />
     </>
   );
 }
