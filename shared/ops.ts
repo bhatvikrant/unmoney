@@ -116,6 +116,8 @@ export interface Ops {
   /** entries: false leaves the entries alone; the app rescales or removes them itself, in chunks (see src/lib/bulk.ts). */
   "settings.changeMainCurrency": { args: { code: string; keepData: boolean; entries?: boolean }; result: void };
   "settings.setPasscode": { args: { hash?: string; salt?: string }; result: void };
+  /** Store amounts with this many decimals, rounding them when there are fewer. entries: false as for changeMainCurrency. */
+  "settings.changeDecimals": { args: { decimals: number; entries?: boolean }; result: void };
   "settings.setDefaultAccount": { args: { id?: Id<"accounts"> }; result: void };
 
   "accountGroups.create": { args: { name: string; kind: Doc<"accountGroups">["kind"] }; result: Id<"accountGroups"> };
@@ -214,6 +216,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "settings.update": ["settings"],
   "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks"],
   "settings.setPasscode": ["settings"],
+  "settings.changeDecimals": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks"],
   "settings.setDefaultAccount": ["settings", "accounts"],
   "accountGroups.create": ["accountGroups"],
   "accountGroups.update": ["accountGroups"],
@@ -303,6 +306,7 @@ export function txScope(op: Op): TxScope {
     }
     case "transactions.rescale": return { ids: a.ids as string[] };
     case "settings.changeMainCurrency":
+    case "settings.changeDecimals":
     case "backup.restore":
     case "backup.wipeAll": return a.entries === false ? {} : { all: true };
     default: return {};
@@ -538,6 +542,20 @@ function rescale(w: Work, ids: Id<"transactions">[], factor: number) {
   }
 }
 
+/** Opening balances, budgets and what repeats and bookmarks will enter, when amounts change scale. */
+function rescaleOtherAmounts(w: Work, factor: number) {
+  const scale = (n: number) => Math.round(n * factor);
+  for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: scale(a.initialBalance) });
+  for (const b of [...w.snap.budgets]) {
+    const overrides: Record<string, number> = {};
+    for (const [k, val] of Object.entries(b.overrides)) overrides[k] = scale(val);
+    w.patch("budgets", b._id, { amount: scale(b.amount), overrides });
+  }
+  const template = (t: Template): Template => ({ ...t, amount: scale(t.amount), feeAmount: t.feeAmount === undefined ? undefined : scale(t.feeAmount) });
+  for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
+  for (const b of [...w.snap.bookmarks]) w.patch("bookmarks", b._id, { template: template(b.template) });
+}
+
 /** A backup's entries with their account, category and schedule ids moved to the restored copies, for restoreRows. */
 export function restoreRowsFrom(data: BackupData, ids: RestoreIds): Record<string, unknown>[] {
   const map = (table: Record<string, string>, v: unknown) => (typeof v === "string" ? table[v] : undefined);
@@ -593,18 +611,20 @@ const handlers: Handlers = {
       if (entries) w.clear("transactions");
     } else if (factor !== 1) {
       if (entries) rescale(w, w.snap.transactions.map((t) => t._id), factor);
-      for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: Math.round(a.initialBalance * factor) });
-      for (const b of [...w.snap.budgets]) {
-        const overrides: Record<string, number> = {};
-        for (const [k, val] of Object.entries(b.overrides)) overrides[k] = Math.round(val * factor);
-        w.patch("budgets", b._id, { amount: Math.round(b.amount * factor), overrides });
-      }
-      // the amounts future repeats and bookmarks will enter
-      const template = (t: Template): Template => ({ ...t, amount: Math.round(t.amount * factor), feeAmount: t.feeAmount === undefined ? undefined : Math.round(t.feeAmount * factor) });
-      for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
-      for (const b of [...w.snap.bookmarks]) w.patch("bookmarks", b._id, { template: template(b.template) });
+      rescaleOtherAmounts(w, factor);
     }
     w.patch("settings", s._id, { mainCurrency: info.code, symbol: info.symbol, decimals: info.decimals, symbolPosition: info.position ?? "before" });
+  },
+
+  "settings.changeDecimals": (w, { decimals, entries = true }) => {
+    const s = w.requireSettings();
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 4) throw new Error("Decimals must be between 0 and 4");
+    const factor = 10 ** (decimals - s.decimals);
+    if (factor !== 1) {
+      if (entries) rescale(w, w.snap.transactions.map((t) => t._id), factor);
+      rescaleOtherAmounts(w, factor);
+    }
+    w.patch("settings", s._id, { decimals });
   },
 
   "settings.setPasscode": (w, { hash, salt }) => {

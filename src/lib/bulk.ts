@@ -52,6 +52,15 @@ export function useBulkOps() {
       return track(ids, { loading: "Restoring… keep UnMoney open until it is saved", success: "Restored" });
     },
 
+    async changeDecimals(decimals: number) {
+      const current = view.settings[0]?.decimals ?? 2;
+      const factor = 10 ** (decimals - current);
+      const ids: string[] = [];
+      for (const part of chunks(view.transactions.map((t) => t._id as Id<"transactions">))) ids.push((await dispatchTracked("transactions.rescale", { ids: part, factor })).id);
+      ids.push((await dispatchTracked("settings.changeDecimals", { decimals, entries: false })).id);
+      return track(ids, { loading: "Updating amounts…", success: `Amounts now have ${decimals} decimal ${decimals === 1 ? "place" : "places"}` });
+    },
+
     async changeMainCurrency(code: string, keepData: boolean) {
       const current = view.settings[0];
       const factor = 10 ** ((currencyInfo(code)?.decimals ?? 2) - (current?.decimals ?? 2));
