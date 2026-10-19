@@ -107,3 +107,21 @@ export const pruneSyncOps = internalMutation({
     if (old.length === PRUNE_BATCH) await ctx.scheduler.runAfter(0, internal.sync.pruneSyncOps, { cutoff });
   },
 });
+
+/** A saved or dismissed draft is kept this long, so "Open in Gmail" on a fresh entry still works. */
+const DRAFT_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Daily cron: delete drafts resolved more than the TTL ago. Open drafts stay until the user
+ * handles them or disconnects Gmail. Walks the drafts older than the TTL a page at a time (one
+ * resolved that long ago is at least that old), rescheduling until done.
+ */
+export const pruneDrafts = internalMutation({
+  args: { cutoff: v.optional(v.number()), cursor: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, args) => {
+    const cutoff = args.cutoff ?? Date.now() - DRAFT_TTL_MS;
+    const res = await ctx.db.query("drafts").withIndex("by_creation_time", (q) => q.lt("_creationTime", cutoff)).paginate({ numItems: PRUNE_BATCH, cursor: args.cursor ?? null });
+    for (const d of res.page) if (d.status !== "open" && (d.resolvedAt ?? d._creationTime) < cutoff) await ctx.db.delete(d._id);
+    if (!res.isDone) await ctx.scheduler.runAfter(0, internal.sync.pruneDrafts, { cutoff, cursor: res.continueCursor });
+  },
+});

@@ -1,0 +1,9 @@
+From: State Bank of India <alerts@sbi.co.in>
+Subject: Transaction Alert from SBI
+Received: 2026-10-01T04:30:00Z
+
+Dear Customer,
+
+Your A/C XXXXX112233 Credited INR 50,000.00 on 01/10/26 by transfer from ACME TECH PVT LTD Ref No 528012345683.
+
+-SBI

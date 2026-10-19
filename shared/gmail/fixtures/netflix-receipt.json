@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "netflix",
+    "type": "debit",
+    "amount": 649,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "last4": "4521",
+    "channel": "card",
+    "merchantRaw": "Netflix",
+    "item": "Standard"
+  }
+}

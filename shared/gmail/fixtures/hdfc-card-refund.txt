@@ -1,0 +1,10 @@
+From: HDFC Bank InstaAlerts <alerts@hdfcbank.net>
+Subject: Alert : Refund on your HDFC Bank Credit Card
+Received: 2026-10-19T11:00:00Z
+
+Dear Customer,
+
+Rs 899.00 has been credited to your HDFC Bank Credit Card ending 4521 on 19-10-26 towards refund from MYNTRA DESIGNS.
+
+Warm Regards,
+HDFC Bank

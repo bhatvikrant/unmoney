@@ -11,7 +11,7 @@ import {
 } from "../../shared/ops";
 
 export async function loadTable<T extends Table>(ctx: QueryCtx | MutationCtx, userId: Id<"users">, table: T): Promise<Doc<T>[]> {
-  const byUser = (t: "settings" | "accountGroups" | "accounts" | "repeats" | "bookmarks" | "budgets" | "currencies" | "categoryCleanups" | "history") =>
+  const byUser = (t: "settings" | "accountGroups" | "accounts" | "repeats" | "bookmarks" | "budgets" | "currencies" | "categoryCleanups" | "history" | "drafts") =>
     ctx.db.query(t).withIndex("by_user", (q) => q.eq("userId", userId)).collect();
   let docs: unknown[];
   switch (table) {

@@ -1,0 +1,5 @@
+From: Zomato <order@zomato.com>
+Subject: Your order is on its way
+Received: 2026-10-18T15:20:00Z
+
+Hi Arjun, Ramesh has picked up your order from Meghana Foods and is on the way. Track your order in the app.

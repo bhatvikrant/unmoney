@@ -1,0 +1,17 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "google-pay",
+    "type": "credit",
+    "amount": 500,
+    "currency": "INR",
+    "date": "2026-10-17",
+    "dateSource": "mail",
+    "time": "16:50",
+    "last4": "1234",
+    "bankName": "HDFC",
+    "channel": "upi",
+    "merchantRaw": "Rahul V",
+    "vpa": "rahul.v@okicici"
+  }
+}

@@ -1,0 +1,15 @@
+From: Swiggy <noreply@swiggy.in>
+Subject: Your Swiggy order was delivered
+Received: 2026-10-18T15:30:00Z
+
+Your order from Burger King, Koramangala has been delivered.
+
+Order No. #198812345678
+Ordered on 18 Oct 2026, 8:45 PM
+
+Item Total ₹420
+Delivery Fee ₹30
+Taxes & Charges ₹35
+
+Grand Total ₹485
+Paid via UPI

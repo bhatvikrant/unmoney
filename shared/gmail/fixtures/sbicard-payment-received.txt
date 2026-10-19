@@ -1,0 +1,9 @@
+From: SBI Card <sbicard@sbicard.com>
+Subject: Payment received for your SBI Card
+Received: 2026-10-10T09:00:00Z
+
+Dear Cardholder,
+
+Payment of Rs. 12,340.00 has been received towards your SBI Card ending 8899 on 10/10/26 and will be credited to your card account.
+
+Thank you.

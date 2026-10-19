@@ -1,0 +1,11 @@
+From: ICICI Bank <credit_cards@icicibank.com>
+Subject: Transaction alert for your ICICI Bank Credit Card
+Received: 2026-10-18T03:46:00Z
+
+Dear Customer,
+
+Your ICICI Bank Credit Card XX7001 has been used for a transaction of INR 1,199.00 on Oct 18, 2026 at 09:15:22. Info: NETFLIX.COM.
+
+The Available Credit Limit on your card is INR 2,10,801.00.
+
+If this transaction was not done by you, call 18001080 immediately.

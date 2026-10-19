@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "icici",
+    "type": "debit",
+    "amount": 540,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "last4": "5566",
+    "bankName": "ICICI",
+    "channel": "upi",
+    "merchantRaw": "zomato",
+    "vpa": "zomato@ptybl"
+  }
+}

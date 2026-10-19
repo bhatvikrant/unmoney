@@ -157,6 +157,8 @@ export default defineSchema({
     installmentIndex: v.optional(v.number()),
     installmentCount: v.optional(v.number()),
     installmentTotal: v.optional(v.number()),
+    /** The mail this entry was read from (Gmail sync), so its detail screen can link back to it. */
+    source: v.optional(v.object({ app: v.literal("gmail"), messageId: v.string() })),
   })
     .index("by_user_date", ["userId", "date"])
     .index("by_user_account", ["userId", "accountId"])
@@ -302,6 +304,85 @@ export default defineSchema({
     error: v.optional(v.string()),
     idMap: v.optional(v.record(v.string(), v.string())),
   }).index("by_user_op", ["userId", "opId"]),
+
+  /**
+   * A user's Gmail connection (docs/specs/gmail-sync.md). Server-only: the refresh token is
+   * encrypted with GMAIL_TOKEN_KEY and the app reads a safe projection through gmail.status.
+   */
+  gmailConnections: defineTable({
+    userId: v.id("users"),
+    email: v.string(),
+    refreshTokenEnc: v.string(),
+    iv: v.string(),
+    /** Gmail cursor for incremental sync. */
+    historyId: v.optional(v.string()),
+    lastSyncAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    status: v.union(v.literal("ok"), v.literal("reauth"), v.literal("paused")),
+    lookbackDays: v.number(),
+    /** Sender allowlist, editable; seeded with known bank, UPI and shop senders. */
+    senders: v.array(v.string()),
+    /** Also scan mail Gmail files under Purchases. */
+    scanPurchases: v.boolean(),
+    /** "hdfcbank.net|1234" → the card; learned from what the user picked when saving. */
+    accountMap: v.record(v.string(), v.id("accounts")),
+    /** Per-user monthly cap on model calls. */
+    aiMonth: v.string(),
+    aiCalls: v.number(),
+    /** The last 10 checks. */
+    log: v.array(v.object({ at: v.number(), scanned: v.number(), found: v.number(), error: v.optional(v.string()) })),
+  }).index("by_user", ["userId"]),
+
+  /**
+   * Entries read from mail, waiting for the user to check and save them. Never counted anywhere:
+   * saving one creates a real entry through the drafts.accept op.
+   */
+  drafts: defineTable({
+    userId: v.id("users"),
+    source: v.literal("gmail"),
+    /** The primary Gmail message. */
+    messageId: v.string(),
+    /** Mails folded into this one: the receipt that went with the bank alert, etc. */
+    extraMessageIds: v.array(v.string()),
+    threadId: v.string(),
+    receivedAt: v.number(),
+    from: v.string(),
+    /** Trimmed to 120 characters. */
+    subject: v.string(),
+    proposal: v.object({
+      type: txType,
+      date: v.string(),
+      time: v.optional(v.string()),
+      /** Minor units of the main currency. */
+      amount: v.number(),
+      /** When the mail was in another currency. */
+      subAmount: v.optional(v.number()),
+      subCurrency: v.optional(v.string()),
+      /** The merchant, cleaned ("Swiggy", not "SWIGGY*ORDER 8812-BLR"). */
+      note: v.string(),
+      /** One line of provenance: "HDFC alert · card ending 1234". */
+      description: v.optional(v.string()),
+      accountId: v.optional(v.id("accounts")),
+      toAccountId: v.optional(v.id("accounts")),
+      categoryId: v.optional(v.id("categories")),
+      subcategoryId: v.optional(v.id("categories")),
+      accountHint: v.optional(v.object({
+        bankName: v.optional(v.string()),
+        last4: v.optional(v.string()),
+        channel: v.optional(v.union(v.literal("upi"), v.literal("card"), v.literal("netbanking"), v.literal("wallet"))),
+      })),
+    }),
+    confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+    how: v.union(v.literal("rule"), v.literal("ai")),
+    /** An entry the user already typed in that looks like this one ("already added?"). */
+    matchedTransactionId: v.optional(v.id("transactions")),
+    status: v.union(v.literal("open"), v.literal("accepted"), v.literal("dismissed")),
+    transactionId: v.optional(v.id("transactions")),
+    resolvedAt: v.optional(v.number()),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_status", ["userId", "status"])
+    .index("by_user_message", ["userId", "messageId"]),
 
   currencies: defineTable({
     userId: v.id("users"),

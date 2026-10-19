@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "flipkart",
+    "type": "debit",
+    "amount": 999,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "last4": "3344",
+    "bankName": "Axis",
+    "channel": "card",
+    "merchantRaw": "Flipkart"
+  }
+}

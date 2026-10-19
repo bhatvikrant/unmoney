@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hdfc",
+    "type": "debit",
+    "amount": 1250,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "last4": "1234",
+    "bankName": "HDFC",
+    "channel": "upi",
+    "merchantRaw": "SWIGGY",
+    "vpa": "swiggy.upi@axisbank"
+  }
+}

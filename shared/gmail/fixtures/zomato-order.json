@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "zomato",
+    "type": "debit",
+    "amount": 612,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "21:10",
+    "bankName": "HDFC",
+    "channel": "upi",
+    "merchantRaw": "Zomato"
+  }
+}

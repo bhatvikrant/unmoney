@@ -1,0 +1,13 @@
+From: Netflix <info@account.netflix.com>
+Subject: Your Netflix payment receipt
+Received: 2026-10-18T02:00:00Z
+
+Hi Arjun,
+
+Thanks for being a member. Here is your receipt.
+
+Plan: Standard.
+Amount: ₹649.00.
+Payment method: Visa •••• 4521.
+Date of payment: 18/10/2026.
+Next billing date: 18/11/2026.

@@ -1,0 +1,14 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "ola",
+    "type": "debit",
+    "amount": 190,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "23:20",
+    "channel": "wallet",
+    "merchantRaw": "Ola"
+  }
+}

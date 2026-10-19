@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "phonepe",
+    "type": "debit",
+    "amount": 1200,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "10:41",
+    "last4": "1234",
+    "bankName": "HDFC",
+    "channel": "upi",
+    "merchantRaw": "Zomato"
+  }
+}

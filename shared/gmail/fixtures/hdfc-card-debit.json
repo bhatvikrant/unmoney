@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hdfc",
+    "type": "debit",
+    "amount": 2499,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "14:32",
+    "last4": "4521",
+    "bankName": "HDFC",
+    "channel": "card",
+    "merchantRaw": "AMAZON PAY INDIA"
+  }
+}

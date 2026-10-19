@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hdfc",
+    "type": "cardPayment",
+    "amount": 23450,
+    "currency": "INR",
+    "date": "2026-10-10",
+    "dateSource": "mail",
+    "last4": "4521",
+    "bankName": "HDFC",
+    "channel": "card",
+    "merchantRaw": "HDFC card payment"
+  }
+}

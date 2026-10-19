@@ -1,0 +1,9 @@
+From: Kotak Cards <cards@kotak.com>
+Subject: Transaction alert on your Kotak Credit Card
+Received: 2026-10-18T14:46:00Z
+
+Dear Customer,
+
+Rs 4,299.00 spent on your Kotak Credit Card XX5511 at MYNTRA DESIGNS PVT LTD on 18-Oct-2026 at 20:15 hrs.
+
+Available limit Rs 95,701.00.

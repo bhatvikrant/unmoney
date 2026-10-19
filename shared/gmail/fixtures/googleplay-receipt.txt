@@ -1,0 +1,17 @@
+From: Google Play <googleplay-noreply@google.com>
+Subject: Your Google Play Order Receipt from Oct 18, 2026
+Received: 2026-10-18T05:33:00Z
+
+Thank you for your purchase.
+
+Order number: GPA.3312-1234-5678-90123
+Order date: Oct 18, 2026 11:02:35 AM IST
+
+Item  Price
+YouTube Premium (YouTube)  ₹149.00
+Monthly subscription
+
+Tax: ₹0.00
+Total: ₹149.00
+
+Payment method: HDFC Bank Credit Card-4521

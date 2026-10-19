@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "apple",
+    "type": "debit",
+    "amount": 179,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "last4": "4521",
+    "channel": "card",
+    "merchantRaw": "Apple",
+    "item": "iCloud+ 50GB"
+  }
+}

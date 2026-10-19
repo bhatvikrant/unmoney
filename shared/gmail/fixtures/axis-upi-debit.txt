@@ -1,0 +1,7 @@
+From: Axis Bank <alerts@axisbank.com>
+Subject: Debit alert on Axis Bank A/c
+Received: 2026-10-18T05:12:00Z
+
+INR 320.00 debited from A/c no. XX9900 on 18-10-26 at 10:41:02 IST. Info- UPI/P2M/529412345680/BLINKIT COMMERCE. Avl bal INR 9,120.00.
+
+If not done by you, call 18001035577.

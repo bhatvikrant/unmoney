@@ -1,0 +1,16 @@
+From: Flipkart <noreply@nct.flipkart.com>
+Subject: Your order for boAt Rockerz 450 has been placed
+Received: 2026-10-18T10:15:00Z
+
+Hi Arjun,
+
+Your order has been placed.
+
+Order ID: OD331234567890123456
+Order placed on 18 Oct 2026
+
+boAt Rockerz 450 Bluetooth Headset (Luscious Black)
+Amount Paid ₹999
+Paid via Axis Bank Credit Card ending 3344
+
+Expected delivery: Tue, 21 Oct

@@ -57,6 +57,11 @@ export function notesRange(snap: Snapshot, from: string, to: string): Doc<"notes
   return snap.notes.filter((n) => n.date >= from && n.date <= to);
 }
 
+/** Open drafts from Gmail dated in the range, for the ledger's faded rows. Ones matched to an entry the user already has are left out. */
+export function draftsRange(snap: Snapshot, from: string, to: string): Doc<"drafts">[] {
+  return snap.drafts.filter((d) => d.status === "open" && !d.matchedTransactionId && d.proposal.date >= from && d.proposal.date <= to);
+}
+
 // ---------- accounts ----------
 
 export type AccountRow = Omit<Doc<"accounts">, "kind"> & {

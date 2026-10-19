@@ -1,0 +1,20 @@
+From: Apple <no_reply@email.apple.com>
+Subject: Your receipt from Apple.
+Received: 2026-10-18T04:05:00Z
+
+Receipt
+
+APPLE ID arjun@example.com
+BILLED TO Visa .... 4521
+ORDER ID MMN2Q3T4
+DOCUMENT NO. 1234567890
+DATE 18 Oct 2026
+
+iCloud+ 50GB
+Monthly
+Renews 18 Nov 2026
+₹179.00
+
+Subtotal ₹151.69
+GST ₹27.31
+TOTAL ₹179.00
