@@ -37,7 +37,8 @@ export default function TransactionsPage() {
   const openEntry = useOpenEntry();
   const entryOpen = useLocation().pathname.startsWith("/t/");
   const goToday = () => setMonth(monthKeyForDate(todayISO(), settings.monthStartDay));
-  useShortcuts({ n: () => openEntry("new", { date: addDate() }), "/": () => nav("/search"), ArrowLeft: () => shift(-1), ArrowRight: () => shift(1), t: goToday });
+  // not while an entry is open beside the list: they would replace it and lose unsaved edits
+  useShortcuts({ n: () => openEntry("new", { date: addDate() }), "/": () => nav("/search"), ArrowLeft: () => shift(-1), ArrowRight: () => shift(1), t: goToday }, !entryOpen);
   const [sp, setSp] = useSearchParams();
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
@@ -128,7 +129,12 @@ function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: st
   const { settings, ledger } = useApp();
   const snap = useView();
   const notes = useMemo(() => notesRange(snap, range.from, range.to), [snap, range.from, range.to]);
-  const [day, setDay] = useState<string | null>(null);
+  // the day sheet belongs to the screen it was opened on: opening an entry (beside the list on a
+  // wide screen, where this screen stays mounted) closes it
+  const { pathname } = useLocation();
+  const [opened, setOpened] = useState<{ day: string; at: string } | null>(null);
+  const day = opened?.at === pathname ? opened.day : null;
+  const setDay = (d: string | null) => setOpened(d ? { day: d, at: pathname } : null);
   const byDay = useMemo(() => {
     const m = new Map<string, { income: number; expense: number; list: Tx[] }>();
     for (const t of txs) {

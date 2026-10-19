@@ -20,6 +20,7 @@ import { useMonthParam } from "@/lib/period-hooks";
 import { amountInput, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
 import { parseMonthKey, yearRange } from "../../../shared/period";
 import { todayISO } from "../../../shared/dates";
+import { useToday } from "@/lib/today";
 import { toMinor } from "../../../shared/money";
 
 export default function AccountDetail() {
@@ -32,7 +33,8 @@ export default function AccountDetail() {
   const view = useView();
   const { resolveId } = useStore();
   const realId = resolveId(id ?? "");
-  const data = useMemo(() => accountGet(view, realId, gran, r.from, r.to), [view, realId, gran, r.from, r.to]);
+  const today = useToday();
+  const data = useMemo(() => accountGet(view, realId, gran, r.from, r.to, today), [view, realId, gran, r.from, r.to, today]);
   const payCard = useOp("accounts.payCard");
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
   if (!data) return <><PageHeader back="/accounts" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Account not found</div></>;

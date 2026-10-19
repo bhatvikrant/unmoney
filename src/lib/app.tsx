@@ -6,6 +6,7 @@ import { dueRepeats } from "../../shared/ops";
 import { todayISO } from "../../shared/dates";
 import { accountsList, categoriesList, currenciesList, groupsList, ledgerOf, type AccountRow, type AccountGroupRow } from "../../shared/views";
 import { useStore, useView } from "./store";
+import { useToday } from "@/lib/today";
 import { applyTheme } from "./theme";
 
 export type Settings = Doc<"settings">;
@@ -35,7 +36,9 @@ const Ctx = createContext<AppData | null>(null);
 
 export function AppDataProvider({ settings, user, children }: { settings: Settings; user: AppData["user"]; children: ReactNode }) {
   const view = useView();
-  const acc = useMemo(() => accountsList(view), [view]);
+  // balances count entries up to today, so they move on at midnight as well as on every change
+  const today = useToday();
+  const acc = useMemo(() => accountsList(view, today), [view, today]);
   const groups = useMemo(() => groupsList(view, true), [view]);
   const categories = useMemo(() => categoriesList(view, true), [view]);
   const currencies = useMemo(() => currenciesList(view), [view]);
