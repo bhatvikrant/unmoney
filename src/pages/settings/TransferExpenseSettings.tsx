@@ -21,7 +21,7 @@ export default function TransferExpenseSettings() {
                 const patch = (p: Partial<{ includeInTotals: boolean; transferAsExpense: boolean }>) => update({
                   id: a._id, name: a.name, kind: a.kind, groupId: a.groupId, initialBalance: a.initialBalance, includeInTotals: a.includeInTotals, hidden: a.hidden,
                   transferAsExpense: a.transferAsExpense, description: a.description, billingAccountId: a.billingAccountId, settlementDay: a.settlementDay,
-                  paymentDay: a.paymentDay, linkedAccountId: a.linkedAccountId, ...p,
+                  paymentDay: a.paymentDay, linkedAccountId: a.linkedAccountId, bankName: a.bankName, last4: a.last4, color: a.color, ...p,
                 });
                 return (
                   <div key={a._id} className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 items-center px-4 py-2 border-b last:border-b-0 text-sm">
