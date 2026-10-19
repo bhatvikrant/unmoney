@@ -18,6 +18,8 @@ type AppData = {
   user: { name?: string; email?: string; image?: string } | null;
   accounts: AccountRow[];
   accountGroups: AccountGroupRow[];
+  /** Methods the user archived: not in accountGroups or pickers, but their entries and balances still count. */
+  archivedAccounts: AccountRow[];
   accountsSummary: { assets: number; liabilities: number; total: number };
   loading: boolean;
   groups: Doc<"accountGroups">[];
@@ -64,6 +66,7 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
       user,
       accounts: acc.accounts,
       accountGroups: acc.groups,
+      archivedAccounts: acc.archived,
       accountsSummary: { assets: acc.assets, liabilities: acc.liabilities, total: acc.total },
       loading: false,
       groups,

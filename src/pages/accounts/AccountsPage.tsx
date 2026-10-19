@@ -1,6 +1,7 @@
 import { useState } from "react";
+import type { AccountRow } from "@/lib/app";
 import { useNavigate } from "react-router";
-import { CheckSquare, ChevronDown, FolderInput, Pencil, Plus, X } from "lucide-react";
+import { Archive, ArchiveRestore, CheckSquare, ChevronDown, FolderInput, Pencil, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
@@ -19,8 +20,10 @@ import { DeletePaymentMethodDialog } from "./DeletePaymentMethodDialog";
 
 export default function AccountsPage() {
   const nav = useNavigate();
-  const { accountGroups, accountsSummary, accounts, loading } = useApp();
+  const { accountGroups, archivedAccounts, accountsSummary, accounts, loading } = useApp();
   const move = useOp("accounts.move");
+  const setArchived = useOp("accounts.setArchived");
+  const [showArchived, setShowArchived] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -32,11 +35,56 @@ export default function AccountsPage() {
   const pick = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const exit = () => { setSelecting(false); setSelected(new Set()); };
   const startSelecting = () => { setSwiped(null); setSelecting(true); };
-  const shown = accountGroups.flatMap((g) => g.accounts.filter((a) => !a.hidden));
+  // What can be ticked: the methods on screen, archived ones included while that section is open.
+  const shown = [...accountGroups.flatMap((g) => g.accounts.filter((a) => !a.hidden)), ...(showArchived ? archivedAccounts : [])];
   const chosen = shown.filter((a) => selected.has(a._id));
   // Tick the group in the sheet only when every chosen method is already in it.
   const where = new Set(chosen.map((a) => a.groupId ?? null));
   const current = where.size === 1 ? [...where][0] : undefined;
+
+  /** One method's row; `dim` for archived ones. */
+  const renderRow = (a: AccountRow, dim = false) => {
+    const row = cn("w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-accent/40 text-left", selected.has(a._id) && "bg-primary/10", dim && "text-muted-foreground [&_.tabular]:opacity-70");
+    const body = (
+      <>
+        {a.kind === "card" || a.kind === "debitCard" ? <CardThumb color={cardColorOf(a)} /> : null}
+        <span className="flex-1 min-w-0">
+          <span className="block truncate">{a.name}</span>
+          {a.bankName || a.last4 ? <span className="block truncate text-xs text-muted-foreground">{[a.bankName, a.last4 && `•• ${a.last4}`].filter(Boolean).join(" · ")}</span> : null}
+        </span>
+        {a.kind === "card" ? (
+          <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><Money amount={a.payable ?? 0} kind="expense" /><div className="text-[10px] text-muted-foreground"><Money amount={a.balance} muted /></div></span><span><Money amount={a.outstanding ?? 0} kind="expense" />{a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={-a.upcoming} sign muted /> upcoming</div> : null}</span></span>
+        ) : a.linked ? (
+          <span className="text-right"><Money amount={-(a.monthlyUsage ?? 0)} className="text-muted-foreground" /><div className="text-[10px] text-muted-foreground">this month</div></span>
+        ) : (
+          <span className="text-right">
+            <Money amount={a.balance} kind={!a.includeInTotals ? "plain" : a.balance < 0 ? "expense" : "income"} />
+            {/* future-dated entries are not in the balance yet */}
+            {a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={a.upcoming} sign muted /> upcoming</div> : null}
+          </span>
+        )}
+      </>
+    );
+    return (
+      <SwipeToDelete key={a._id} className="border-b last:border-b-0" disabled={selecting}
+        open={swiped === a._id} onOpenChange={(o) => setSwiped(o ? a._id : null)} onDelete={() => setDeleting(a)}>
+        {selecting ? (
+          <label className={cn(row, "cursor-pointer")}><Checkbox checked={selected.has(a._id)} onCheckedChange={() => pick(a._id)} aria-label={`Select ${a.name}`} />{body}</label>
+        ) : (
+          <button type="button" onClick={() => nav(`/payment-methods/${a._id}`)} className={row}>{body}</button>
+        )}
+      </SwipeToDelete>
+    );
+  };
+
+  // Archive the ticked methods, or bring them back when every one of them is archived already.
+  const unarchiving = chosen.length > 0 && chosen.every((a) => a.archivedAt);
+  async function archiveChosen() {
+    try {
+      await setArchived({ ids: chosen.map((a) => a._id), archived: !unarchiving });
+      exit();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not change them"); }
+  }
 
   async function moveTo(groupId: Id<"accountGroups"> | undefined) {
     try {
@@ -77,51 +125,38 @@ export default function AccountsPage() {
               </button>
               {open ? (
                 <div className="bg-card border-y">
-                  {visible.map((a) => {
-                    const row = cn("w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-accent/40 text-left", selected.has(a._id) && "bg-primary/10");
-                    const body = (
-                      <>
-                        {a.kind === "card" || a.kind === "debitCard" ? <CardThumb color={cardColorOf(a)} /> : null}
-                        <span className="flex-1 min-w-0">
-                          <span className="block truncate">{a.name}</span>
-                          {a.bankName || a.last4 ? <span className="block truncate text-xs text-muted-foreground">{[a.bankName, a.last4 && `•• ${a.last4}`].filter(Boolean).join(" · ")}</span> : null}
-                        </span>
-                        {a.kind === "card" ? (
-                          <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><Money amount={a.payable ?? 0} kind="expense" /><div className="text-[10px] text-muted-foreground"><Money amount={a.balance} muted /></div></span><span><Money amount={a.outstanding ?? 0} kind="expense" />{a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={-a.upcoming} sign muted /> upcoming</div> : null}</span></span>
-                        ) : a.linked ? (
-                          <span className="text-right"><Money amount={-(a.monthlyUsage ?? 0)} className="text-muted-foreground" /><div className="text-[10px] text-muted-foreground">this month</div></span>
-                        ) : (
-                          <span className="text-right">
-                            <Money amount={a.balance} kind={!a.includeInTotals ? "plain" : a.balance < 0 ? "expense" : "income"} />
-                            {/* future-dated entries are not in the balance yet */}
-                            {a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={a.upcoming} sign muted /> upcoming</div> : null}
-                          </span>
-                        )}
-                      </>
-                    );
-                    return (
-                      <SwipeToDelete key={a._id} className="border-b last:border-b-0" disabled={selecting}
-                        open={swiped === a._id} onOpenChange={(o) => setSwiped(o ? a._id : null)} onDelete={() => setDeleting(a)}>
-                        {selecting ? (
-                          <label className={cn(row, "cursor-pointer")}><Checkbox checked={selected.has(a._id)} onCheckedChange={() => pick(a._id)} aria-label={`Select ${a.name}`} />{body}</label>
-                        ) : (
-                          <button type="button" onClick={() => nav(`/payment-methods/${a._id}`)} className={row}>{body}</button>
-                        )}
-                      </SwipeToDelete>
-                    );
-                  })}
+                  {visible.map((a) => renderRow(a))}
                 </div>
               ) : null}
             </div>
           );
         })}
+        {archivedAccounts.length ? (
+          <div className="mt-6">
+            <button type="button" onClick={() => setShowArchived(!showArchived)} aria-expanded={showArchived} className="w-full flex items-center px-4 py-1.5 text-sm text-muted-foreground">
+              <ChevronDown className={cn("size-4 mr-1 transition-transform", !showArchived && "-rotate-90")} />
+              <Archive className="size-3.5 mr-1.5" />
+              <span className="flex-1 text-left">Archived</span>
+              <span className="text-xs tabular">{archivedAccounts.length}</span>
+            </button>
+            {showArchived ? (
+              <>
+                <div className="bg-card border-y">{archivedAccounts.map((a) => renderRow(a, true))}</div>
+                <p className="px-4 py-2 text-xs text-muted-foreground">Not offered when adding entries. Their entries and balances are kept and still count. Open one to unarchive it.</p>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </Page>
       {selecting ? (
         <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
           <div className="mx-auto max-w-3xl flex items-center gap-2 p-3 text-sm">
             <Button variant="outline" size="sm" onClick={() => setSelected(chosen.length === shown.length ? new Set() : new Set(shown.map((a) => a._id)))}>{chosen.length === shown.length && shown.length ? "Clear" : "Select all"}</Button>
-            <span className="text-muted-foreground">{chosen.length} selected</span>
+            <span className="text-muted-foreground">{chosen.length}<span className="hidden sm:inline"> selected</span></span>
             <span className="flex-1" />
+            <Button variant="outline" size="sm" disabled={!chosen.length} onClick={() => void archiveChosen()} aria-label={unarchiving ? "Unarchive" : "Archive"}>
+              {unarchiving ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}<span className="hidden sm:inline">{unarchiving ? "Unarchive" : "Archive"}</span>
+            </Button>
             <Button size="sm" disabled={!chosen.length} onClick={() => setMoving(true)}><FolderInput className="size-4" />Move to…</Button>
             <Button variant="ghost" size="icon" aria-label="Exit selection" onClick={exit}><X className="size-4" /></Button>
           </div>
