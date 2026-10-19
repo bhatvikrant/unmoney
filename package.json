@@ -11,6 +11,7 @@
     "icons": "pwa-assets-generator"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@auth/core": "^0.41.3",
     "@convex-dev/auth": "^0.0.96",
     "@fontsource-variable/geist": "^5.3.0",
