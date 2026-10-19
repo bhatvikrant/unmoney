@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "axis",
+    "type": "debit",
+    "amount": 650,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "22:10",
+    "last4": "3344",
+    "bankName": "Axis",
+    "channel": "card",
+    "merchantRaw": "UBER INDIA SYSTEMS"
+  }
+}

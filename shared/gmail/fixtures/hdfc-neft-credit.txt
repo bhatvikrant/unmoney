@@ -1,0 +1,9 @@
+From: HDFC Bank InstaAlerts <alerts@hdfcbank.net>
+Subject: Alert: Credit to your account
+Received: 2026-10-01T04:40:00Z
+
+Dear Customer,
+
+Rs. 85000.00 is credited to your a/c XX1234 on 01-10-26 by ACME TECH PVT LTD (NEFT Ref ACMEN2026100112345).
+
+Available balance: Rs. 1,27,310.50.

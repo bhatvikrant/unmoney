@@ -1,0 +1,11 @@
+From: Axis Bank <alerts@axisbank.com>
+Subject: Transaction alert on Axis Bank Credit Card
+Received: 2026-10-18T16:41:00Z
+
+Dear Customer,
+
+Thank you for using your Axis Bank Credit Card no. XX3344 for INR 650.00 at UBER INDIA SYSTEMS on 18-10-2026 22:10:05 IST.
+
+Available limit: INR 1,24,350.00.
+
+Not you? Call 18604195555 to block your card.

@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "icici",
+    "type": "credit",
+    "amount": 25000,
+    "currency": "INR",
+    "date": "2026-10-05",
+    "dateSource": "mail",
+    "last4": "5566",
+    "bankName": "ICICI",
+    "channel": "netbanking",
+    "merchantRaw": "RAHUL SHARMA"
+  }
+}

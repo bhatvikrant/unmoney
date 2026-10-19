@@ -1,0 +1,13 @@
+From: Google Pay <payments-noreply@google.com>
+Subject: You paid ₹450.00 to Swiggy
+Received: 2026-10-18T07:42:00Z
+
+Payment successful
+
+You paid ₹450.00 to Swiggy
+swiggy.upi@axisbank
+
+18 Oct 2026, 1:12 PM
+UPI transaction ID 529412345686
+Paid from HDFC Bank ••1234
+Google transaction ID CICAgKDaq9mXYw

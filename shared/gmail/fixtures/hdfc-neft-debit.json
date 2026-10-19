@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hdfc",
+    "type": "debit",
+    "amount": 15000,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "last4": "1234",
+    "bankName": "HDFC",
+    "channel": "netbanking",
+    "merchantRaw": "Vikram Enterprises"
+  }
+}

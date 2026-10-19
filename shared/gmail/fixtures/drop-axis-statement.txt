@@ -1,0 +1,7 @@
+From: Axis Bank <alerts@axisbank.com>
+Subject: Your Axis Bank Credit Card e-statement for October 2026 is ready
+Received: 2026-10-20T03:00:00Z
+
+Dear Customer,
+
+Your statement for card XX3344 is ready. Total amount due: INR 12,340.00. Payment due date 05-11-2026.

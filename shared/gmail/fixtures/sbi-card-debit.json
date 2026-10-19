@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "sbi",
+    "type": "debit",
+    "amount": 3450,
+    "currency": "INR",
+    "date": "2026-10-18",
+    "dateSource": "mail",
+    "time": "19:05",
+    "last4": "8899",
+    "bankName": "SBI",
+    "channel": "card",
+    "merchantRaw": "BIG BAZAAR BENGALURU"
+  }
+}

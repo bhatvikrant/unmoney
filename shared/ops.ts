@@ -19,13 +19,13 @@ import { normName, normNote } from "./categoryLint";
 import { describeOp, HISTORY_COALESCE_MS, HISTORY_KINDS, HISTORY_MAX, type HistoryLine } from "./history";
 
 export const TABLES = [
-  "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies", "categoryCleanups", "history",
+  "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies", "categoryCleanups", "history", "drafts",
 ] as const;
 export type Table = (typeof TABLES)[number];
 export type Snapshot = { [T in Table]: Doc<T>[] };
 
 export function emptySnapshot(): Snapshot {
-  return { settings: [], accountGroups: [], accounts: [], categories: [], transactions: [], repeats: [], bookmarks: [], budgets: [], notes: [], currencies: [], categoryCleanups: [], history: [] };
+  return { settings: [], accountGroups: [], accounts: [], categories: [], transactions: [], repeats: [], bookmarks: [], budgets: [], notes: [], currencies: [], categoryCleanups: [], history: [], drafts: [] };
 }
 
 export type Op = { id: string; kind: OpKind; args: unknown; at: number };
@@ -67,6 +67,8 @@ export function clean<T extends object>(o: T): T {
 
 export type TxType = "income" | "expense" | "transfer";
 export type Template = Doc<"bookmarks">["template"];
+/** Where an entry was read from; only Gmail so far. Set by the drafts ops, never by the entry form. */
+export type TxSource = NonNullable<Doc<"transactions">["source"]>;
 export type TxFields = {
   type: TxType;
   date: string;
@@ -210,6 +212,13 @@ export interface Ops {
   /** Entries from a backup, with ids already pointing at the restored accounts, categories and schedules (restoreRows). */
   "transactions.restoreRows": { args: { rows: Record<string, unknown>[]; bookmarks?: Record<string, string> }; result: number };
 
+  /** Save a draft read from mail as a real entry (with `source` pointing at the mail); the draft becomes accepted. */
+  "drafts.accept": { args: TxFields & { id: Id<"drafts"> }; result: Id<"transactions"> };
+  /** "Not an entry": the drafts are dismissed. Ones gone or already handled are left out. */
+  "drafts.dismiss": { args: { ids: Id<"drafts">[] }; result: void };
+  /** "Yes, that's the one I typed in": the existing entry gets the draft's `source`, the draft becomes accepted. */
+  "drafts.link": { args: { id: Id<"drafts">; transactionId: Id<"transactions"> }; result: void };
+
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
   "repeats.remove": { args: { id: Id<"repeats"> }; result: void };
   "repeats.catchUp": { args: { today: string }; result: number };
@@ -305,6 +314,9 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.copy": ["transactions"],
   "transactions.rescale": ["transactions"],
   "transactions.restoreRows": ["accounts", "categories", "repeats", "transactions", "bookmarks"],
+  "drafts.accept": ["drafts", "transactions", "accounts", "categories"],
+  "drafts.dismiss": ["drafts"],
+  "drafts.link": ["drafts", "transactions"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions", "accounts", "categories"],
@@ -363,6 +375,7 @@ export function txScope(op: Op): TxScope {
     case "transactions.bulkRemove": return { ids: a.ids as string[] };
     case "transactions.copy": return { ids: [id] };
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
+    case "drafts.link": return { ids: [a.transactionId as string] };
     case "repeats.remove": return { repeatIds: [id] };
     case "accounts.permanentlyDelete": return { accountIds: [id] };
     // a merge moves every entry from or to the methods being merged
@@ -1593,9 +1606,31 @@ const handlers: Handlers = {
 
   "transactions.copy": (w, { id, useToday, today }) => {
     const t = w.must("transactions", id);
-    const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, ...rest } = t;
-    void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal;
+    const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, source, ...rest } = t;
+    void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal; void source;
     return w.insert("transactions", { ...rest, date: useToday ? (today && isDate(today) ? today : todayISO()) : t.date });
+  },
+
+  "drafts.accept": (w, { id, ...input }) => {
+    const draft = w.must("drafts", id, "That draft is gone");
+    if (draft.status !== "open") throw new Error("That draft was already handled");
+    const t = validateTx(w, input);
+    const transactionId = w.insert("transactions", { ...t, source: { app: "gmail", messageId: draft.messageId } });
+    w.patch("drafts", id, { status: "accepted", transactionId, matchedTransactionId: undefined, resolvedAt: w.at });
+    return transactionId;
+  },
+  "drafts.dismiss": (w, { ids }) => {
+    for (const id of ids) {
+      const draft = w.get("drafts", id);
+      if (draft?.status === "open") w.patch("drafts", id, { status: "dismissed", resolvedAt: w.at });
+    }
+  },
+  "drafts.link": (w, { id, transactionId }) => {
+    const draft = w.must("drafts", id, "That draft is gone");
+    if (draft.status !== "open") throw new Error("That draft was already handled");
+    w.must("transactions", transactionId, "That entry is gone");
+    w.patch("transactions", transactionId, { source: { app: "gmail", messageId: draft.messageId } });
+    w.patch("drafts", id, { status: "accepted", transactionId, matchedTransactionId: undefined, resolvedAt: w.at });
   },
 
   "repeats.update": (w, { id, ...patch }) => {

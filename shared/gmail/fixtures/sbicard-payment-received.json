@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "sbi",
+    "type": "cardPayment",
+    "amount": 12340,
+    "currency": "INR",
+    "date": "2026-10-10",
+    "dateSource": "mail",
+    "last4": "8899",
+    "bankName": "SBI",
+    "channel": "card",
+    "merchantRaw": "SBI card payment"
+  }
+}

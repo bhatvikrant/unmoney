@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hdfc",
+    "type": "refund",
+    "amount": 899,
+    "currency": "INR",
+    "date": "2026-10-19",
+    "dateSource": "mail",
+    "last4": "4521",
+    "bankName": "HDFC",
+    "channel": "card",
+    "merchantRaw": "MYNTRA DESIGNS"
+  }
+}

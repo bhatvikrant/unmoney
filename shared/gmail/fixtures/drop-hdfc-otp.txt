@@ -1,0 +1,7 @@
+From: HDFC Bank <alerts@hdfcbank.net>
+Subject: OTP for your HDFC Bank Credit Card transaction
+Received: 2026-10-18T09:02:00Z
+
+Dear Customer,
+
+482913 is the OTP for a transaction of Rs 2,499.00 at AMAZON on your card ending 4521. Valid for 10 minutes. Do not share it with anyone.

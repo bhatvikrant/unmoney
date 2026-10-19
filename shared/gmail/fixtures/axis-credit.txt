@@ -1,0 +1,7 @@
+From: Axis Bank <alerts@axisbank.com>
+Subject: Credit alert on Axis Bank A/c
+Received: 2026-10-17T12:00:00Z
+
+Dear Customer,
+
+Your A/c no. XX9900 is credited with INR 1,200.00 on 17-10-26 by UPI/P2A/529312345681/PRIYA MENON. Avl bal INR 9,440.00.

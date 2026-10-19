@@ -1,0 +1,9 @@
+From: ICICI Bank <alert@icicibank.com>
+Subject: Credit alert for your ICICI Bank Account
+Received: 2026-10-05T10:02:00Z
+
+Dear Customer,
+
+Your Account XX5566 has been credited with INR 25,000.00 on 05-Oct-26. Info: IMPS/P2A/528012345678/RAHUL SHARMA.
+
+Available balance is INR 43,240.75.

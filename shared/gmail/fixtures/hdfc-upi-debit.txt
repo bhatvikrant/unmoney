@@ -1,0 +1,14 @@
+From: HDFC Bank InstaAlerts <alerts@hdfcbank.net>
+Subject: You have done a UPI txn. Check details!
+Received: 2026-10-18T05:11:00Z
+
+Dear Customer,
+
+Rs.1250.00 has been debited from account **1234 to VPA swiggy.upi@axisbank SWIGGY on 18-10-26.
+
+Your UPI transaction reference number is 529412345678.
+
+If you did not authorize this transaction, please report it immediately by calling 18002586161.
+
+Warm Regards,
+HDFC Bank

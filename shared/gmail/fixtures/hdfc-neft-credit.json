@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hdfc",
+    "type": "credit",
+    "amount": 85000,
+    "currency": "INR",
+    "date": "2026-10-01",
+    "dateSource": "mail",
+    "last4": "1234",
+    "bankName": "HDFC",
+    "channel": "netbanking",
+    "merchantRaw": "ACME TECH PVT LTD"
+  }
+}

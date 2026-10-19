@@ -25,6 +25,11 @@ test("deleting an account removes every document, file and sign-in of that user,
       await ctx.db.insert("authAccounts", { userId, provider: "google", providerAccountId: email });
       for (let i = 0; i < entries; i++) await ctx.db.insert("transactions", { userId, type: "expense", date: "2026-01-01", accountId: account._id, amount: 1, note: "", tags: [], photoIds: i === 0 ? [photo] : [] });
       await ctx.db.insert("notes", { userId, date: "2026-01-01", text: "x", color: "#000" });
+      await ctx.db.insert("gmailConnections", { userId, email, refreshTokenEnc: "x", iv: "y", status: "ok", lookbackDays: 30, senders: [], scanPurchases: false, accountMap: {}, aiMonth: "2026-10", aiCalls: 0, log: [] });
+      await ctx.db.insert("drafts", {
+        userId, source: "gmail", messageId: "m", extraMessageIds: [], threadId: "t", receivedAt: 1, from: "a@b", subject: "s",
+        proposal: { type: "expense", date: "2026-01-01", amount: 1, note: "" }, confidence: "high", how: "rule", status: "open",
+      });
     });
     return { userId, as, photo };
   };
@@ -45,7 +50,7 @@ test("deleting an account removes every document, file and sign-in of that user,
   const left = await t.run(async (ctx) => {
     const count = async (userId: Id<"users">) => {
       const n: Record<string, number> = {};
-      for (const table of ["transactions", "notes", "accounts", "categories", "settings", "fileOwners", "syncOps", "authSessions"] as const) {
+      for (const table of ["transactions", "notes", "accounts", "categories", "settings", "fileOwners", "syncOps", "authSessions", "gmailConnections", "drafts"] as const) {
         const rows = (await ctx.db.query(table).collect()) as { userId?: Id<"users"> }[];
         n[table] = rows.filter((r) => r.userId === userId).length;
       }
