@@ -5,8 +5,9 @@
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { Snapshot } from "./ops";
 import {
-  buildCtx, cardStatus, computeBalances, debitMonthlyUsage, holderOf, kindsOf, nextPaymentDate, type Ctx as LedgerCtx,
+  buildCtx, cardStatus, computeBalances, debitMonthlyUsage, drawsFromLinked, holderOf, kindsOf, nextPaymentDate, resolveKind, type Ctx as LedgerCtx,
 } from "./ledger";
+import type { AccountKind } from "./defaults";
 import { addDays, addMonths, daysInMonth, make, parts, todayISO } from "./dates";
 import { elapsedFraction, periodRange, type Range } from "./period";
 
@@ -58,8 +59,10 @@ export function notesRange(snap: Snapshot, from: string, to: string): Doc<"notes
 
 // ---------- accounts ----------
 
-export type AccountRow = Doc<"accounts"> & {
-  kind: string | undefined;
+export type AccountRow = Omit<Doc<"accounts">, "kind"> & {
+  kind: AccountKind;
+  /** Spending comes out of the linked account (debit cards, linked UPIs): the row shows usage, not a balance. */
+  linked: boolean;
   balance: number;
   payable?: number;
   outstanding?: number;
@@ -68,7 +71,10 @@ export type AccountRow = Doc<"accounts"> & {
   /** Net of the entries dated after today: what the balance will move by, not counted in it yet. */
   upcoming: number;
 };
-export type AccountGroupRow = { group: Doc<"accountGroups">; accounts: AccountRow[]; total: number; payable: number; outstanding: number };
+/** A section of the payment methods list: a group, or (group null, id "none") the methods outside any group. */
+export type AccountGroupRow = { id: string; name: string; group: Doc<"accountGroups"> | null; accounts: AccountRow[]; total: number; payable: number; outstanding: number };
+export const NO_GROUP = "none";
+export const NO_GROUP_NAME = "No group";
 export type AccountsList = { groups: AccountGroupRow[]; accounts: AccountRow[]; assets: number; liabilities: number; total: number };
 
 export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
@@ -77,13 +83,17 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
   const balances = computeBalances(txs, ledger, today);
   const upcoming = computeBalances(txs, ledger, undefined, today);
   const live = snap.accounts.filter((a) => !a.deletedAt).sort((a, b) => a.order - b.order);
+  const liveGroups = groupsList(snap);
   const rows: AccountRow[] = live.map((a) => {
-    const kind = ledger.groups.get(a.groupId)?.kind;
+    const kind = ledger.accounts.get(a._id)!.kind as AccountKind;
+    const linked = drawsFromLinked({ kind, linkedAccountId: a.linkedAccountId });
     const balance = balances.get(a._id) ?? 0;
     const card = kind === "card" ? cardStatus(a, balance, txs, today) : undefined;
-    const monthlyUsage = kind === "debitCard" ? debitMonthlyUsage(a._id, txs, today) : undefined;
+    const monthlyUsage = linked ? debitMonthlyUsage(a._id, txs, today) : undefined;
+    // A method in a group that was deleted shows with the ungrouped ones.
+    const groupId = a.groupId && liveGroups.some((g) => g._id === a.groupId) ? a.groupId : undefined;
     return {
-      ...a, kind, balance, upcoming: upcoming.get(a._id) ?? 0, payable: card?.payable, outstanding: card?.outstanding,
+      ...a, groupId, kind, linked, balance, upcoming: upcoming.get(a._id) ?? 0, payable: card?.payable, outstanding: card?.outstanding,
       nextPayment: kind === "card" && a.paymentDay ? nextPaymentDate(a.paymentDay, today) : undefined, monthlyUsage,
     };
   });
@@ -91,19 +101,20 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
   let liabilities = 0;
   for (const r of rows) {
     if (!r.includeInTotals) continue;
-    if (r.kind === "debitCard") continue;
+    if (r.linked) continue;
     if (r.balance >= 0) assets += r.balance;
     else liabilities += -r.balance;
   }
-  const groups = groupsList(snap)
-    .map((g) => {
-      const items = rows.filter((r) => r.groupId === g._id);
-      const total = items.filter((r) => r.includeInTotals).reduce((s, r) => s + r.balance, 0);
-      const payable = items.reduce((s, r) => s + (r.payable ?? 0), 0);
-      const outstanding = items.reduce((s, r) => s + (r.outstanding ?? 0), 0);
-      return { group: g, accounts: items, total, payable, outstanding };
-    })
-    .filter((g) => g.accounts.length > 0);
+  const section = (id: string, name: string, group: Doc<"accountGroups"> | null, items: AccountRow[]): AccountGroupRow => ({
+    id, name, group, accounts: items,
+    total: items.filter((r) => r.includeInTotals && !r.linked).reduce((s, r) => s + r.balance, 0),
+    payable: items.reduce((s, r) => s + (r.payable ?? 0), 0),
+    outstanding: items.reduce((s, r) => s + (r.outstanding ?? 0), 0),
+  });
+  const groups = [
+    ...liveGroups.map((g) => section(g._id, g.name, g, rows.filter((r) => r.groupId === g._id))),
+    section(NO_GROUP, NO_GROUP_NAME, null, rows.filter((r) => !r.groupId)),
+  ].filter((g) => g.accounts.length > 0);
   return { groups, accounts: rows, assets, liabilities, total: assets - liabilities };
 }
 
@@ -121,7 +132,7 @@ export function accountGet(snap: Snapshot, id: string, granularity: "daily" | "m
   const all = snap.transactions;
   const balance = computeBalances(all, ledger, today).get(id) ?? 0;
   const upcoming = computeBalances(all, ledger, undefined, today).get(id) ?? 0;
-  const kind = snap.accountGroups.find((g) => g._id === account.groupId)?.kind;
+  const kind = resolveKind(account, snap.accountGroups);
 
   const deltas = new Map<string, number>();
   const bump = (d: string, n: number) => deltas.set(d, (deltas.get(d) ?? 0) + n);

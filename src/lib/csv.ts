@@ -111,24 +111,14 @@ export function dropTransferIns<T extends { type: string }>(rows: T[]): { rows: 
   return { rows: kept, dropped: rows.length - kept.length };
 }
 
-export const ACCOUNT_KINDS: { kind: NewImportAccount["groupKind"]; label: string }[] = [
-  { kind: "bank", label: "Bank account" },
-  { kind: "card", label: "Credit card" },
-  { kind: "debitCard", label: "Debit card" },
-  { kind: "cash", label: "Cash" },
-  { kind: "prepaid", label: "Wallet / prepaid" },
-  { kind: "savings", label: "Savings" },
-  { kind: "investment", label: "Investments" },
-  { kind: "other", label: "Other" },
-];
-
-/** Best guess at an account's group from its name, so the user mostly just confirms. */
-export function guessGroupKind(name: string): NewImportAccount["groupKind"] {
+/** Best guess at a payment method's type from its name, so the user mostly just confirms. */
+export function guessKind(name: string): NewImportAccount["kind"] {
   const n = name.toLowerCase();
   if (/debit/.test(n)) return "debitCard";
   if (/\bcc\b|credit|\bcard\b/.test(n)) return "card";
   if (/\bcash\b/.test(n)) return "cash";
-  if (/upi|wallet|\bpay\b|paytm|pluxee|sodexo|balance|prepaid/.test(n)) return "prepaid";
+  if (/upi|gpay|google pay|phonepe|bhim/.test(n)) return "upi";
+  if (/wallet|\bpay\b|paytm|pluxee|sodexo|balance|prepaid/.test(n)) return "prepaid";
   if (/saving/.test(n)) return "savings";
   return "bank";
 }

@@ -2,6 +2,8 @@
 import type { Snapshot } from "./ops";
 import { byDateDesc, settingsOf } from "./views";
 import { toMajor } from "./money";
+import { kindLabel } from "./defaults";
+import { resolveKind } from "./ledger";
 
 export type Cell = string | number | boolean | Date | null;
 export type SheetRows = Cell[][];
@@ -61,7 +63,7 @@ export function completeSheets(snap: Snapshot): { sheet: string; data: SheetRows
   const name = (m: Map<string, string>, id?: string) => (id ? m.get(id) ?? null : null);
   const typeLabel = (t: string) => (t === "income" ? "Income" : t === "expense" ? "Expense" : "Transfer");
 
-  const transactions: SheetRows = [["Date", "Time", "Type", "Account", "Category / To account", "Subcategory", "Note", "Description", "Amount", "Sub amount", "Sub currency", "Exchange rate", "Fee", "Tags", "Repeat", "Installment", "Installment total", "Bookmarked"]];
+  const transactions: SheetRows = [["Date", "Time", "Type", "Payment method", "Category / To payment method", "Subcategory", "Note", "Description", "Amount", "Sub amount", "Sub currency", "Exchange rate", "Fee", "Tags", "Repeat", "Installment", "Installment total", "Bookmarked"]];
   const bookmarked = new Set(snap.bookmarks.map((b) => b.transactionId).filter(Boolean));
   for (const t of [...snap.transactions].sort(byDateDesc)) {
     const r = t.repeatId ? repeatOf.get(t.repeatId) : undefined;
@@ -75,10 +77,10 @@ export function completeSheets(snap: Snapshot): { sheet: string; data: SheetRows
     ]);
   }
 
-  const accounts: SheetRows = [["Account", "Group", "Group type", "Opening balance", "Include in totals", "Hidden", "Transfer as expense", "Billing account", "Settlement day", "Payment day", "Linked account", "Description", "Deleted"]];
+  const accounts: SheetRows = [["Payment method", "Group", "Type", "Opening balance", "Include in totals", "Hidden", "Transfer as expense", "Billing account", "Settlement day", "Payment day", "Linked account", "Description", "Deleted"]];
   for (const a of snap.accounts) {
-    const g = grp.get(a.groupId);
-    accounts.push([a.name, g?.name ?? null, g?.kind ?? null, major(a.initialBalance), a.includeInTotals, a.hidden, a.transferAsExpense, name(acc, a.billingAccountId), a.settlementDay ?? null, a.paymentDay ?? null, name(acc, a.linkedAccountId), a.description ?? null, !!a.deletedAt]);
+    const g = a.groupId ? grp.get(a.groupId) : undefined;
+    accounts.push([a.name, g && !g.deletedAt ? g.name : null, kindLabel(resolveKind(a, snap.accountGroups)), major(a.initialBalance), a.includeInTotals, a.hidden, a.transferAsExpense, name(acc, a.billingAccountId), a.settlementDay ?? null, a.paymentDay ?? null, name(acc, a.linkedAccountId), a.description ?? null, !!a.deletedAt]);
   }
 
   const categories: SheetRows = [["Type", "Category", "Parent category", "Deleted"]];
@@ -89,7 +91,7 @@ export function completeSheets(snap: Snapshot): { sheet: string; data: SheetRows
     budgets.push([b.categoryId ? name(cat, b.categoryId) : "Total", b.period, major(b.amount), Object.entries(b.overrides).map(([k, v]) => `${k}=${toMajor(v, decimals)}`).join("; ") || null]);
   }
 
-  const repeats: SheetRows = [["Kind", "Frequency", "Start", "End", "Next", "Installments", "Active", "Type", "Account", "Category / To account", "Subcategory", "Note", "Amount"]];
+  const repeats: SheetRows = [["Kind", "Frequency", "Start", "End", "Next", "Installments", "Active", "Type", "Payment method", "Category / To payment method", "Subcategory", "Note", "Amount"]];
   for (const r of snap.repeats) {
     const t = r.template;
     repeats.push([r.kind, r.frequency, when(r.startDate), r.endDate ? when(r.endDate) : null, when(r.nextDate), r.installmentCount ?? null, r.active, typeLabel(t.type), name(acc, t.accountId), t.type === "transfer" ? name(acc, t.toAccountId) : name(cat, t.categoryId), name(cat, t.subcategoryId), t.note || null, major(t.amount)]);
@@ -102,7 +104,7 @@ export function completeSheets(snap: Snapshot): { sheet: string; data: SheetRows
   for (const c of snap.currencies) currencies.push([c.code, c.name, c.symbol, c.rate, c.decimals, c.isCustom]);
 
   return [
-    { sheet: "Transactions", data: transactions }, { sheet: "Accounts", data: accounts }, { sheet: "Categories", data: categories },
+    { sheet: "Transactions", data: transactions }, { sheet: "Payment methods", data: accounts }, { sheet: "Categories", data: categories },
     { sheet: "Budgets", data: budgets }, { sheet: "Repeats", data: repeats }, { sheet: "Notes", data: notes }, { sheet: "Currencies", data: currencies },
   ];
 }
