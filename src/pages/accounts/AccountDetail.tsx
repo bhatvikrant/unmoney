@@ -48,7 +48,7 @@ export default function AccountDetail() {
     <>
       <PageHeader back="/payment-methods" title={a.name} right={<><Button variant="ghost" size="icon" aria-label="Edit" onClick={() => nav(`/payment-methods/${a._id}/edit`)}><Pencil className="size-4" /></Button>
         <Select value={gran} onValueChange={(v) => setGran(v as typeof gran)}><SelectTrigger className="h-8 w-16"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">D</SelectItem><SelectItem value="monthly">M</SelectItem><SelectItem value="yearly">Y</SelectItem></SelectContent></Select></>}
-        sub={<div className="mx-auto max-w-3xl"><MonthNav label={gran === "yearly" ? String(parseMonthKey(month).y) : monthLabel(month)} onPrev={() => shift(gran === "yearly" ? -12 : -1)} onNext={() => shift(gran === "yearly" ? 12 : 1)} month={month} onPick={setMonth} withData={monthsWithData} /></div>} />
+        sub={<div className="mx-auto max-w-3xl"><MonthNav label={gran === "yearly" ? String(parseMonthKey(month).y) : monthLabel(month)} onPrev={() => shift(gran === "yearly" ? -12 : -1)} onNext={() => shift(gran === "yearly" ? 12 : 1)} month={month} onPick={setMonth} withData={monthsWithData.months} spent={monthsWithData.spent} /></div>} />
       <Page className="pb-8">
         {a.archivedAt ? (
           <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border bg-muted/50 px-3 py-2 text-sm" role="status">
