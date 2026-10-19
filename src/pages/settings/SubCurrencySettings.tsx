@@ -100,7 +100,7 @@ export default function SubCurrencySettings() {
 
   return (
     <>
-      <PageHeader back="/settings" title="Sub currencies" right={<><Button variant="ghost" size="icon" aria-label="Refresh rates" disabled={busy || !currencies.length} onClick={refreshAll}><RefreshCw className={cn("size-4", busy && "animate-spin")} /></Button><Button variant="ghost" size="icon" aria-label="Add" onClick={() => setAdding(true)}><Plus className="size-5" /></Button></>} />
+      <PageHeader back="/settings/currency" title="Sub currencies" right={<><Button variant="ghost" size="icon" aria-label="Refresh rates" disabled={busy || !currencies.length} onClick={refreshAll}><RefreshCw className={cn("size-4", busy && "animate-spin")} /></Button><Button variant="ghost" size="icon" aria-label="Add" onClick={() => setAdding(true)}><Plus className="size-5" /></Button></>} />
       <Page className="pb-8">
         {!currencies.length ? <EmptyState title="No sub currencies" hint={`Add currencies you spend in. Rates are relative to ${s.mainCurrency} and stay up to date when you're online; past entries keep their rate.`} action={<Button onClick={() => setAdding(true)}>Add a currency</Button>} /> : null}
         <div className="bg-card border-y">

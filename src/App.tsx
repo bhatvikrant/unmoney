@@ -41,6 +41,8 @@ import ImportPage from "@/pages/settings/ImportPage";
 import AccountGroupSettings from "@/pages/settings/AccountGroupSettings";
 import DeletedAccounts from "@/pages/settings/DeletedAccounts";
 import TransferExpenseSettings from "@/pages/settings/TransferExpenseSettings";
+import PaymentMethodsSettings from "@/pages/settings/PaymentMethodsSettings";
+import PreferencesSettings from "@/pages/settings/PreferencesSettings";
 
 function Splash({ text = "Loading…" }: { text?: string }) {
   return <div className="min-h-dvh flex items-center justify-center text-sm text-muted-foreground">{text}</div>;
@@ -157,6 +159,8 @@ function Gate() {
             <Route path="account-groups" element={<Navigate to="/settings/groups" replace />} />
             <Route path="deleted-accounts" element={<Navigate to="/settings/deleted-payment-methods" replace />} />
             <Route path="transfer-expense" element={<TransferExpenseSettings />} />
+            <Route path="payment-methods" element={<PaymentMethodsSettings />} />
+            <Route path="preferences" element={<PreferencesSettings />} />
           </Route>
           <Route path="import" element={<ImportPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
