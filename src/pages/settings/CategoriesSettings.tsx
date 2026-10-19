@@ -8,6 +8,7 @@ import { CLEANUP_UNDO_MS } from "../../../shared/ops";
 import { lintCategories } from "../../../shared/categoryLint";
 import { useApp } from "@/lib/app";
 import { cn } from "@/lib/utils";
+import { HistorySection } from "@/components/HistorySection";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SegmentedTabs } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
@@ -111,6 +112,7 @@ export default function CategoriesSettings() {
         ) : null}
         <p className="px-4 py-3 text-xs text-muted-foreground">Subcategories need the Subcategories switch in Settings. Edit a subcategory and set its parent to "Main category" to promote it. Archive a category you no longer use (edit it): it stops showing when you add entries, and entries already on it keep it.</p>
         <UndoLastTidy tidy={tidy} />
+        <HistorySection scope="categories" className="mt-2" />
       </Page>
       <Dialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent>
