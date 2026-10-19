@@ -69,3 +69,13 @@ test("restored rows cannot point at accounts the user does not have", () => {
   expect(r.result).toBe(0);
   expect(r.snap.transactions.length).toBe(s.transactions.length);
 });
+
+test("changing currency rescales what repeats and bookmarks will enter", () => {
+  let s = ledger();
+  const food = s.categories.find((c) => c.name === "Food")!._id;
+  s = run(s, "transactions.create", { type: "expense", accountId: s.accounts[0]._id, categoryId: food, amount: 1599, note: "Spotify", tags: [], photoIds: [], date: "2026-01-20", repeat: { frequency: "monthly" } }).snap;
+  s = run(s, "bookmarks.create", { template: { type: "expense", accountId: s.accounts[0]._id, categoryId: food, amount: 450, note: "Coffee", tags: [] } }).snap;
+  const after = run(s, "settings.changeMainCurrency", { code: "JPY", keepData: true }).snap;
+  expect(after.repeats.find((r) => r.kind === "repeat")!.template.amount).toBe(16);
+  expect(after.bookmarks[0].template.amount).toBe(5);
+});

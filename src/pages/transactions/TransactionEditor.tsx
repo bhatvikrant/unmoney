@@ -10,6 +10,7 @@ import { amountInput, localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { todayISO } from "../../../shared/dates";
 import { evaluateExpression, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { useGoBack } from "@/lib/nav";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
 import { RepeatSheet, repeatLabel, type RepeatChoice } from "@/components/tx/RepeatSheet";
@@ -126,6 +127,7 @@ type Existing = TxDetail;
 
 function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transactions">; existing?: Existing }) {
   const nav = useNavigate();
+  const goBack = useGoBack();
   const { settings, accountName, categoryLabel, currencies, fmt, accounts } = useApp();
   const [f, setF] = useState<Form>(initial);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -179,6 +181,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
     const amountMajor = evaluateExpression(f.amount, LOCALE_DECIMAL);
     if (amountMajor === null) throw new Error("Enter an amount");
     const amount = toMinor(amountMajor, settings.decimals);
+    if (amount === 0) throw new Error("Enter an amount");
     if (!f.accountId) throw new Error("Pick an account");
     if (f.type !== "transfer" && !f.categoryId) throw new Error("Pick a category");
     if (f.type === "transfer" && !f.toAccountId) throw new Error("Pick an account to transfer to");
@@ -213,7 +216,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         if (inSeries && !scope) { setConfirm("scope"); setBusy(false); return; }
         await update({ id: id!, ...args, scope });
         toast.success("Saved");
-        nav(-1);
+        goBack();
       } else {
         await create({
           ...args,
@@ -224,7 +227,7 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
         if (mode === "continue") {
           setF((p) => ({ ...p, amount: "", subAmount: "", note: "", description: "", tags: [], photoIds: [], fee: "", feeOn: false, repeat: { kind: "none" } }));
         } else {
-          nav(-1);
+          goBack();
         }
       }
     } catch (e) {
@@ -420,8 +423,8 @@ function Editor({ initial, id, existing }: { initial: Form; id?: Id<"transaction
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            {inSeries ? <AlertDialogAction onClick={() => remove({ id: id!, scope: "future" }).then(() => nav(-1))}>This and future</AlertDialogAction> : null}
-            <AlertDialogAction onClick={() => remove({ id: id!, scope: "one" }).then(() => nav(-1))}>{inSeries ? "Only this one" : "Delete"}</AlertDialogAction>
+            {inSeries ? <AlertDialogAction onClick={() => remove({ id: id!, scope: "future" }).then(() => goBack())}>This and future</AlertDialogAction> : null}
+            <AlertDialogAction onClick={() => remove({ id: id!, scope: "one" }).then(() => goBack())}>{inSeries ? "Only this one" : "Delete"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

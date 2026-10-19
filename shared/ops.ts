@@ -208,7 +208,7 @@ const ALL: Table[] = [...TABLES];
 export const OP_TABLES: Record<OpKind, Table[]> = {
   "settings.completeOnboarding": ["settings", "accountGroups", "accounts", "categories"],
   "settings.update": ["settings"],
-  "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets"],
+  "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks"],
   "settings.setPasscode": ["settings"],
   "settings.setDefaultAccount": ["settings", "accounts"],
   "accountGroups.create": ["accountGroups"],
@@ -437,12 +437,21 @@ function run<K extends OpKind>(w: Work, kind: K, a: OpArgs<K>): OpResult<K> {
 
 type Handlers = { [K in OpKind]: (w: Work, a: OpArgs<K>) => OpResult<K> };
 
+/** Large enough for any real amount, small enough that thousands of them still add up exactly in JavaScript. */
+export const MAX_AMOUNT = 1e13;
+const checkAmount = (n: number | undefined) => {
+  if (n === undefined) return;
+  if (!Number.isInteger(n)) throw new Error("Amount must be a whole number of minor units");
+  if (Math.abs(n) > MAX_AMOUNT) throw new Error("That amount is too large");
+};
+
 const isDate = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const nextOrder = (docs: { order: number }[]) => Math.max(-1, ...docs.map((d) => d.order)) + 1;
 
 function validateTx(w: Work, t: TxFields): TxFields {
   if (!isDate(t.date)) throw new Error("Bad date");
-  if (!Number.isInteger(t.amount)) throw new Error("Amount must be a whole number of minor units");
+  checkAmount(t.amount);
+  checkAmount(t.feeAmount);
   w.must("accounts", t.accountId, "Pick an account");
   const tags = [...new Set((t.tags ?? []).map((x) => x.trim()).filter(Boolean))];
   const c: TxFields = { ...t, note: (t.note ?? "").trim(), tags, photoIds: t.photoIds ?? [] };
@@ -471,7 +480,7 @@ function validateTx(w: Work, t: TxFields): TxFields {
 
 function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Doc<"accountGroups"> {
   if (!a.name.trim()) throw new Error("Name is required");
-  if (!Number.isInteger(a.initialBalance)) throw new Error("Amount must be a whole number of minor units");
+  checkAmount(a.initialBalance);
   const group = w.must("accountGroups", a.groupId, "Pick a group");
   if (group.kind === "card") {
     if (!a.billingAccountId) throw new Error("A credit card needs a billing account");
@@ -580,6 +589,10 @@ const handlers: Handlers = {
         for (const [k, val] of Object.entries(b.overrides)) overrides[k] = Math.round(val * factor);
         w.patch("budgets", b._id, { amount: Math.round(b.amount * factor), overrides });
       }
+      // the amounts future repeats and bookmarks will enter
+      const template = (t: Template): Template => ({ ...t, amount: Math.round(t.amount * factor), feeAmount: t.feeAmount === undefined ? undefined : Math.round(t.feeAmount * factor) });
+      for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
+      for (const b of [...w.snap.bookmarks]) w.patch("bookmarks", b._id, { template: template(b.template) });
     }
     w.patch("settings", s._id, { mainCurrency: info.code, symbol: info.symbol, decimals: info.decimals, symbolPosition: info.position ?? "before" });
   },
@@ -859,6 +872,7 @@ const handlers: Handlers = {
       const parsed = parseNumber(r.amount ?? "", format?.decimal);
       if (parsed === null) { errors.push({ row: rowNo, reason: `Bad amount "${r.amount}"` }); continue; }
       const amountMajor = Math.abs(parsed);
+      if (toMinor(amountMajor, settings.decimals) > MAX_AMOUNT) { errors.push({ row: rowNo, reason: `Amount too large "${r.amount}"` }); continue; }
       const time = r.time?.match(/^(\d{1,2}):(\d{2})/);
       const base: Prepared = {
         _row: rowNo, type, date, _acc: acc, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
