@@ -14,7 +14,7 @@ import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_I
 import { drawsFromLinked, resolveKind } from "./ledger";
 import { nextOccurrence, type Frequency } from "./repeat";
 import { monthKeyForDate, monthRange } from "./period";
-import { toMinor } from "./money";
+import { parseNumber, toMinor, type DecimalMark } from "./money";
 import { normName, normNote } from "./categoryLint";
 
 export const TABLES = [
@@ -140,7 +140,8 @@ export const CLEANUP_MAX_ENTRIES = 10_000;
 export interface Ops {
   "settings.completeOnboarding": { args: { currency: string; symbolPosition?: "before" | "after" }; result: void };
   "settings.update": { args: { patch: SettingsPatch }; result: void };
-  "settings.changeMainCurrency": { args: { code: string; keepData: boolean }; result: void };
+  /** entries: false leaves the entries alone; the app rescales or removes them itself, in chunks (see src/lib/bulk.ts). */
+  "settings.changeMainCurrency": { args: { code: string; keepData: boolean; entries?: boolean }; result: void };
   "settings.setPasscode": { args: { hash?: string; salt?: string }; result: void };
   "settings.setDefaultAccount": { args: { id?: Id<"accounts"> }; result: void };
 
@@ -181,12 +182,16 @@ export interface Ops {
     /**
      * createMissing: categories · createAccounts: accounts, of type Other · new accounts land outside any group · skipInvalid: import the good rows, report the rest ·
      * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry ·
-     * rowOffset: numbering of the first row, for chunked imports
+     * rowOffset: numbering of the first row, for chunked imports · format: how the whole file writes dates and numbers
      */
-    args: { rows: ImportRow[]; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
+    args: { rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
     result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
   };
   "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean }; result: Id<"transactions"> };
+  /** Multiply amounts by `factor` (a change of main currency's decimals), a chunk of entries at a time. */
+  "transactions.rescale": { args: { ids: Id<"transactions">[]; factor: number }; result: void };
+  /** Entries from a backup, with ids already pointing at the restored accounts, categories and schedules (restoreRows). */
+  "transactions.restoreRows": { args: { rows: Record<string, unknown>[]; bookmarks?: Record<string, string> }; result: number };
 
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
   "repeats.remove": { args: { id: Id<"repeats"> }; result: void };
@@ -210,8 +215,9 @@ export interface Ops {
   "currencies.reorder": { args: { ids: Id<"currencies">[] }; result: void };
   "currencies.setRates": { args: { rates: { id: Id<"currencies">; rate: number }[] }; result: void };
 
-  "backup.restore": { args: { data: BackupData }; result: void };
-  "backup.wipeAll": { args: { confirm: "DELETE" }; result: void };
+  /** entries: false restores everything but the entries and returns the new id of each backup id, for restoreRows. */
+  "backup.restore": { args: { data: BackupData; entries?: boolean }; result: RestoreIds };
+  "backup.wipeAll": { args: { confirm: "DELETE"; entries?: boolean }; result: void };
 
   /** Not a snapshot change: the browser uploads the queued file itself. Listed so queues can hold it. */
   "files.upload": { args: { name: string; type: string; size: number }; result: Id<"_storage"> };
@@ -219,6 +225,12 @@ export interface Ops {
 export type OpKind = keyof Ops;
 export type OpArgs<K extends OpKind> = Ops[K]["args"];
 export type OpResult<K extends OpKind> = Ops[K]["result"];
+
+export type RestoreIds = {
+  accounts: Record<string, string>; categories: Record<string, string>; repeats: Record<string, string>;
+  /** Backup entry id → the restored bookmark that pointed at it, to link again as the entry comes back. */
+  bookmarks?: Record<string, string>;
+};
 
 export type BackupData = {
   version: number;
@@ -239,7 +251,7 @@ const ALL: Table[] = [...TABLES];
 export const OP_TABLES: Record<OpKind, Table[]> = {
   "settings.completeOnboarding": ["settings", "accountGroups", "accounts", "categories"],
   "settings.update": ["settings"],
-  "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets"],
+  "settings.changeMainCurrency": ["settings", "transactions", "accounts", "budgets", "repeats", "bookmarks"],
   "settings.setPasscode": ["settings"],
   "settings.setDefaultAccount": ["settings", "accounts"],
   "accountGroups.create": ["accountGroups"],
@@ -270,6 +282,8 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.bulkRemove": ["transactions"],
   "transactions.importRows": ["settings", "accountGroups", "accounts", "categories", "currencies", "transactions"],
   "transactions.copy": ["transactions"],
+  "transactions.rescale": ["transactions"],
+  "transactions.restoreRows": ["accounts", "categories", "repeats", "transactions", "bookmarks"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions"],
@@ -291,6 +305,120 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "backup.wipeAll": ["transactions", "notes", "repeats", "bookmarks", "budgets", "categoryCleanups"],
   "files.upload": [],
 };
+
+/**
+ * Which of the user's entries an op reads or writes, so the server loads just those rather than
+ * the whole transactions table (Convex caps what one function may read, and a ledger outgrows
+ * that cap). `all` is for the few ops that really rewrite every entry.
+ */
+export type TxScope = {
+  all?: boolean;
+  /** Entries by id. */
+  ids?: string[];
+  /** Every entry in the repeat or installment series of these entries. */
+  seriesOf?: string[];
+  /** Every entry of these schedules. */
+  repeatIds?: string[];
+  /** Every entry from or to these accounts. */
+  accountIds?: string[];
+  /** Every entry on these dates. */
+  dates?: string[];
+  /** Every entry filed under these categories (as main category or as subcategory). */
+  categoryIds?: string[];
+  /** The entries these tidy-up records moved, and those of the categories they created. */
+  cleanupIds?: string[];
+};
+
+export function txScope(op: Op): TxScope {
+  const a = op.args as Record<string, unknown>;
+  const id = a.id as string;
+  switch (op.kind) {
+    case "transactions.update": return a.scope === "future" ? { seriesOf: [id] } : { ids: [id] };
+    case "transactions.remove": return a.scope === "future" || a.scope === "all" ? { seriesOf: [id] } : { ids: [id] };
+    case "transactions.bulkUpdate":
+    case "transactions.bulkRemove": return { ids: a.ids as string[] };
+    case "transactions.copy": return { ids: [id] };
+    case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
+    case "repeats.remove": return { repeatIds: [id] };
+    case "accounts.permanentlyDelete": return { accountIds: [id] };
+    // duplicates can only be entries on the same day
+    case "transactions.importRows": {
+      if (!a.skipDuplicates) return {};
+      const order = (a.format as ImportFormat | undefined)?.dateOrder;
+      const dates = (a.rows as ImportRow[]).map((r) => parseImportDate(r.date ?? "", order)).filter((d): d is string => d !== null);
+      return { dates: [...new Set(dates)] };
+    }
+    case "transactions.rescale": return { ids: a.ids as string[] };
+    // a tidy-up moves the entries of the categories its steps name
+    case "categories.applyCleanup": {
+      const ref = (r: CatRef | undefined) => (r && "id" in r ? [r.id] : []);
+      const ids = (a.steps as CleanupStep[]).flatMap((st) =>
+        st.kind === "nest" ? [st.id, ...ref(st.parent)] : st.kind === "merge" ? [...st.sourceIds, ...ref(st.target)]
+          : st.kind === "refile" ? [st.fromId, ...ref(st.target)] : st.kind === "remove" ? [st.id] : []);
+      return { categoryIds: [...new Set(ids)] };
+    }
+    case "categories.undoCleanup": return { cleanupIds: [id] };
+    case "settings.changeMainCurrency":
+    case "backup.restore":
+    case "backup.wipeAll": return a.entries === false ? {} : { all: true };
+    default: return {};
+  }
+}
+
+/** One scope covering several ops. */
+export function mergeTxScopes(scopes: TxScope[]): TxScope {
+  const out: TxScope = {};
+  const keys = ["ids", "seriesOf", "repeatIds", "accountIds", "dates", "categoryIds", "cleanupIds"] as const;
+  for (const s of scopes) {
+    if (s.all) out.all = true;
+    for (const k of keys) if (s[k]?.length) out[k] = [...new Set([...(out[k] ?? []), ...s[k]!])];
+  }
+  return out;
+}
+
+/** How a file writes dates and numbers; decided once for the whole file (`detectImportFormat`). */
+export type ImportFormat = { dateOrder: "dmy" | "mdy"; decimal: DecimalMark };
+
+const SLASH_DATE = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/;
+
+/**
+ * A date from an imported row: YYYY-MM-DD (or with / or .), DD.MM.YYYY, and DD/MM/YYYY or
+ * MM/DD/YYYY as the file's `dateOrder` says. Null when unreadable or not a real date.
+ */
+export function parseImportDate(s: string, dateOrder: ImportFormat["dateOrder"] = "mdy"): string | null {
+  const t = s.trim();
+  let y: string, mo: string, d: string;
+  let m = t.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) [y, mo, d] = [m[1], m[2], m[3]];
+  else if ((m = t.match(SLASH_DATE))) [y, mo, d] = dateOrder === "dmy" ? [m[3], m[2], m[1]] : [m[3], m[1], m[2]];
+  else if ((m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/))) [y, mo, d] = [m[3], m[2], m[1]];
+  else return null;
+  const iso = `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  // 2026-02-30 and 2026-25-03 do not round-trip through a calendar date
+  const date = new Date(`${iso}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(iso) ? iso : null;
+}
+
+/**
+ * Read the file's own conventions from all of its rows: any day above 12 settles DD/MM against
+ * MM/DD, and any amount ending in a comma and one or two digits means a decimal comma. Where the
+ * file cannot tell, the user's locale (`fallback`) decides.
+ */
+export function detectImportFormat(rows: Pick<ImportRow, "date" | "amount">[], fallback: ImportFormat): ImportFormat {
+  let dmy = 0, mdy = 0, comma = 0, dot = 0;
+  for (const r of rows) {
+    const m = (r.date ?? "").trim().match(SLASH_DATE);
+    if (m && Number(m[1]) > 12) dmy++;
+    if (m && Number(m[2]) > 12) mdy++;
+    const a = (r.amount ?? "").trim();
+    if (/\d,\d{1,2}\)?$/.test(a)) comma++;
+    if (/\d\.\d{1,2}\)?$/.test(a)) dot++;
+  }
+  return {
+    dateOrder: dmy && !mdy ? "dmy" : mdy && !dmy ? "mdy" : fallback.dateOrder,
+    decimal: comma && !dot ? "," : dot && !comma ? "." : fallback.decimal,
+  };
+}
 
 // ---------- working copy ----------
 
@@ -387,12 +515,21 @@ function run<K extends OpKind>(w: Work, kind: K, a: OpArgs<K>): OpResult<K> {
 
 type Handlers = { [K in OpKind]: (w: Work, a: OpArgs<K>) => OpResult<K> };
 
+/** Large enough for any real amount, small enough that thousands of them still add up exactly in JavaScript. */
+export const MAX_AMOUNT = 1e13;
+const checkAmount = (n: number | undefined) => {
+  if (n === undefined) return;
+  if (!Number.isInteger(n)) throw new Error("Amount must be a whole number of minor units");
+  if (Math.abs(n) > MAX_AMOUNT) throw new Error("That amount is too large");
+};
+
 const isDate = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const nextOrder = (docs: { order: number }[]) => Math.max(-1, ...docs.map((d) => d.order)) + 1;
 
 function validateTx(w: Work, t: TxFields): TxFields {
   if (!isDate(t.date)) throw new Error("Bad date");
-  if (!Number.isInteger(t.amount)) throw new Error("Amount must be a whole number of minor units");
+  checkAmount(t.amount);
+  checkAmount(t.feeAmount);
   w.must("accounts", t.accountId, "Pick an account");
   const tags = [...new Set((t.tags ?? []).map((x) => x.trim()).filter(Boolean))];
   const c: TxFields = { ...t, note: (t.note ?? "").trim(), tags, photoIds: t.photoIds ?? [] };
@@ -428,7 +565,7 @@ const cardFields = (kind: string, a: Pick<AccountFields, "bankName" | "last4" | 
 /** Checks a payment method and returns its kind (an op from an older app may only name a group). */
 function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): AccountKind {
   if (!a.name.trim()) throw new Error("Name is required");
-  if (!Number.isInteger(a.initialBalance)) throw new Error("Amount must be a whole number of minor units");
+  checkAmount(a.initialBalance);
   if (a.groupId && w.must("accountGroups", a.groupId, "That group is gone").deletedAt) throw new Error("That group is deleted");
   const kind = resolveKind(a, w.snap.accountGroups) as AccountKind;
   if (kind === "card") {
@@ -737,6 +874,33 @@ const strip = (d: Record<string, unknown>) => {
   return rest;
 };
 
+function rescale(w: Work, ids: Id<"transactions">[], factor: number) {
+  const scale = (n: number | undefined) => (n === undefined ? undefined : Math.round(n * factor));
+  for (const id of ids) {
+    const t = w.must("transactions", id);
+    w.patch("transactions", id, { amount: scale(t.amount)!, feeAmount: scale(t.feeAmount), installmentTotal: scale(t.installmentTotal) });
+  }
+}
+
+/** A backup's entries with their account, category and schedule ids moved to the restored copies, for restoreRows. */
+export function restoreRowsFrom(data: BackupData, ids: RestoreIds): Record<string, unknown>[] {
+  const map = (table: Record<string, string>, v: unknown) => (typeof v === "string" ? table[v] : undefined);
+  return (data.transactions ?? []).flatMap((t) => {
+    const accountId = map(ids.accounts, t.accountId);
+    if (!accountId) return [];
+    const s = strip(t);
+    return [{
+      ...s, accountId,
+      toAccountId: t.toAccountId ? map(ids.accounts, t.toAccountId) : undefined,
+      categoryId: t.categoryId ? map(ids.categories, t.categoryId) : undefined,
+      subcategoryId: t.subcategoryId ? map(ids.categories, t.subcategoryId) : undefined,
+      repeatId: t.repeatId ? map(ids.repeats, t.repeatId) : undefined,
+      // which backup entry this was, so a bookmark of it can point at the restored copy
+      fromBackupId: typeof t._id === "string" ? t._id : undefined,
+    }];
+  });
+}
+
 const handlers: Handlers = {
   "settings.completeOnboarding": (w, { currency, symbolPosition }) => {
     if (w.settings()) return;
@@ -767,26 +931,24 @@ const handlers: Handlers = {
     w.patch("settings", s._id, clean(patch));
   },
 
-  "settings.changeMainCurrency": (w, { code, keepData }) => {
+  "settings.changeMainCurrency": (w, { code, keepData, entries = true }) => {
     const s = w.requireSettings();
     const info = currencyInfo(code) ?? { code, symbol: code, decimals: 2, name: code };
     const factor = 10 ** (info.decimals - s.decimals);
     if (!keepData) {
-      w.clear("transactions");
+      if (entries) w.clear("transactions");
     } else if (factor !== 1) {
-      for (const t of [...w.snap.transactions]) {
-        w.patch("transactions", t._id, {
-          amount: Math.round(t.amount * factor),
-          feeAmount: t.feeAmount === undefined ? undefined : Math.round(t.feeAmount * factor),
-          installmentTotal: t.installmentTotal === undefined ? undefined : Math.round(t.installmentTotal * factor),
-        });
-      }
+      if (entries) rescale(w, w.snap.transactions.map((t) => t._id), factor);
       for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: Math.round(a.initialBalance * factor) });
       for (const b of [...w.snap.budgets]) {
         const overrides: Record<string, number> = {};
         for (const [k, val] of Object.entries(b.overrides)) overrides[k] = Math.round(val * factor);
         w.patch("budgets", b._id, { amount: Math.round(b.amount * factor), overrides });
       }
+      // the amounts future repeats and bookmarks will enter
+      const template = (t: Template): Template => ({ ...t, amount: Math.round(t.amount * factor), feeAmount: t.feeAmount === undefined ? undefined : Math.round(t.feeAmount * factor) });
+      for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
+      for (const b of [...w.snap.bookmarks]) w.patch("bookmarks", b._id, { template: template(b.template) });
     }
     w.patch("settings", s._id, { mainCurrency: info.code, symbol: info.symbol, decimals: info.decimals, symbolPosition: info.position ?? "before" });
   },
@@ -1037,7 +1199,7 @@ const handlers: Handlers = {
     }
   },
 
-  "transactions.importRows": (w, { rows, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
+  "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
     const settings = w.requireSettings();
     const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
     // Payment methods the import should create first, all outside any group. Cards need a bank to bill / link to, so other kinds go first.
@@ -1069,16 +1231,6 @@ const handlers: Handlers = {
     const prepared: Prepared[] = [];
     const toCreateCats: { type: "income" | "expense"; name: string; parentName?: string }[] = [];
     const toCreateAccs = new Map<string, string>();
-    const parseDate = (s: string): string | null => {
-      const t = s.trim();
-      let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-      if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
-      m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-      if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
-      m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-      if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
-      return null;
-    };
     /** Name of an existing or to-be-created account, or null if unknown and creating is off. */
     const accountName = (raw: string | undefined): string | null => {
       const name = (raw ?? "").trim();
@@ -1091,15 +1243,18 @@ const handlers: Handlers = {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const rowNo = rowOffset + i + 1;
-      const date = parseDate(r.date ?? "");
+      const date = parseImportDate(r.date ?? "", format?.dateOrder);
       if (!date) { errors.push({ row: rowNo, reason: `Bad date "${r.date}"` }); continue; }
       const tRaw = (r.type ?? "").trim().toLowerCase();
       const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;
       if (!type) { errors.push({ row: rowNo, reason: `Unknown type "${r.type}" (Income, Expenses or Transfer-Out)` }); continue; }
       const acc = accountName(r.account);
       if (!acc) { errors.push({ row: rowNo, reason: `Unknown account "${r.account}"` }); continue; }
-      const amountMajor = Math.abs(Number((r.amount ?? "").replace(/[^0-9.-]/g, "")));
-      if (!(r.amount ?? "").trim() || !Number.isFinite(amountMajor)) { errors.push({ row: rowNo, reason: `Bad amount "${r.amount}"` }); continue; }
+      // The Type column says income or expense; a sign on the amount is only the file's convention.
+      const parsed = parseNumber(r.amount ?? "", format?.decimal);
+      if (parsed === null) { errors.push({ row: rowNo, reason: `Bad amount "${r.amount}"` }); continue; }
+      const amountMajor = Math.abs(parsed);
+      if (toMinor(amountMajor, settings.decimals) > MAX_AMOUNT) { errors.push({ row: rowNo, reason: `Amount too large "${r.amount}"` }); continue; }
       const time = r.time?.match(/^(\d{1,2}):(\d{2})/);
       const base: Prepared = {
         _row: rowNo, type, date, _acc: acc, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
@@ -1110,7 +1265,7 @@ const handlers: Handlers = {
         const cur = w.snap.currencies.find((c) => c.code.toLowerCase() === r.subCurrency!.trim().toLowerCase());
         if (cur && cur.code !== settings.mainCurrency) {
           base.subCurrency = cur.code;
-          base.subAmount = toMinor(Math.abs(Number(r.subAmount.replace(/[^0-9.-]/g, ""))), cur.decimals);
+          base.subAmount = toMinor(Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0), cur.decimals);
           base.exchangeRate = cur.rate;
         }
       }
@@ -1202,6 +1357,27 @@ const handlers: Handlers = {
       inserted++;
     }
     return { inserted, errors, createdAccounts, duplicates };
+  },
+
+  "transactions.rescale": (w, { ids, factor }) => {
+    if (!(factor > 0)) throw new Error("Bad factor");
+    rescale(w, ids, factor);
+  },
+
+  "transactions.restoreRows": (w, { rows, bookmarks = {} }) => {
+    let inserted = 0;
+    for (const r of rows) {
+      const { fromBackupId, ...s } = strip(r);
+      if (!w.get("accounts", s.accountId as string)) continue;
+      if (s.type === "transfer" ? !w.get("accounts", s.toAccountId as string) : s.toAccountId !== undefined) continue;
+      for (const k of ["categoryId", "subcategoryId"] as const) if (s[k] && !w.get("categories", s[k] as string)) s[k] = undefined;
+      if (s.repeatId && !w.get("repeats", s.repeatId as string)) s.repeatId = undefined;
+      const id = w.insert("transactions", clean({ ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [] }) as never);
+      const bookmark = typeof fromBackupId === "string" ? bookmarks[fromBackupId] : undefined;
+      if (bookmark && w.get("bookmarks", bookmark)) w.patch("bookmarks", bookmark as Id<"bookmarks">, { transactionId: id });
+      inserted++;
+    }
+    return inserted;
   },
 
   "transactions.copy": (w, { id, useToday }) => {
@@ -1337,9 +1513,10 @@ const handlers: Handlers = {
     }
   },
 
-  "backup.restore": (w, { data }) => {
+  "backup.restore": (w, { data, entries = true }) => {
     if (!data || data.version !== 1) throw new Error("Not an UnMoney backup file");
-    for (const t of ["transactions", "notes", "categories", "repeats", "bookmarks", "budgets", "accounts", "accountGroups", "currencies"] as const) w.clear(t);
+    for (const t of ["notes", "categories", "repeats", "bookmarks", "budgets", "accounts", "accountGroups", "currencies"] as const) w.clear(t);
+    if (entries) w.clear("transactions");
     // Backups from before payment methods had their own kind keep it on the group: carry it over.
     const oldGroups = (data.accountGroups ?? []).map((g) => ({ _id: g._id as string, kind: g.kind as string | undefined }));
     const groupIds = new Map<string, Id<"accountGroups">>();
@@ -1387,16 +1564,20 @@ const handlers: Handlers = {
       repeatIds.set(r._id as string, w.insert("repeats", { ...s, template } as never));
     }
     const txIds = new Map<string, Id<"transactions">>();
-    for (const t of data.transactions ?? []) {
-      const s = mapTemplate(strip(t));
-      if (!s.accountId) continue;
-      txIds.set(t._id as string, w.insert("transactions", { ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [], repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined } as never));
+    const bookmarkLinks: Record<string, string> = {};
+    if (entries) {
+      for (const t of data.transactions ?? []) {
+        const s = mapTemplate(strip(t));
+        if (!s.accountId) continue;
+        txIds.set(t._id as string, w.insert("transactions", { ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [], repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined } as never));
+      }
     }
     for (const b of data.bookmarks ?? []) {
       const s = strip(b);
       const template = mapTemplate(s.template as Record<string, unknown>);
       if (!template.accountId) continue;
-      w.insert("bookmarks", { ...s, template, transactionId: s.transactionId ? txIds.get(s.transactionId as string) : undefined } as never);
+      const bookmarkId = w.insert("bookmarks", { ...s, template, transactionId: s.transactionId ? txIds.get(s.transactionId as string) : undefined } as never);
+      if (!entries && typeof s.transactionId === "string") bookmarkLinks[s.transactionId] = bookmarkId;
     }
     for (const b of data.budgets ?? []) {
       const s = strip(b);
@@ -1412,11 +1593,13 @@ const handlers: Handlers = {
       if (existing) w.patch("settings", existing._id, s as never);
       else w.insert("settings", s as never);
     }
+    return { accounts: Object.fromEntries(accountIds), categories: Object.fromEntries(catIds), repeats: Object.fromEntries(repeatIds), bookmarks: bookmarkLinks };
   },
 
-  "backup.wipeAll": (w, { confirm }) => {
+  "backup.wipeAll": (w, { confirm, entries = true }) => {
     if (confirm !== "DELETE") throw new Error("Not confirmed");
-    for (const t of ["transactions", "notes", "repeats", "bookmarks", "budgets", "categoryCleanups"] as const) w.clear(t);
+    for (const t of ["notes", "repeats", "bookmarks", "budgets", "categoryCleanups"] as const) w.clear(t);
+    if (entries) w.clear("transactions");
   },
 
   "files.upload": () => {

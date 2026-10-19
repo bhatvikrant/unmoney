@@ -14,8 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { toMajor, toMinor } from "../../../shared/money";
-import { monthLabel } from "@/lib/format";
+import { toMinor } from "../../../shared/money";
+import { amountInput, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
 import { monthKeyForDate, weekRange } from "../../../shared/period";
 import { parts, todayISO } from "../../../shared/dates";
 
@@ -41,10 +41,10 @@ export default function BudgetSettings() {
   async function save() {
     if (!dialog) return;
     try {
-      const amount = toMinor(dialog.amount, settings.decimals);
+      const amount = toMinor(dialog.amount, settings.decimals, LOCALE_DECIMAL);
       const id = await upsert({ id: dialog.id, categoryId: dialog.categoryId === "total" ? undefined : (dialog.categoryId as Id<"categories">), period, amount });
       if (dialog.id || dialog.override) {
-        await setOverride({ id, key, amount: dialog.override.trim() ? toMinor(dialog.override, settings.decimals) : null });
+        await setOverride({ id, key, amount: dialog.override.trim() ? toMinor(dialog.override, settings.decimals, LOCALE_DECIMAL) : null });
       }
       setDialog(null);
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
@@ -61,7 +61,7 @@ export default function BudgetSettings() {
             const ov = b.overrides[key];
             return (
               <Row key={b._id} label={b.categoryId ? categoryById.get(b.categoryId)?.name ?? "(deleted)" : "Total budget"} hint={ov !== undefined ? <>{keyLabel}: <Money amount={ov} /></> : `default`} value={<Money amount={b.amount} />}
-                onClick={() => setDialog({ id: b._id, categoryId: b.categoryId ?? "total", amount: String(toMajor(b.amount, settings.decimals)), override: ov !== undefined ? String(toMajor(ov, settings.decimals)) : "" })} />
+                onClick={() => setDialog({ id: b._id, categoryId: b.categoryId ?? "total", amount: amountInput(b.amount, settings.decimals), override: ov !== undefined ? amountInput(ov, settings.decimals) : "" })} />
             );
           })}
         </div>

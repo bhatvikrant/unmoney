@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -18,13 +19,26 @@ export const me = query({
   },
 });
 
-/** One table of the signed-in user's documents; null while signed out. */
+/** One table of the signed-in user's documents; null while signed out. Transactions come through `transactionsPage`. */
 export const table = query({
   args: { table: tableArg },
   handler: async (ctx, { table }) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) return null;
     return loadTable(ctx, userId, table);
+  },
+});
+
+/**
+ * The signed-in user's entries, a page at a time. The client loads every page and keeps each one
+ * subscribed, so no single query reads more than a page and an edit re-sends only its own page.
+ */
+export const transactionsPage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, { paginationOpts }) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return { page: [], isDone: true, continueCursor: "" };
+    return ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).paginate(paginationOpts);
   },
 });
 
@@ -62,6 +76,20 @@ export const apply = mutation({
       }
     }
     return results;
+  },
+});
+
+/**
+ * After a wipe or restore done in chunks: delete the user's entries created before it that the
+ * chunks did not reach (made on another device, or by the repeats job, before the device knew).
+ * A page at a time, rescheduling itself.
+ */
+export const sweepEntries = internalMutation({
+  args: { userId: v.id("users"), before: v.number(), cursor: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, { userId, before, cursor = null }) => {
+    const res = await ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).paginate({ numItems: 1000, cursor });
+    for (const t of res.page) if (t._creationTime < before) await ctx.db.delete(t._id);
+    if (!res.isDone) await ctx.scheduler.runAfter(0, internal.sync.sweepEntries, { userId, before, cursor: res.continueCursor });
   },
 });
 

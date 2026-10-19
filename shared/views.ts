@@ -229,13 +229,17 @@ export function txGet(snap: Snapshot, id: string): TxDetail | null {
 
 export type SearchArgs = {
   q?: string; from?: string; to?: string; type?: "income" | "expense" | "transfer";
-  accountIds?: string[]; categoryIds?: string[]; tag?: string; limit?: number;
+  accountIds?: string[]; categoryIds?: string[]; tag?: string;
 };
 
 export function txSearch(snap: Snapshot, args: SearchArgs): Tx[] {
   const q = args.q?.trim().toLowerCase();
   const acc = args.accountIds && args.accountIds.length ? new Set(args.accountIds) : null;
   const cats = args.categoryIds && args.categoryIds.length ? new Set(args.categoryIds) : null;
+  // a search for "groceries" or "visa" also finds entries by their category or account name
+  const named = (docs: { _id: string; name: string }[]) => (q ? new Set(docs.filter((d) => d.name.toLowerCase().includes(q)).map((d) => d._id)) : new Set<string>());
+  const qCats = named(snap.categories);
+  const qAccs = named(snap.accounts);
   const out = snap.transactions.filter((t) => {
     if (args.from && t.date < args.from) return false;
     if (args.to && t.date > args.to) return false;
@@ -243,10 +247,11 @@ export function txSearch(snap: Snapshot, args: SearchArgs): Tx[] {
     if (acc && !acc.has(t.accountId) && !(t.toAccountId && acc.has(t.toAccountId))) return false;
     if (cats && !(t.categoryId && cats.has(t.categoryId)) && !(t.subcategoryId && cats.has(t.subcategoryId))) return false;
     if (args.tag && !t.tags.includes(args.tag)) return false;
-    if (q && !(t.note.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q) || t.tags.some((x) => x.toLowerCase().includes(q)))) return false;
+    if (q && !(t.note.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q) || t.tags.some((x) => x.toLowerCase().includes(q))
+      || qCats.has(t.categoryId ?? "") || qCats.has(t.subcategoryId ?? "") || qAccs.has(t.accountId) || qAccs.has(t.toAccountId ?? ""))) return false;
     return true;
   });
-  return out.sort(byDateDesc).slice(0, args.limit ?? 500);
+  return out.sort(byDateDesc);
 }
 
 export type NoteSuggestion = Pick<Tx, "note" | "type" | "accountId" | "toAccountId" | "categoryId" | "subcategoryId" | "amount">;

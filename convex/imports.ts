@@ -9,6 +9,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { action, httpAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireUser } from "./lib/auth";
+import { forgetOwner, setOwner } from "./files";
 
 const MAX_BYTES = 15 * 1024 * 1024;
 const MAX_PENDING = 10;
@@ -77,10 +78,12 @@ export const addPending = internalMutation({
   args: { userId: v.id("users"), storageId: v.id("_storage"), name: v.string(), size: v.number() },
   handler: async (ctx, args) => {
     await ctx.db.insert("pendingImports", args);
+    await setOwner(ctx, args.userId, args.storageId);
     // Keep the inbox small: drop the oldest beyond the cap.
     const all = await ctx.db.query("pendingImports").withIndex("by_user", (q) => q.eq("userId", args.userId)).order("desc").collect();
     for (const old of all.slice(MAX_PENDING)) {
       await ctx.storage.delete(old.storageId);
+      await forgetOwner(ctx, old.storageId);
       await ctx.db.delete(old._id);
     }
   },
@@ -105,6 +108,7 @@ export const discardPending = mutation({
     const row = await ctx.db.get(id);
     if (!row || row.userId !== userId) return;
     await ctx.storage.delete(row.storageId);
+    await forgetOwner(ctx, row.storageId);
     await ctx.db.delete(id);
   },
 });

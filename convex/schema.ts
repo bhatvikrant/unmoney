@@ -67,6 +67,8 @@ export default defineSchema({
     repeatDisplay: v.union(v.literal("onDate"), v.literal("firstOfMonth")),
     cardExpenseDisplay: v.union(v.literal("atTime"), v.literal("lumpSum")),
     passcodeHash: v.optional(v.string()),
+    /** "Forgot passcode" was asked for at this time; a sign-in after it removes the passcode (convex/passcode.ts). */
+    passcodeResetRequestedAt: v.optional(v.number()),
     passcodeSalt: v.optional(v.string()),
     lockAfter: v.union(v.literal("always"), v.literal("5m"), v.literal("1h")),
     /** Account a new entry starts on; falls back to the first visible account when unset or gone. */
@@ -151,6 +153,7 @@ export default defineSchema({
   })
     .index("by_user_date", ["userId", "date"])
     .index("by_user_account", ["userId", "accountId"])
+    .index("by_user_to_account", ["userId", "toAccountId"])
     .index("by_user_category", ["userId", "categoryId"])
     .index("by_repeat", ["repeatId"])
     .searchIndex("search_note", { searchField: "note", filterFields: ["userId"] }),
@@ -211,6 +214,12 @@ export default defineSchema({
     name: v.string(),
     size: v.number(),
   }).index("by_user", ["userId"]),
+
+  /** Who uploaded each stored file (receipt photos, import inbox), so nobody else can read or delete it. */
+  fileOwners: defineTable({
+    userId: v.id("users"),
+    storageId: v.id("_storage"),
+  }).index("by_storage", ["storageId"]),
 
   /**
    * The last "Tidy up" of a user's categories, with what it changed, so it can be undone for 30

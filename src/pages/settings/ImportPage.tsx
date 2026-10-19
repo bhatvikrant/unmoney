@@ -11,10 +11,12 @@ import { toast } from "sonner";
 import { Check, Copy, Download, FileSpreadsheet, Share2, Smartphone } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { applyOp, type OpResult } from "../../../shared/ops";
+import { applyOp, detectImportFormat, type ImportFormat, type OpResult } from "../../../shared/ops";
 import { CURRENCIES } from "../../../shared/currencies";
-import { useOp, useStore, useView } from "@/lib/store";
+import { useStore, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
+import { useBulkOps } from "@/lib/bulk";
+import { LOCALE_FORMAT } from "@/lib/format";
 import { IMPORT_ACCEPT, readImportFile, type ParsedImport } from "@/lib/importFile";
 import { SHARE_CACHE, SHARE_KEY } from "@/lib/share";
 import { isIOS, promptInstall, useInstallState } from "@/lib/pwa";
@@ -23,6 +25,7 @@ import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const CHUNK = 400;
 const SHORTCUT_FILE = "/send-to-unmoney.shortcut";
@@ -299,24 +302,28 @@ function IosSteps() {
 
 function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => void | Promise<void>; onDone: () => void | Promise<void> }) {
   const view = useView();
-  const { userId } = useStore();
+  const { userId, status, dispatchTracked, whenSynced } = useStore();
   const { settings } = useApp();
-  const importRows = useOp("transactions.importRows");
-  const changeCurrency = useOp("settings.changeMainCurrency");
+  const bulk = useBulkOps();
+  const [saving, setSaving] = useState(false);
   const [createMissing, setCreateMissing] = useState(true);
   const [createAccounts, setCreateAccounts] = useState(true);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
+  // How the file writes dates and numbers, read from all its rows; the user can correct it below.
+  const [format, setFormat] = useState<ImportFormat>(() => detectImportFormat(loaded.rows, LOCALE_FORMAT));
+  const hasSlashDates = useMemo(() => loaded.rows.some((r) => /^\d{1,2}[/-]\d{1,2}[/-]\d{4}/.test((r.date ?? "").trim())), [loaded.rows]);
+  const hasCommas = useMemo(() => loaded.rows.some((r) => (r.amount ?? "").includes(",")), [loaded.rows]);
 
   // Dry run against the local data: what would be imported, created and skipped.
   const dry = useMemo<DryRun | { error: string }>(() => {
     try {
-      const op = { id: "dryrun", kind: "transactions.importRows" as const, args: { rows: loaded.rows, createMissing, createAccounts, skipInvalid: true, skipDuplicates: true }, at: 0 };
+      const op = { id: "dryrun", kind: "transactions.importRows" as const, args: { rows: loaded.rows, format, createMissing, createAccounts, skipInvalid: true, skipDuplicates: true }, at: 0 };
       return applyOp(view, op, { userId: (userId ?? "") as Id<"users"> }).result as DryRun;
     } catch (e) {
       return { error: e instanceof Error ? e.message : "This file cannot be imported" };
     }
-  }, [loaded.rows, view, userId, createMissing, createAccounts]);
+  }, [loaded.rows, view, userId, format, createMissing, createAccounts]);
 
   const fileCurrency = loaded.currency && loaded.currency !== settings.mainCurrency && CURRENCIES.some((c) => c.code === loaded.currency) ? loaded.currency : null;
   const noEntriesYet = view.transactions.length === 0;
@@ -329,18 +336,30 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
     // catch identical entries the file itself has in two different chunks.
     const dup = new Set(dry.duplicates);
     const rows = loaded.rows.filter((_, i) => !dup.has(i + 1));
+    const opIds: string[] = [];
     try {
       for (let i = 0; i < rows.length; i += CHUNK) {
-        const res = await importRows({ rows: rows.slice(i, i + CHUNK), createMissing, createAccounts, skipInvalid: true, rowOffset: i });
-        inserted += res.inserted;
+        const { id, result } = await dispatchTracked("transactions.importRows", { rows: rows.slice(i, i + CHUNK), format, createMissing, createAccounts, skipInvalid: true, rowOffset: i });
+        opIds.push(id);
+        inserted += result.inserted;
         setProgress(Math.min(1, (i + CHUNK) / rows.length));
       }
-      toast.success(`Imported ${inserted} ${inserted === 1 ? "entry" : "entries"}`);
-      await onDone();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Import failed");
       setBusy(false);
+      return;
     }
+    // Only a confirmed import counts: until then the file stays in the inbox, so it can be tried again.
+    setSaving(true);
+    const { rejected } = await whenSynced(opIds);
+    setSaving(false);
+    if (rejected.length) {
+      toast.error(`${rejected.length} of ${opIds.length} parts of the import could not be saved: ${rejected[0].error}. Import the file again to add the rest; entries already in are skipped.`);
+      setBusy(false);
+      return;
+    }
+    toast.success(`Imported ${inserted} ${inserted === 1 ? "entry" : "entries"}`);
+    await onDone();
   }
 
   const skipped = "error" in dry ? 0 : dry.errors.length;
@@ -380,13 +399,29 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
               The amounts in this file are in <b>{fileCurrency}</b>, but your main currency is <b>{settings.mainCurrency}</b>.
               {noEntriesYet ? null : <span className="text-muted-foreground"> Change it in Settings › Main currency first if they should be {fileCurrency}.</span>}
             </div>
-            {noEntriesYet ? <Button size="sm" variant="outline" onClick={() => void changeCurrency({ code: fileCurrency, keepData: true })}>Use {fileCurrency}</Button> : null}
+            {noEntriesYet ? <Button size="sm" variant="outline" onClick={() => void bulk.changeMainCurrency(fileCurrency, true).catch(() => {})}>Use {fileCurrency}</Button> : null}
           </div>
         ) : null}
       </Section>
       <Section title="Options">
         <label className="flex items-center gap-3 px-4 py-3 border-b text-sm"><Checkbox checked={createMissing} onCheckedChange={(v) => setCreateMissing(!!v)} />Create categories that don't exist yet</label>
         <label className="flex items-center gap-3 px-4 py-3 text-sm"><Checkbox checked={createAccounts} onCheckedChange={(v) => setCreateAccounts(!!v)} />Create payment methods that don't exist yet</label>
+        {hasSlashDates ? (
+          <Row label="Dates are written" right={
+            <Select value={format.dateOrder} onValueChange={(v) => setFormat((f) => ({ ...f, dateOrder: v as ImportFormat["dateOrder"] }))}>
+              <SelectTrigger className="h-8 w-40"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="dmy">Day first (31/12)</SelectItem><SelectItem value="mdy">Month first (12/31)</SelectItem></SelectContent>
+            </Select>
+          } />
+        ) : null}
+        {hasCommas ? (
+          <Row label="Amounts are written" right={
+            <Select value={format.decimal} onValueChange={(v) => setFormat((f) => ({ ...f, decimal: v as ImportFormat["decimal"] }))}>
+              <SelectTrigger className="h-8 w-40"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value=".">1,234.50</SelectItem><SelectItem value=",">1.234,50</SelectItem></SelectContent>
+            </Select>
+          } />
+        ) : null}
       </Section>
       <Section title="First rows">
         <div className="overflow-x-auto max-h-64">
@@ -412,7 +447,7 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
       <div className="flex gap-2 px-4 pt-4 md:px-4">
         <Button variant="outline" className="flex-1" disabled={busy} onClick={() => void onCancel()}>Cancel</Button>
         <Button className="flex-1" disabled={busy || !ready} onClick={() => void run()}>
-          {busy ? `Importing… ${Math.round(progress * 100)}%` : !ready ? "Nothing new to import" : skipped ? `Import ${ready}, skip ${skipped}` : `Import ${ready}`}
+          {saving ? (status.connected ? "Saving to your account…" : "Waiting for a connection to save…") : busy ? `Importing… ${Math.round(progress * 100)}%` : !ready ? "Nothing new to import" : skipped ? `Import ${ready}, skip ${skipped}` : `Import ${ready}`}
         </Button>
       </div>
     </>
