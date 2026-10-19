@@ -17,6 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { useBottomBar } from "@/components/shell/SplitLayout";
 
 /** What the user chose on one card. `target` is a category id, or "new" with `newName`. */
 type Choice = { checked: boolean; target?: string; newName: string };
@@ -36,6 +37,7 @@ function dryRun(view: Snapshot, steps: CleanupStep[], userId: string): { snap: S
 }
 
 export default function CategoryTidyUp() {
+  const bar = useBottomBar();
   const view = useView();
   const { userId } = useStore();
   const { categoryById } = useApp();
@@ -145,7 +147,7 @@ export default function CategoryTidyUp() {
       </Page>
 
       {fixes.length ? (
-        <div className="fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 z-30 bg-background/95 backdrop-blur border-t md:safe-bottom">
+        <div className={cn(bar, "z-30 bg-background/95 backdrop-blur border-t md:safe-bottom")}>
           <div className="mx-auto max-w-3xl space-y-2 p-3">
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <div className="flex gap-2">
