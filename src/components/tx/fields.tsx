@@ -6,6 +6,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
+import { compressImage } from "@/lib/image";
 import { isTmpId } from "../../../shared/ops";
 
 /** Photos are queued locally and uploaded when online; the entry keeps a temporary id until then. */
@@ -26,8 +27,9 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
     try {
       const ids: Id<"_storage">[] = [];
       for (const f of list) {
-        if (f.size > 5 * 1024 * 1024) { toast.error(`${f.name} is over 5 MB`); continue; }
-        ids.push(await enqueueUpload(f));
+        const small = await compressImage(f);
+        if (small.size > 5 * 1024 * 1024) { toast.error(`${f.name} is over 5 MB`); continue; }
+        ids.push(await enqueueUpload(small));
       }
       onChange([...photoIds, ...ids]);
     } catch {
