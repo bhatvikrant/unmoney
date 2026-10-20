@@ -80,7 +80,7 @@ export function CardFace({ kind, name, bankName, last4, color, edit, footer, cla
         <span aria-hidden className="opacity-70">••••</span><span aria-hidden className="opacity-70">••••</span><span aria-hidden className="opacity-70">••••</span>
         {edit ? (
           <input aria-label="Last 4 digits of the card" placeholder="1234" inputMode="numeric" autoComplete="off" value={last4 ?? ""}
-            onChange={(e) => edit.onChange("last4", lastDigits(e.target.value, last4 ?? ""))} className={cn(field, "w-[4.6ch] tracking-[0.14em]")} />
+            onChange={(e) => edit.onChange("last4", lastDigits(e.target.value, last4 ?? ""))} className={cn(field, "w-[calc(4ch+0.8em)] shrink-0 tracking-[0.14em]")} />
         ) : (
           <span>{last4 || <span className="opacity-70">••••</span>}</span>
         )}
