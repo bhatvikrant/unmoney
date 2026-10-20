@@ -380,6 +380,8 @@ export default defineSchema({
     how: v.union(v.literal("rule"), v.literal("ai")),
     /** An entry the user already typed in that looks like this one ("already added?"). */
     matchedTransactionId: v.optional(v.id("transactions")),
+    /** The user said "No, it's new": the draft is never matched to an entry again. */
+    keptNew: v.optional(v.boolean()),
     status: v.union(v.literal("open"), v.literal("accepted"), v.literal("dismissed")),
     transactionId: v.optional(v.id("transactions")),
     resolvedAt: v.optional(v.number()),

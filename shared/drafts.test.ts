@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, OP_TABLES, txScope, type Snapshot } from "./ops";
-import { draftsRange } from "./views";
+import { draftMatches, draftsRange } from "./views";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -78,8 +78,24 @@ test("\"no, it's new\" drops the match and the draft is back on the ledger", () 
   expect(draftsRange(snap, "2026-10-01", "2026-10-31").map((x) => x._id)).toEqual(["d2"]);
   const r = run(snap, "drafts.unmatch", { id: d._id });
   expect(r.snap.drafts[0].matchedTransactionId).toBeUndefined();
+  expect(r.snap.drafts[0].keptNew).toBe(true);
   expect(draftsRange(r.snap, "2026-10-01", "2026-10-31").map((x) => x._id)).toEqual(["d2", "d1"]);
   expect(() => run(snap, "drafts.unmatch", { id: "nope" })).toThrow(/draft is gone/);
+});
+
+test("an entry typed in after the draft hides its faded row at once, and \"no, it's new\" sticks", () => {
+  const { s, cash, food, d } = ledger();
+  let r = run(s, "transactions.create", { type: "expense", date: "2026-10-17", amount: 48500, note: "Dinner", accountId: cash._id, categoryId: food, tags: [], photoIds: [] });
+  const txId = r.result as Id<"transactions">;
+  // d1 is a day from the entry; d2 is two days off and stays on the ledger
+  expect([...draftMatches(r.snap)]).toEqual([[d._id, txId]]);
+  expect(draftsRange(r.snap, "2026-10-01", "2026-10-31").map((x) => x._id)).toEqual(["d2"]);
+  r = run(r.snap, "drafts.unmatch", { id: d._id });
+  expect(draftMatches(r.snap).size).toBe(0);
+  expect(draftsRange(r.snap, "2026-10-01", "2026-10-31").map((x) => x._id)).toEqual(["d2", "d1"]);
+  // the check's own match still counts, even for an entry the replica does not hold
+  const stored = { ...s, drafts: [{ ...d, matchedTransactionId: "t9" as Id<"transactions"> }] };
+  expect([...draftMatches(stored)]).toEqual([[d._id, "t9"]]);
 });
 
 test("a copy of a mail-sourced entry is not itself from the mail, and an edit keeps the link", () => {

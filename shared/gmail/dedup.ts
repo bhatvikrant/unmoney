@@ -9,7 +9,7 @@ import { drawsFromLinked } from "../ledger";
 import { isShopMail } from "./rules";
 
 /** A draft about to be written: everything but what the database and the user add. */
-export type DraftCandidate = Omit<Doc<"drafts">, "_id" | "_creationTime" | "userId" | "status" | "transactionId" | "resolvedAt">;
+export type DraftCandidate = Omit<Doc<"drafts">, "_id" | "_creationTime" | "userId" | "status" | "transactionId" | "resolvedAt" | "keptNew">;
 type Draftish = Pick<DraftCandidate, "from" | "subject" | "messageId" | "receivedAt" | "proposal">;
 
 /** Folding one draft into another: the one that stays, and what it takes over. */
@@ -113,4 +113,21 @@ export function matchEntry(draft: Pick<DraftCandidate, "proposal">, transactions
     if (t._creationTime > best._creationTime) best = t;
   }
   return best?._id;
+}
+
+/**
+ * Open drafts that look like an entry typed in after the draft was written. Drafts already
+ * matched, and ones the user said were new, are left as they are.
+ */
+export function laterMatches(drafts: Doc<"drafts">[], transactions: Doc<"transactions">[], accounts: Doc<"accounts">[] = []): Map<Id<"drafts">, Id<"transactions">> {
+  const waiting = drafts.filter((d) => d.status === "open" && !d.matchedTransactionId && !d.keptNew);
+  const out = new Map<Id<"drafts">, Id<"transactions">>();
+  if (!waiting.length) return out;
+  const amounts = new Set(waiting.map((d) => d.proposal.amount));
+  const near = transactions.filter((t) => amounts.has(t.amount));
+  for (const d of waiting) {
+    const id = matchEntry(d, near, accounts);
+    if (id) out.set(d._id, id);
+  }
+  return out;
 }

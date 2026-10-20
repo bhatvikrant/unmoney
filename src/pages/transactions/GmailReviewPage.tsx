@@ -15,7 +15,7 @@ import { useApp } from "@/lib/app";
 import { useOpenEntry } from "@/lib/nav";
 import { useShortcuts } from "@/lib/shortcuts";
 import { dateLabel } from "@/lib/format";
-import { draftsOpen } from "../../../shared/views";
+import { draftMatches, draftsOpen } from "../../../shared/views";
 import type { TxFields } from "../../../shared/ops";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { EmptyState, Section } from "@/components/shell/misc";
@@ -52,17 +52,19 @@ export default function GmailReviewPage() {
   const entryOpen = /\/t\//.test(useLocation().pathname);
 
   const all = useMemo(() => draftsOpen(view), [view]);
+  const matches = useMemo(() => draftMatches(view), [view]);
   const txById = useMemo(() => new Map(view.transactions.map((t) => [t._id as string, t])), [view.transactions]);
   const groups = useMemo(() => {
     const ready: Draft[] = [], look: Draft[] = [], matched: { draft: Draft; tx: Doc<"transactions"> }[] = [];
     for (const d of all) {
-      const tx = d.matchedTransactionId ? txById.get(d.matchedTransactionId) : undefined;
+      const txId = matches.get(d._id);
+      const tx = txId ? txById.get(txId) : undefined;
       if (tx) matched.push({ draft: d, tx });
       else if (d.confidence === "high" && draftFields(d, currencies, settings.decimals)) ready.push(d);
       else look.push(d);
     }
     return { ready, look, matched };
-  }, [all, txById, currencies, settings.decimals]);
+  }, [all, matches, txById, currencies, settings.decimals]);
   const order = useMemo(() => [...groups.ready, ...groups.look, ...groups.matched.map((m) => m.draft)], [groups]);
 
   // keyboard: j/k move, Enter opens, s saves a ready one, x dismisses

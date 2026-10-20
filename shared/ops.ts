@@ -222,7 +222,7 @@ export interface Ops {
   "drafts.dismiss": { args: { ids: Id<"drafts">[] }; result: void };
   /** "Yes, that's the one I typed in": the existing entry gets the draft's `source`, the draft becomes accepted. */
   "drafts.link": { args: { id: Id<"drafts">; transactionId: Id<"transactions"> }; result: void };
-  /** "No, it's new": the draft stops pointing at the entry it looked like and goes back to the ledger. */
+  /** "No, it's new": the draft stops pointing at the entry it looked like, goes back to the ledger and is never matched again. */
   "drafts.unmatch": { args: { id: Id<"drafts"> }; result: void };
 
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
@@ -1642,7 +1642,7 @@ const handlers: Handlers = {
   },
   "drafts.unmatch": (w, { id }) => {
     const draft = w.must("drafts", id, "That draft is gone");
-    if (draft.status === "open") w.patch("drafts", id, { matchedTransactionId: undefined });
+    if (draft.status === "open") w.patch("drafts", id, { matchedTransactionId: undefined, keptNew: true });
   },
   "drafts.link": (w, { id, transactionId }) => {
     const draft = w.must("drafts", id, "That draft is gone");
