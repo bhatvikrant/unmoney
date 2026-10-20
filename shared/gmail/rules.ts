@@ -151,8 +151,9 @@ const BANKS: Bank[] = [
   { name: "Kotak", rule: "kotak", domains: ["kotak.com", "kotakbank.com"], merchant: [
     /\bto\s+(?<vpa>\S+@\S+)\s+on\b/i, /\bfrom\s+(?<vpa>\S+@\S+)\s+on\b/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
   ] },
+  // HSBC India writes from hsbc@hsbc.bank.in (older mail from hsbc.co.in);
   // card spends go through ANY_BANK's "at MERCHANT on 17-10-26"; "from your HSBC account" is the user's own side, never the counterparty
-  { name: "HSBC", rule: "hsbc", domains: ["hsbc.co.in", "mail.hsbc.co.in", "hsbc.com"], merchant: [
+  { name: "HSBC", rule: "hsbc", domains: ["hsbc.bank.in", "hsbc.co.in", "mail.hsbc.co.in", "hsbc.com"], merchant: [
     /\bto\s+(?<vpa>[a-z0-9.\-_]+@[a-z]+)\b/i, /\b(?:to|from)\s+(?!your\b)(?<m>[^()]{1,60}?)\s*\((?:Ref|UPI|NEFT|IMPS|RTGS)\b/i,
     /\bto\s+(?!your\b)(?<m>.+?)\s+on\b/i, /\bfrom\s+(?!your\b)(?<m>.+?)\s+on\b/i, /\bby\s+(?!your\b)(?<m>.+?)\s+on\b/i,
   ] },
