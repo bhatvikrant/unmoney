@@ -16,6 +16,25 @@ export const MAX_TEXT = 4000;
 /** The user revoked access, changed their password, or the token is otherwise dead: they must reconnect. */
 export class GmailAuthError extends Error {}
 
+/**
+ * Gmail refused for a reason the user or the app's owner has to fix, not a passing failure:
+ * "api-off" (the Gmail API is not enabled in the Google Cloud project) or "no-scope" (the user
+ * left Gmail unticked on Google's consent screen).
+ */
+export class GmailSetupError extends Error {
+  readonly kind: "api-off" | "no-scope";
+  constructor(kind: "api-off" | "no-scope", message: string) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
+/** Google's own reason for a refusal: "accessNotConfigured", "insufficientPermissions", "SERVICE_DISABLED", … */
+function reasonOf(json: unknown): string {
+  const err = (json as { error?: { message?: string; status?: string; errors?: { reason?: string }[]; details?: { reason?: string }[] } })?.error;
+  return err?.details?.find((d) => d.reason)?.reason ?? err?.errors?.[0]?.reason ?? err?.status ?? "";
+}
+
 function creds(): { id: string; secret: string } {
   const id = process.env.AUTH_GOOGLE_ID;
   const secret = process.env.AUTH_GOOGLE_SECRET;
@@ -55,9 +74,13 @@ async function tokenCall(body: Record<string, string>): Promise<Record<string, u
   return json;
 }
 
-export async function exchangeCode(code: string, redirectUri: string): Promise<{ accessToken: string; refreshToken?: string }> {
+export async function exchangeCode(code: string, redirectUri: string): Promise<{ accessToken: string; refreshToken?: string; scopes: string[] }> {
   const json = await tokenCall({ grant_type: "authorization_code", code, redirect_uri: redirectUri });
-  return { accessToken: String(json.access_token), refreshToken: typeof json.refresh_token === "string" ? json.refresh_token : undefined };
+  return {
+    accessToken: String(json.access_token),
+    refreshToken: typeof json.refresh_token === "string" ? json.refresh_token : undefined,
+    scopes: typeof json.scope === "string" ? json.scope.split(/\s+/) : [],
+  };
 }
 
 /** A short-lived access token from the stored refresh token. Never stored. */
@@ -76,7 +99,12 @@ async function api<T>(token: string, path: string): Promise<{ status: number; js
   if (res.status === 401) throw new GmailAuthError("Gmail refused the access token. Reconnect Gmail.");
   if (res.status === 429) throw new Error("Gmail rate limit reached; the next check will retry.");
   const json = (await res.json().catch(() => ({}))) as T;
-  if (!res.ok) throw new Error(`Gmail API ${path.split("?")[0]} failed: ${res.status}`);
+  if (!res.ok) {
+    const reason = reasonOf(json);
+    if (res.status === 403 && /accessNotConfigured|SERVICE_DISABLED/i.test(reason)) throw new GmailSetupError("api-off", "The Gmail API is not enabled in UnMoney's Google Cloud project.");
+    if (res.status === 403 && /insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(reason)) throw new GmailSetupError("no-scope", "Google did not grant access to Gmail.");
+    throw new Error(`Gmail API ${path.split("?")[0]} failed: ${res.status}${reason ? ` ${reason}` : ""}`);
+  }
   return { status: res.status, json };
 }
 

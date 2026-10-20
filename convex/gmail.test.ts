@@ -169,3 +169,29 @@ test("connecting records where reading may start: now for \"from now on\", the l
   const again = (await t.run((ctx) => ctx.db.get(c._id)))!;
   expect(again.readsFrom).toBeLessThanOrEqual(Date.now() - 7 * 24 * 60 * 60 * 1000);
 });
+
+test("a callback whose Gmail call is refused for setup reasons says which, instead of a bare error", async () => {
+  const { t, userId } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const payload = `${userId}.30.${Date.now()}`;
+  const state = `${payload}.${await sign(payload)}`;
+  const real = globalThis.fetch;
+  const answer = (scope: string, gmail: Response) => async (input: string | URL | Request) => {
+    const u = String(input instanceof Request ? input.url : input);
+    if (u.startsWith("https://oauth2.googleapis.com/token")) return Response.json({ access_token: "at", refresh_token: "rt", scope });
+    if (u.startsWith("https://gmail.googleapis.com/")) return gmail;
+    return real(input as RequestInfo);
+  };
+  const gmailScope = "https://www.googleapis.com/auth/gmail.readonly";
+  const run = async (fake: typeof fetch) => {
+    globalThis.fetch = fake;
+    try { return (await t.fetch(`/gmail/callback?code=c&state=${state}`)).headers.get("Location"); } finally { globalThis.fetch = real; }
+  };
+  // the Gmail API is switched off in the Cloud project
+  expect(await run(answer(`openid ${gmailScope}`, Response.json({ error: { code: 403, status: "PERMISSION_DENIED", errors: [{ reason: "accessNotConfigured" }] } }, { status: 403 })) as typeof fetch))
+    .toBe("https://app.test/settings/gmail?gmail=api-off");
+  // the user left Gmail unticked on the consent screen
+  expect(await run(answer("openid email", Response.json({}, { status: 403 })) as typeof fetch)).toBe("https://app.test/settings/gmail?gmail=no-scope");
+  expect(await t.run((ctx) => ctx.db.query("gmailConnections").collect())).toEqual([]);
+});
