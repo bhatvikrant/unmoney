@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { Bookmark, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Tags, WalletCards } from "lucide-react";
 import { useQuery } from "convex/react";
@@ -81,7 +81,9 @@ export default function SettingsPage() {
         <Section>
           <DeleteAccountRow />
         </Section>
-        <p className="px-4 pt-6 text-xs text-muted-foreground">UnMoney · works offline and syncs across your devices.</p>
+        <p className="px-4 pt-6 text-xs text-muted-foreground">
+          UnMoney · works offline and syncs across your devices · <Link to="/privacy" className="underline underline-offset-2 hover:text-foreground">Privacy policy</Link>
+        </p>
       </Page>
     </>
   );
