@@ -1,0 +1,14 @@
+From: HSBC India <alerts@hsbc.co.in>
+Subject: Debit alert on your HSBC account
+Received: 2026-10-15T04:12:00Z
+
+Dear Customer,
+
+INR 12,000.00 has been debited from your HSBC account XXXXXX4410 on 15-10-26 towards NEFT to RAVI KUMAR (Ref N288262345678).
+
+Available balance: INR 84,215.40.
+
+If you did not make this transaction, please call 1800 267 3456.
+
+Yours sincerely,
+HSBC India
