@@ -7,11 +7,20 @@ import { senderAddress, senderDomain } from "./mail";
 /** Senders a new connection starts with: Indian banks and cards, UPI apps, and the shops the rules know. One entry is an address or a domain. */
 export const DEFAULT_SENDERS: string[] = [
   "hdfcbank.net", "hdfcbank.com", "icicibank.com", "axisbank.com", "sbi.co.in", "sbicard.com", "kotak.com", "kotakbank.com",
-  "idfcfirstbank.com", "yesbank.in", "indusind.com", "federalbank.co.in",
+  "idfcfirstbank.com", "yesbank.in", "indusind.com", "federalbank.co.in", "hsbc.co.in",
   "phonepe.com", "paytm.com", "paytmmail.com", "payments-noreply@google.com", "npci.org.in",
   "amazon.in", "flipkart.com", "swiggy.in", "zomato.com", "uber.com", "olacabs.com",
   "apple.com", "netflix.com", "spotify.com", "googleplay-noreply@google.com",
 ];
+
+/**
+ * A connection's stored senders with the defaults added since it was made appended at the end.
+ * A default already on the list, or covered by one of its domains, is not added twice.
+ */
+export function withNewDefaults(senders: string[]): string[] {
+  const missing = DEFAULT_SENDERS.filter((d) => !senders.includes(d) && !matchesSender(d.includes("@") ? d : `x@${d}`, senders));
+  return [...senders, ...missing];
+}
 
 /** Subject words that mark money mail from a sender not on the list. */
 export const MONEY_SUBJECT_WORDS = ["debited", "credited", "transaction", "payment", "receipt", "invoice", "order", "spent", "UPI", "txn", "\"payment received\""];

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { buildQuery, DEFAULT_SENDERS, matchesSender, normaliseSender, windowStart } from "./query";
+import { buildQuery, DEFAULT_SENDERS, matchesSender, normaliseSender, windowStart, withNewDefaults } from "./query";
 
 test("the query narrows to the window, the senders, Purchases and money subjects", () => {
   const q = buildQuery({ senders: ["hdfcbank.net", "Alerts@AxisBank.com"], scanPurchases: true, afterSeconds: 1_700_000_000.9 });
@@ -45,4 +45,13 @@ test("a check's window: the look-back first, then two days of overlap, never bef
   expect(windowStart({ lookbackDays: 0, readsFrom: connectedAt }, connectedAt)).toBe(connectedAt);
   expect(windowStart({ lookbackDays: 0, readsFrom: connectedAt, syncedUpTo: connectedAt }, now)).toBe(connectedAt);
   expect(windowStart({ lookbackDays: 0, readsFrom: connectedAt, syncedUpTo: now + 5 * day }, now + 6 * day)).toBe(now + 3 * day);
+});
+
+test("an existing connection gains the defaults it lacks, after its own entries, without doubles", () => {
+  const old = DEFAULT_SENDERS.filter((s) => s !== "hsbc.co.in");
+  expect(withNewDefaults([...old, "mybank.example"])).toEqual([...old, "mybank.example", "hsbc.co.in"]);
+  expect(withNewDefaults(DEFAULT_SENDERS)).toEqual(DEFAULT_SENDERS);
+  // covered already: a parent domain takes in an address under it
+  expect(withNewDefaults(["google.com"])).not.toContain("payments-noreply@google.com");
+  expect(withNewDefaults([])).toEqual(DEFAULT_SENDERS);
 });

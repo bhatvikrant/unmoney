@@ -133,6 +133,14 @@ and in Google Cloud add a second redirect URI to the same OAuth client: `https:/
 
 To see what a check would make of your own inbox without writing anything: `npx convex run gmail:dryRun '{"userId":"<your users id>"}'`.
 
+A connection keeps the sender list it was made with, so senders added to `DEFAULT_SENDERS` (`shared/gmail/query.ts`) reach existing connections only after a one-off run, once the new code is deployed:
+
+```bash
+npx convex run gmail:addNewDefaultSenders        # add --prod for production
+```
+
+It appends every default missing from each connection's list and leaves the rest alone; a default the user had removed comes back, so check the list in More › Gmail afterwards. It returns how many connections it changed.
+
 ## Import from Money Manager
 
 More › Import from Money Manager reads Money Manager's Excel export (Settings › Backup › Export to Excel), as well as CSV and TSV. Every file goes through the same review: a dry run shows what will be added, which accounts and categories get created, which rows are skipped and which entries are already there.
