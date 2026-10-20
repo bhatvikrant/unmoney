@@ -241,9 +241,10 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   // New entries start with the cursor in the amount, and go back there after "Continue". The tap
   // that opened this screen primed the iOS keyboard (primeKeyboard); take focus over before paint.
   const amountRef = useRef<HTMLInputElement>(null);
+  // a draft already has its amount: no keyboard popping up over a review
   useLayoutEffect(() => {
-    if (!isEdit) amountRef.current?.focus();
-  }, [isEdit]);
+    if (!isEdit && !draft) amountRef.current?.focus();
+  }, [isEdit, draft]);
 
   // Desktop: Enter saves (Ctrl/⌘+Enter even from the description), Esc goes back. A field that
   // uses Enter itself (tags) prevents it first; an open sheet or dialog keeps its own keys.
