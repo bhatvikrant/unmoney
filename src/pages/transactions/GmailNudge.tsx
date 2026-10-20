@@ -29,11 +29,11 @@ export function GmailNudge({ from, to }: { from: string; to: string }) {
   if (!here && !matched) return null;
   const title = here ? `${here} ${here === 1 ? "entry" : "entries"} found in Gmail` : `Gmail found ${matched} ${matched === 1 ? "entry" : "entries"} you may already have`;
   const hint = here
-    ? `Tap a faded row to check it and save, or review them all.${matched ? ` ${matched} more may already be added.` : ""}`
+    ? `Pick which to import, or tap a faded row to check one.${matched ? ` ${matched} more may already be added.` : ""}`
     : "Each one looks like an entry you typed in. Say whether it is the same or new.";
   return (
     <Card title={title} hint={hint}>
-      <Button size="sm" onClick={() => nav("/gmail")}>Review</Button>
+      <Button size="sm" onClick={() => nav("/gmail")}>Pick what to import</Button>
     </Card>
   );
 }
