@@ -96,8 +96,11 @@ export async function revoke(token: string): Promise<void> {
 
 /** Gmail's "slow down": 429, or a 403 whose reason is a rate limit (common right after the API is switched on). */
 const RATE_LIMIT = /rateLimitExceeded|userRateLimitExceeded|RATE_LIMIT_EXCEEDED|RESOURCE_EXHAUSTED|concurrentLimitExceeded/i;
-/** Waits before each retry of a rate-limited call; Google asks for exponential backoff. */
-export const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000];
+/**
+ * Waits before each retry of a rate-limited call; Google asks for exponential backoff. Its
+ * per-user quota counts per minute, so the waits add up to well over a minute.
+ */
+export const BACKOFF_MS = [2000, 5000, 15000, 30000, 60000];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function api<T>(token: string, path: string): Promise<{ status: number; json: T }> {
