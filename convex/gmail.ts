@@ -412,7 +412,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   const { inserts, updates } = foldDrafts(candidates, prep.openDrafts);
   return {
     scanned: ids.length,
-    inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, prep.transactions) })),
+    inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, prep.transactions, prep.accounts) })),
     updates,
     learned: learnAccounts(prep),
     aiCalls, aiSkipped, aiDropped, notes,

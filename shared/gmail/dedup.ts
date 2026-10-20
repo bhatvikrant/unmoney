@@ -5,6 +5,7 @@
  */
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { diffDays } from "../dates";
+import { drawsFromLinked } from "../ledger";
 import { isShopMail } from "./rules";
 
 /** A draft about to be written: everything but what the database and the user add. */
@@ -86,19 +87,30 @@ export function foldDrafts(batch: DraftCandidate[], open: Doc<"drafts">[]): Fold
 
 /**
  * An entry the user already has that looks like this draft: same amount, dated within a day,
- * same payment method when both are known. Entries a schedule made count too, so a salary mail
- * matches the salary repeat. The closest in date wins, then the most recent. Entries that came
- * from a draft themselves are never matched again.
+ * same money when both methods are known. A bank account, its debit cards and the UPIs linked to
+ * it are the same money, so an alert read as "HDFC" still finds the entry typed under "PhonePe".
+ * Entries a schedule made count too, so a salary mail matches the salary repeat. The closest in
+ * date wins, then the exact method, then the most recent. Entries that came from a draft
+ * themselves are never matched again.
  */
-export function matchEntry(draft: Pick<DraftCandidate, "proposal">, transactions: Doc<"transactions">[]): Id<"transactions"> | undefined {
+export function matchEntry(draft: Pick<DraftCandidate, "proposal">, transactions: Doc<"transactions">[], accounts: Doc<"accounts">[] = []): Id<"transactions"> | undefined {
   const p = draft.proposal;
+  const byId = new Map(accounts.map((a) => [a._id as string, a]));
+  const holder = (id: Id<"accounts"> | undefined) => {
+    const a = id ? byId.get(id) : undefined;
+    return a && drawsFromLinked(a) && a.linkedAccountId ? a.linkedAccountId : id;
+  };
+  const want = holder(p.accountId);
+  const exact = (t: Doc<"transactions">) => t.accountId === p.accountId || t.toAccountId === p.accountId;
   let best: Doc<"transactions"> | undefined;
   for (const t of transactions) {
     if (t.source || t.amount !== p.amount || !withinADay(t.date, p.date)) continue;
-    if (p.accountId && t.accountId !== p.accountId && t.toAccountId !== p.accountId) continue;
+    if (p.accountId && !exact(t) && holder(t.accountId) !== want && holder(t.toAccountId) !== want) continue;
     if (!best) { best = t; continue; }
     const db = Math.abs(diffDays(best.date, p.date)), dt = Math.abs(diffDays(t.date, p.date));
-    if (dt < db || (dt === db && t._creationTime > best._creationTime)) best = t;
+    if (dt !== db) { if (dt < db) best = t; continue; }
+    if (exact(t) !== exact(best)) { if (exact(t)) best = t; continue; }
+    if (t._creationTime > best._creationTime) best = t;
   }
   return best?._id;
 }
