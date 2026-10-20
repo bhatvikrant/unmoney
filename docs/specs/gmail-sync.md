@@ -228,11 +228,15 @@ The primary button reads **Save entry**; a secondary **Not an entry** dismisses 
 
 A saved entry's detail screen keeps the banner (from `source`), so the user can always find the mail an entry came from.
 
-### 6.3 Review page
+### 6.3 Picking what to import
 
-`/gmail` (reachable from the ledger card and Settings): all open drafts, newest first, grouped **Ready to save** (account and category resolved, high confidence) / **Needs a look** (something unresolved or medium/low) / **Already added?** (matched). Each row has Save and Dismiss; the "Ready" group has **Save all** (one `drafts.accept` op per draft, applied locally at once, synced in order). "Already added?" rows show the matched entry underneath with **Same entry** (`drafts.link`) and **No, it's new** (clears the match and the draft returns to the ledger).
+`/gmail` lists every open draft as a checklist before anything is imported (`src/pages/transactions/GmailReviewPage.tsx`). The header says how many entries were found; every new one starts ticked, and "Select all" covers them. Drafts that look like an entry the user already has sit in a "Maybe already added" group, unticked, with a link button for "same entry". The bar at the bottom shows how many are ticked and what they add up to (out and in), with **Import N** (or **Import all N**) and **Dismiss** (asks first). Unticked drafts stay, here and as faded rows in the ledger, until imported or dismissed.
 
-Keyboard on desktop: `j`/`k` move, `s` save, `x` dismiss, `Enter` opens the editor, following `useShortcuts`.
+A gap the mail left is filled the way the entry form would (`shared/gmail/importable.ts`): the default payment method, and the "Other" category of the right type. The row says what was filled in, and tapping it opens the form to change it first. A transfer missing one of its methods cannot be ticked; it has to be opened.
+
+Right after connecting, the settings page shows "Looking for money mail in your inbox…" until the first check finishes, then opens this list. With the "From now" look-back, or when nothing was found, it says so instead.
+
+Keyboard on desktop: `j`/`k` move, space ticks, `Enter` opens, `x` dismisses.
 
 ### 6.4 Offline
 
