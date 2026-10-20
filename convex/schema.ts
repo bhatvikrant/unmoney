@@ -322,6 +322,8 @@ export default defineSchema({
     lastError: v.optional(v.string()),
     status: v.union(v.literal("ok"), v.literal("reauth"), v.literal("paused")),
     lookbackDays: v.number(),
+    /** Mail received before this is never read: when the user connected, minus the look-back they chose. */
+    readsFrom: v.optional(v.number()),
     /** Sender allowlist, editable; seeded with known bank, UPI and shop senders. */
     senders: v.array(v.string()),
     /** Also scan mail Gmail files under Purchases. */

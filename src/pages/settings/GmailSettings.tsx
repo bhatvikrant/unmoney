@@ -143,12 +143,12 @@ export default function GmailSettings() {
             </Section>
             <Section title="Look back">
               <div className="px-4 py-3">
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {LOOKBACKS.map((d) => (
-                    <button key={d} type="button" onClick={() => setLookback(d)} className={cn("h-9 rounded-md border text-sm transition-colors", lookback === d ? "border-primary text-foreground font-medium bg-accent/40" : "text-muted-foreground")}>{d} days</button>
+                    <button key={d} type="button" onClick={() => setLookback(d)} className={cn("h-9 rounded-md border text-sm transition-colors", lookback === d ? "border-primary text-foreground font-medium bg-accent/40" : "text-muted-foreground")}>{d === 0 ? "From now" : `${d} days`}</button>
                   ))}
                 </div>
-                <div className="mt-2 text-xs text-muted-foreground">How far back the first check reads. After that, every hour picks up what is new.</div>
+                <div className="mt-2 text-xs text-muted-foreground">{lookback === 0 ? "Only mail that arrives after you connect. Nothing already in your inbox is read." : "How far back the first check reads. After that, every hour picks up what is new."}</div>
               </div>
             </Section>
             <div className="px-4 pt-4">
