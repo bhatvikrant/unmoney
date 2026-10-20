@@ -9,7 +9,7 @@ import { useQuery } from "convex/react";
 import { Mail } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import { useView } from "@/lib/store";
-import { draftsRange } from "../../../shared/views";
+import { draftMatches, draftsRange } from "../../../shared/views";
 import { Button } from "@/components/ui/button";
 
 export function GmailNudge({ from, to }: { from: string; to: string }) {
@@ -18,7 +18,7 @@ export function GmailNudge({ from, to }: { from: string; to: string }) {
   // online only: offline the card says what the local copy knows and nothing about the connection
   const status = useQuery(api.gmail.status);
   const here = useMemo(() => draftsRange(view, from, to).length, [view, from, to]);
-  const matched = useMemo(() => view.drafts.filter((d) => d.status === "open" && !!d.matchedTransactionId).length, [view]);
+  const matched = useMemo(() => draftMatches(view).size, [view]);
   if (status?.connected && status.status === "reauth") {
     return (
       <Card title="Gmail needs reconnecting" hint="Google no longer accepts the saved access, so new money mail is not being read.">
