@@ -16,8 +16,23 @@ export const DEFAULT_SENDERS: string[] = [
 /** Subject words that mark money mail from a sender not on the list. */
 export const MONEY_SUBJECT_WORDS = ["debited", "credited", "transaction", "payment", "receipt", "invoice", "order", "spent", "UPI", "txn", "\"payment received\""];
 
-export const LOOKBACKS = [7, 30, 90] as const;
+/** How far back the first check reads, in days; 0 is "from now on": only mail that arrives after connecting. */
+export const LOOKBACKS = [0, 7, 30, 90] as const;
 export type Lookback = (typeof LOOKBACKS)[number];
+
+const DAY = 24 * 60 * 60 * 1000;
+/** Later checks start this long before the last one ended, so mail that arrived late is not missed. */
+export const OVERLAP_MS = 2 * DAY;
+
+/**
+ * Where a check's search starts, in ms. The first covers the look-back; later ones overlap the last
+ * by two days. Neither goes before `readsFrom` (connect time minus the look-back), so "from now on"
+ * never reads mail from before the user connected.
+ */
+export function windowStart(c: { lookbackDays: number; syncedUpTo?: number; readsFrom?: number }, now: number): number {
+  const start = c.syncedUpTo ? c.syncedUpTo - OVERLAP_MS : now - c.lookbackDays * DAY;
+  return c.readsFrom === undefined ? start : Math.max(start, c.readsFrom);
+}
 
 /** A sender entry as stored: trimmed, lower case, without a display name or angle brackets. */
 export function normaliseSender(entry: string): string {
