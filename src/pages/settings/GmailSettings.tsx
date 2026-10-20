@@ -3,7 +3,7 @@
  * tune which senders are read, and disconnect. The consent screen is Google's own page; this
  * screen sends the browser there and reads the outcome from ?gmail= when it comes back.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { Mail, RefreshCw, X } from "lucide-react";
@@ -30,6 +30,9 @@ export function ago(ms: number, now = Date.now()): string {
   return d === 1 ? "yesterday" : `${d} days ago`;
 }
 
+/** How long before this page loads the first check may have started. */
+const FIRST_CHECK_SLACK_MS = 2 * 60 * 1000;
+
 const errorText = (e: unknown) => (e instanceof Error ? e.message.replace(/^.*Uncaught ConvexError: /, "").replace(/\n[\s\S]*$/, "") : "Something went wrong");
 
 export default function GmailSettings() {
@@ -44,18 +47,41 @@ export default function GmailSettings() {
   const [lookback, setLookback] = useState<Lookback>(30);
   const [busy, setBusy] = useState<null | "connect" | "check" | "disconnect">(null);
   const [newSender, setNewSender] = useState("");
+  /**
+   * Back from connecting: the first check is running, and what it finds opens as a list to pick
+   * from. It started as Google sent the browser back, a moment before this page loaded.
+   */
+  const [waitingSince] = useState<number | null>(() => (sp.get("gmail") === "connected" ? Date.now() - FIRST_CHECK_SLACK_MS : null));
+  const firstCheck = waitingSince !== null && s?.connected ? s.log.find((l) => l.at >= waitingSince) : undefined;
+  const waiting = waitingSince !== null && !!s?.connected && s.lookbackDays !== 0 && !firstCheck;
+  const handled = useRef(false);
 
   // back from Google's consent screen
   useEffect(() => {
     const outcome = sp.get("gmail");
     if (!outcome) return;
-    if (outcome === "connected") toast.success("Gmail connected. Looking for money mail now…");
+    if (outcome === "connected") toast.success("Gmail connected");
     else if (outcome === "denied") toast("Gmail was not connected.");
     else toast.error("Could not connect Gmail. Try again.");
     const n = new URLSearchParams(sp);
     n.delete("gmail");
     setSp(n, { replace: true });
   }, [sp, setSp]);
+
+  // the first check finished: show what it found before anything is imported
+  useEffect(() => {
+    if (handled.current || waitingSince === null || !s?.connected) return;
+    if (s.lookbackDays === 0) {
+      handled.current = true;
+      toast("New money mail will show up in From Gmail for you to pick from.");
+      return;
+    }
+    if (!firstCheck) return;
+    handled.current = true;
+    if (firstCheck.error) toast.error(`The first check failed: ${firstCheck.error}`);
+    else if (s.open) nav("/gmail");
+    else toast(`No money mail found in the last ${s.lookbackDays} days. New mail is checked every hour.`);
+  }, [waitingSince, firstCheck, s, nav]);
 
   async function connect() {
     setBusy("connect");
@@ -73,7 +99,8 @@ export default function GmailSettings() {
       const r = await syncNow({});
       if (!r.ran) toast("Checked less than a minute ago.");
       else if (r.error) toast.error(`The check failed: ${r.error}`);
-      else toast.success(r.found ? `Found ${r.found} new ${r.found === 1 ? "entry" : "entries"} to review.` : "Nothing new.");
+      else if (r.found) toast.success(`Found ${r.found} new ${r.found === 1 ? "entry" : "entries"}`, { action: { label: "Pick what to import", onClick: () => nav("/gmail") } });
+      else toast.success("Nothing new.");
     } catch (e) {
       toast.error(errorText(e));
     } finally {
@@ -163,6 +190,15 @@ export default function GmailSettings() {
 
         {s && s.connected ? (
           <>
+            {waiting ? (
+              <div className="mx-4 mt-4 flex items-start gap-3 rounded-lg border bg-card p-3 text-sm" role="status">
+                <RefreshCw className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
+                <div>
+                  <div className="font-medium">Looking for money mail in your inbox…</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">This takes a few seconds. You'll see everything it finds and pick what to import; nothing is added before that.</div>
+                </div>
+              </div>
+            ) : null}
             {s.status === "reauth" ? (
               <div className="mx-4 mt-4 rounded-lg border border-amber-400/50 bg-amber-50 p-3 text-sm dark:bg-amber-950/30">
                 <div className="font-medium">Gmail needs reconnecting</div>
@@ -176,7 +212,7 @@ export default function GmailSettings() {
               <Row label={s.open ? `${s.open} ${s.open === 1 ? "draft" : "drafts"} waiting` : "Nothing waiting"} hint={s.open ? "Faded rows in the ledger, or review them all" : "New mail is checked every hour"}
                 right={
                   <div className="flex items-center gap-2">
-                    {s.open ? <Button size="sm" onClick={() => nav("/gmail")}>Review</Button> : null}
+                    {s.open ? <Button size="sm" onClick={() => nav("/gmail")}>Pick what to import</Button> : null}
                     <Button variant="outline" size="sm" disabled={busy !== null || s.status !== "ok"} onClick={() => void check()}>
                       <RefreshCw className={cn("size-3.5", busy === "check" && "animate-spin")} />{busy === "check" ? "Checking" : "Check now"}
                     </Button>
