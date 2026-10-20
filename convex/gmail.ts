@@ -24,7 +24,7 @@ import { triage } from "../shared/gmail/triage";
 import { parseMail } from "../shared/gmail/rules";
 import { accountMapKey, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
 import { foldDrafts, laterMatches, matchEntry, type DraftCandidate } from "../shared/gmail/dedup";
-import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, normaliseSender, type Lookback } from "../shared/gmail/query";
+import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, normaliseSender, windowStart, type Lookback } from "../shared/gmail/query";
 import { AI_BATCH, AI_MODEL, AI_MONTHLY_CAP, buildAiInput, lowerConfidence, OUTPUT_SCHEMA, SYSTEM_PROMPT, validateAiResults, type AiRead } from "../shared/gmail/ai";
 
 type Connection = Doc<"gmailConnections">;
@@ -32,8 +32,6 @@ const DAY = 24 * 60 * 60 * 1000;
 /** Mails fetched on the first check and on later ones. */
 const FIRST_SYNC_MAX = 300;
 const SYNC_MAX = 100;
-/** Later checks start this long before the last one ended, so mail that arrived late is not missed. */
-const OVERLAP = 2 * DAY;
 /** How many checks the log keeps, and after how many failures in a row a connection pauses itself. */
 const LOG_KEEP = 10;
 const PAUSE_AFTER_FAILURES = 3;
@@ -144,18 +142,19 @@ export const saveConnection = internalMutation({
   args: { userId: v.id("users"), email: v.string(), refreshTokenEnc: v.string(), iv: v.string(), lookbackDays: lookbackArg },
   handler: async (ctx, { userId, email, refreshTokenEnc, iv, lookbackDays }) => {
     if (!(await ctx.db.get(userId))) return;
+    const readsFrom = Date.now() - lookbackDays * DAY;
     const old = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (old) {
       // a different mailbox is a fresh start; the same one picks up where it left off
       const same = old.email.toLowerCase() === email.toLowerCase();
       await ctx.db.patch(old._id, {
-        email, refreshTokenEnc, iv, lookbackDays, status: "ok", lastError: undefined,
+        email, refreshTokenEnc, iv, lookbackDays, readsFrom, status: "ok", lastError: undefined,
         syncedUpTo: same ? old.syncedUpTo : undefined, accountMap: same ? old.accountMap : {},
       });
       return;
     }
     await ctx.db.insert("gmailConnections", {
-      userId, email, refreshTokenEnc, iv, status: "ok", lookbackDays, senders: DEFAULT_SENDERS, scanPurchases: true, accountMap: {},
+      userId, email, refreshTokenEnc, iv, status: "ok", lookbackDays, readsFrom, senders: DEFAULT_SENDERS, scanPurchases: true, accountMap: {},
       aiMonth: monthOf(Date.now()), aiCalls: 0, log: [],
     });
   },
@@ -362,7 +361,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   const c = prep.connection;
   const token = await gmailApi.accessToken(await decryptText(c.refreshTokenEnc, c.iv));
   const first = !c.syncedUpTo;
-  const afterMs = first ? startedAt - c.lookbackDays * DAY : c.syncedUpTo! - OVERLAP;
+  const afterMs = windowStart(c, startedAt);
   const q = buildQuery({ senders: c.senders, scanPurchases: c.scanPurchases, afterSeconds: afterMs / 1000 });
   const ids = await gmailApi.listMessageIds(token, q, first ? FIRST_SYNC_MAX : SYNC_MAX);
   const seen = new Set(await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids }));

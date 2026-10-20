@@ -156,3 +156,16 @@ test("the hourly check schedules one run per live connection", async () => {
   const scheduled = await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect());
   expect(scheduled.map((s) => [s.name, (s.args[0] as { userId: string }).userId])).toEqual([["gmail:syncUser", userId]]);
 });
+
+test("connecting records where reading may start: now for \"from now on\", the look-back before it otherwise", async () => {
+  const { t, userId } = await setup();
+  const before = Date.now();
+  await t.mutation(internal.gmail.saveConnection, { userId, email: "me@gmail.com", refreshTokenEnc: "e", iv: "i", lookbackDays: 0 });
+  const c = (await t.run((ctx) => ctx.db.query("gmailConnections").unique()))!;
+  expect(c.lookbackDays).toBe(0);
+  expect(c.readsFrom).toBeGreaterThanOrEqual(before);
+  // reconnecting the same mailbox with a look-back moves the start back with it
+  await t.mutation(internal.gmail.saveConnection, { userId, email: "me@gmail.com", refreshTokenEnc: "e2", iv: "i2", lookbackDays: 7 });
+  const again = (await t.run((ctx) => ctx.db.get(c._id)))!;
+  expect(again.readsFrom).toBeLessThanOrEqual(Date.now() - 7 * 24 * 60 * 60 * 1000);
+});
