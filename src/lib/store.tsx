@@ -73,7 +73,8 @@ function useLiveTables(): Live {
   const currencies = useQuery(api.sync.table, { table: "currencies" });
   const categoryCleanups = useQuery(api.sync.table, { table: "categoryCleanups" });
   const history = useQuery(api.sync.table, { table: "history" });
-  return { settings, accountGroups, accounts, categories, transactions, repeats, bookmarks, budgets, notes, currencies, categoryCleanups, history } as Live;
+  const drafts = useQuery(api.sync.table, { table: "drafts" });
+  return { settings, accountGroups, accounts, categories, transactions, repeats, bookmarks, budgets, notes, currencies, categoryCleanups, history, drafts } as Live;
 }
 
 /** Every page of the user's entries, kept live; undefined until the last page has arrived. */
@@ -172,7 +173,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     for (const t of TABLES) (s as Record<Table, unknown[]>)[t] = live[t] as unknown[];
     return s;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allLive, live.settings, live.accountGroups, live.accounts, live.categories, live.transactions, live.repeats, live.bookmarks, live.budgets, live.notes, live.currencies, live.categoryCleanups, live.history]);
+  }, [allLive, live.settings, live.accountGroups, live.accounts, live.categories, live.transactions, live.repeats, live.bookmarks, live.budgets, live.notes, live.currencies, live.categoryCleanups, live.history, live.drafts]);
 
   liveRef.current = allLive;
   connectedRef.current = conn.isWebSocketConnected;

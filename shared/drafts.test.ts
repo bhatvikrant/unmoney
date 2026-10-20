@@ -72,6 +72,16 @@ test("linking marks an entry the user typed in as the one the mail was about", (
   expect(() => run(r.snap, "drafts.link", { id: d._id, transactionId: txId })).toThrow(/already handled/);
 });
 
+test("\"no, it's new\" drops the match and the draft is back on the ledger", () => {
+  const { s, d } = ledger();
+  const snap = { ...s, drafts: [{ ...d, matchedTransactionId: "t1" as Id<"transactions"> }, ...s.drafts.slice(1)] };
+  expect(draftsRange(snap, "2026-10-01", "2026-10-31").map((x) => x._id)).toEqual(["d2"]);
+  const r = run(snap, "drafts.unmatch", { id: d._id });
+  expect(r.snap.drafts[0].matchedTransactionId).toBeUndefined();
+  expect(draftsRange(r.snap, "2026-10-01", "2026-10-31").map((x) => x._id)).toEqual(["d2", "d1"]);
+  expect(() => run(snap, "drafts.unmatch", { id: "nope" })).toThrow(/draft is gone/);
+});
+
 test("a copy of a mail-sourced entry is not itself from the mail, and an edit keeps the link", () => {
   const { s, d, cash, food } = ledger();
   const r = run(s, "drafts.accept", fields(d));
@@ -84,7 +94,8 @@ test("a copy of a mail-sourced entry is not itself from the mail, and an edit ke
 test("the ledger sees open, unmatched drafts in its range", () => {
   const { s } = ledger();
   const snap = { ...s, drafts: [...s.drafts, draft("d4", { date: "2026-10-18" }, { matchedTransactionId: "t" as Id<"transactions"> }), draft("d5", { date: "2026-11-01" })] };
-  expect(draftsRange(snap, "2026-10-01", "2026-10-31").map((d) => d._id)).toEqual(["d1", "d2"]);
+  // newest day first, as the ledger lists them
+  expect(draftsRange(snap, "2026-10-01", "2026-10-31").map((d) => d._id)).toEqual(["d2", "d1"]);
   expect(draftsRange(snap, "2026-11-01", "2026-11-30").map((d) => d._id)).toEqual(["d5"]);
 });
 
@@ -92,6 +103,7 @@ test("the server loads the tables the drafts ops need, and just the linked entry
   expect(OP_TABLES["drafts.accept"]).toEqual(["drafts", "transactions", "accounts", "categories"]);
   expect(OP_TABLES["drafts.dismiss"]).toEqual(["drafts"]);
   expect(OP_TABLES["drafts.link"]).toEqual(["drafts", "transactions"]);
+  expect(OP_TABLES["drafts.unmatch"]).toEqual(["drafts"]);
   expect(txScope({ id: "x", kind: "drafts.link", args: { id: "d1", transactionId: "t9" }, at: 1 })).toEqual({ ids: ["t9"] });
   expect(txScope({ id: "x", kind: "drafts.accept", args: { id: "d1" }, at: 1 })).toEqual({});
 });

@@ -59,7 +59,22 @@ export function notesRange(snap: Snapshot, from: string, to: string): Doc<"notes
 
 /** Open drafts from Gmail dated in the range, for the ledger's faded rows. Ones matched to an entry the user already has are left out. */
 export function draftsRange(snap: Snapshot, from: string, to: string): Doc<"drafts">[] {
-  return snap.drafts.filter((d) => d.status === "open" && !d.matchedTransactionId && d.proposal.date >= from && d.proposal.date <= to);
+  return snap.drafts.filter((d) => d.status === "open" && !d.matchedTransactionId && d.proposal.date >= from && d.proposal.date <= to).sort(byDraftDesc);
+}
+
+/** Newest mail first within a day; days are grouped by the caller. */
+export function byDraftDesc(a: Doc<"drafts">, b: Doc<"drafts">): number {
+  if (a.proposal.date !== b.proposal.date) return b.proposal.date.localeCompare(a.proposal.date);
+  return b.receivedAt - a.receivedAt;
+}
+
+/** Every draft still waiting, newest first, for the review page. Matched ones ("already added?") included. */
+export function draftsOpen(snap: Snapshot): Doc<"drafts">[] {
+  return snap.drafts.filter((d) => d.status === "open").sort(byDraftDesc);
+}
+
+export function draftGet(snap: Snapshot, id: string): Doc<"drafts"> | null {
+  return snap.drafts.find((d) => d._id === id) ?? null;
 }
 
 // ---------- accounts ----------
