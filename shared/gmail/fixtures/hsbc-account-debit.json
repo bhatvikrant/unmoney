@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hsbc",
+    "type": "debit",
+    "amount": 12000,
+    "currency": "INR",
+    "date": "2026-10-15",
+    "dateSource": "mail",
+    "last4": "4410",
+    "bankName": "HSBC",
+    "channel": "netbanking",
+    "merchantRaw": "RAVI KUMAR"
+  }
+}

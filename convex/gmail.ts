@@ -24,7 +24,7 @@ import { triage } from "../shared/gmail/triage";
 import { parseMail } from "../shared/gmail/rules";
 import { accountMapKey, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
 import { foldDrafts, laterMatches, matchEntry, type DraftCandidate } from "../shared/gmail/dedup";
-import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, normaliseSender, windowStart, type Lookback } from "../shared/gmail/query";
+import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, normaliseSender, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
 import { AI_BATCH, AI_MODEL, AI_MONTHLY_CAP, buildAiInput, lowerConfidence, OUTPUT_SCHEMA, SYSTEM_PROMPT, validateAiResults, type AiRead } from "../shared/gmail/ai";
 
 type Connection = Doc<"gmailConnections">;
@@ -184,6 +184,27 @@ export const updateSettings = mutation({
     if (args.paused === true && c.status === "ok") patch.status = "paused";
     if (args.paused === false && c.status === "paused") { patch.status = "ok"; patch.lastError = undefined; }
     await ctx.db.patch(c._id, patch);
+  },
+});
+
+/**
+ * One-off, after DEFAULT_SENDERS grows: give every existing connection the new defaults, since
+ * a connection keeps the list it was made with. It only adds: every default missing from a list is
+ * appended (a default the user once removed comes back too), and nothing the user added is touched.
+ * Run with `npx convex run gmail:addNewDefaultSenders` (add --prod for production).
+ */
+export const addNewDefaultSenders = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ connections: number; updated: number }> => {
+    const all = await ctx.db.query("gmailConnections").collect();
+    let updated = 0;
+    for (const c of all) {
+      const senders = withNewDefaults(c.senders).slice(0, MAX_SENDERS);
+      if (senders.length === c.senders.length) continue;
+      await ctx.db.patch(c._id, { senders });
+      updated++;
+    }
+    return { connections: all.length, updated };
   },
 });
 

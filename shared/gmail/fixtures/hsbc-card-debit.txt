@@ -1,0 +1,12 @@
+From: HSBC India <alerts@mail.hsbc.co.in>
+Subject: HSBC Credit Card transaction alert
+Received: 2026-10-17T13:05:00Z
+
+Dear Customer,
+
+Your HSBC Premier Credit Card ending with 7731 has been used for INR 1,849.00 at ZEPTO MARKETPLACE on 17-10-26 at 18:34:12.
+
+If you have not done this transaction, please call 1800 267 3456 immediately to block your card.
+
+Yours sincerely,
+HSBC India

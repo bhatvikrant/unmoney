@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hsbc",
+    "type": "debit",
+    "amount": 1849,
+    "currency": "INR",
+    "date": "2026-10-17",
+    "dateSource": "mail",
+    "time": "18:34",
+    "last4": "7731",
+    "bankName": "HSBC",
+    "channel": "card",
+    "merchantRaw": "ZEPTO MARKETPLACE"
+  }
+}

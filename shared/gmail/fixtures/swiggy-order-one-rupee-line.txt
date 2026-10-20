@@ -1,0 +1,22 @@
+From: Swiggy <noreply@swiggy.in>
+Subject: Your Swiggy order summary
+Received: 2026-10-12T08:05:00Z
+
+Thank you for ordering from Meghana Foods, Indiranagar.
+
+Order No. #199023456789
+Ordered on 12 Oct 2026, 1:20 PM
+
+Swiggy One Lite membership (first 3 months)
+Membership Total ₹1.00
+
+1 x Chicken Boneless Biryani ₹349.00
+1 x Mint Lime Soda (Deal of the day) ₹1.00
+
+Item Total ₹350.00
+Delivery Fee ₹0.00
+Platform Fee ₹10.00
+Taxes & Charges ₹18.50
+
+Order Total ₹379.50
+Paid via UPI
