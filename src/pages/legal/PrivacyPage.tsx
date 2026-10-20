@@ -10,8 +10,8 @@ import { Button } from "@/components/ui/button";
 import { useGoBack } from "@/lib/nav";
 import { applyTheme } from "@/lib/theme";
 
-/** Fill in before submitting the consent screen for Google's verification (docs/google-verification.md). */
-const CONTACT_EMAIL = "privacy@example.com";
+/** Also the support and developer contact on Google's consent screen (docs/google-verification.md). */
+const CONTACT_EMAIL = "vik.bhat223@gmail.com";
 const UPDATED = "20 October 2026";
 const USER_DATA_POLICY = "https://developers.google.com/terms/api-services-user-data-policy";
 const LIMITED_USE = "https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes";
