@@ -1,6 +1,8 @@
 import { useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { Bookmark, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Tags, WalletCards } from "lucide-react";
+import { Bookmark, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Tags, WalletCards } from "lucide-react";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import type { ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import { SyncBadge } from "@/components/shell/SyncStatus";
@@ -25,6 +27,7 @@ export default function SettingsPage() {
   const { settings: s, user, accounts, categories } = useApp();
   const visibleAccounts = accounts.filter((a) => !a.hidden && !a.archivedAt);
   const { status, clearLocal } = useStore();
+  const gmail = useQuery(api.gmail.status);
   const { signOut } = useAuthActions();
   const confirm = useConfirm();
   async function onSignOut() {
@@ -73,6 +76,7 @@ export default function SettingsPage() {
         <Section title="Data">
           {link(<HardDriveDownload />, "Backup & export", "/settings/backup")}
           {link(<FileInput />, "Import from Money Manager", "/import")}
+          {link(<Mail />, "Gmail", "/settings/gmail", { value: gmail?.connected ? gmail.status === "reauth" ? "Reconnect" : gmail.open ? `${gmail.open} to review` : "On" : "Off", hint: "Turn money mail into entries", under: ["/gmail"] })}
         </Section>
         <Section>
           <DeleteAccountRow />

@@ -1,6 +1,6 @@
 # Spec: Gmail sync
 
-Status: draft · 2026-10-20
+Status: built · 2026-10-20 (steps 1 to 5 in the code; step 6, Google's verification, is paperwork)
 
 ## 1. The idea, refined
 
@@ -165,10 +165,7 @@ Push via `users.watch` + Pub/Sub would make it instant but needs a GCP topic and
 ### 5.2 What `syncUser` does
 
 1. Mint an access token from the stored refresh token.
-2. **Find candidate message ids.**
-   - Incremental: `history.list?startHistoryId=<historyId>&historyTypes=messageAdded&labelId=INBOX`. On HTTP 404 (history expired, it only lasts about a week) fall back to the next bullet with a 7-day window.
-   - First time, or fallback: `messages.list?q=<query>&maxResults=100`, paging up to 300 messages, where the query is `newer_than:<N>d` and one of: `from:(<allowlisted senders>)`, `category:purchases` when enabled, or `subject:(debited OR credited OR transaction OR payment OR receipt OR invoice OR order OR spent OR UPI OR txn OR "payment received")`.
-   - Drop ids already in `drafts` (`by_user_message`) or already the `source` of an entry (a small `by_user_source` index on `transactions`, or just the drafts table since every saved entry came from a draft).
+2. **Find candidate message ids** with one `messages.list` search (`shared/gmail/query.ts`): `after:<unix time>` and one of `from:(<allowlisted senders>)`, `category:purchases` when enabled, or `subject:(debited OR credited OR transaction OR payment OR receipt OR invoice OR order OR spent OR UPI OR txn OR "payment received")`. The first check's window is the lookback the user chose (up to 300 mails); every later one starts two days before the previous check ended (`syncedUpTo`, up to 100 mails), so mail that arrived late is still seen. Ids that already have a draft (`by_user_message`, or folded into one) are dropped before anything is fetched. (The spec first planned Gmail's `history.list` cursor; the dated window is simpler, survives the week-long history expiry, and the dedup makes the overlap free.)
 3. **Fetch** each remaining message with `messages.get?format=full`, take the `text/plain` part, else strip the HTML part to text, cap at 4,000 characters, drop quoted replies and signatures.
 4. **Triage** (pure, `shared/gmail/triage.ts`): keep a mail only if it has a currency amount pattern (`Rs.`, `₹`, `INR`, `$`, `USD`, `€`, …) and a money verb nearby; drop OTPs, "transaction failed/declined", statements ("your statement is ready"), promos, balance alerts without a transaction. This throws away most of what the Gmail query let through, before any model call.
 5. **Rules** (pure, `shared/gmail/rules.ts`): a parser per known format, each returning `{ amount, type, date, last4?, bankName?, channel, merchantRaw, vpa? }` or null. v1 formats, written from real samples: HDFC, ICICI, Axis, SBI, Kotak debit/credit alerts (card, UPI, net banking), the UPI apps' "payment successful" mails, Amazon/Flipkart/Swiggy/Zomato/Uber/Ola order receipts, Apple/Google Play/Netflix/Spotify receipts, credit-card "payment received" (→ transfer). A rule hit with amount + date + type is `confidence: "high"`, `how: "rule"`.

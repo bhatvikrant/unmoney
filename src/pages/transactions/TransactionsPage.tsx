@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { Search, Star, SlidersHorizontal, StickyNote, Download, X, CheckSquare } from "lucide-react";
 import { toast } from "sonner";
 import { useView } from "@/lib/store";
-import { budgetStatus, notesRange, txCarryBefore, txCsvRows, txListRange } from "../../../shared/views";
+import { budgetStatus, draftsRange, notesRange, txCarryBefore, txCsvRows, txListRange } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
 import { useShortcuts, useSwipe } from "@/lib/shortcuts";
@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BudgetBar } from "@/components/BudgetBars";
 import { RecapNudge } from "@/pages/recap/RecapNudge";
+import { GmailNudge } from "@/pages/transactions/GmailNudge";
 import { downloadText, toCSV } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 import { kindLabel } from "../../../shared/defaults";
@@ -93,6 +94,8 @@ export default function TransactionsPage() {
     });
   }, [raw, filtered, filterType, filterAcc, filterCat, ledger]);
 
+  // drafts from Gmail sit on their days as faded rows, never in the sums; a filtered list hides them
+  const drafts = useMemo(() => (filtered ? [] : draftsRange(snap, range.from, range.to)), [snap, filtered, range.from, range.to]);
   const totals = useMemo(() => sumKinds(txs, ledger), [txs, ledger]);
   const total = totals.income - totals.expense + (settings.carryOver ? carry : 0);
 
@@ -132,8 +135,9 @@ export default function TransactionsPage() {
       <Page className={cn(bulk.active && view === "daily" && "pb-40")}>
         {/* first week of the month: last month's recap, under the summary bar */}
         <RecapNudge month={month} />
+        <GmailNudge from={range.from} to={range.to} />
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
-        {raw && view === "daily" ? <TransactionList txs={txs} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
+        {raw && view === "daily" ? <TransactionList txs={txs} drafts={drafts} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}
         {raw && view === "weekly" ? <WeeklyView txs={txs} range={range} /> : null}
         {view === "monthly" ? <MonthlyView month={month} reachable={reachable} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}

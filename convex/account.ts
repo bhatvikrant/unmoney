@@ -49,6 +49,9 @@ export const deleteMyAccount = mutation({
   args: { confirm: v.literal("DELETE") },
   handler: async (ctx) => {
     const userId = await requireUser(ctx);
+    // the Gmail grant is revoked at Google before its row goes
+    const gmail = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (gmail) await ctx.scheduler.runAfter(0, internal.gmail.revokeForUser, { refreshTokenEnc: gmail.refreshTokenEnc, iv: gmail.iv });
     // gone at once: from now every call with this user's token is refused (lib/auth currentUserId)
     await ctx.db.delete(userId);
     await ctx.scheduler.runAfter(0, internal.account.purge, { userId, step: 0 });

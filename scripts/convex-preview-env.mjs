@@ -6,14 +6,14 @@
  *
  * - SITE_URL: the branch's stable Vercel URL, so Convex Auth sends people back to this preview.
  * - JWT_PRIVATE_KEY / JWKS: generated once per preview, then left alone so sessions survive redeploys.
- * - AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, ANTHROPIC_API_KEY: copied from Vercel's Preview env vars.
+ * - AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, ANTHROPIC_API_KEY, GMAIL_TOKEN_KEY: copied from Vercel's Preview env vars.
  *
  * Runs after `convex deploy` in the build command (vercel.json); does nothing outside previews.
  */
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 
-const COPIED = ["AUTH_GOOGLE_ID", "AUTH_GOOGLE_SECRET", "ANTHROPIC_API_KEY"];
+const COPIED = ["AUTH_GOOGLE_ID", "AUTH_GOOGLE_SECRET", "ANTHROPIC_API_KEY", "GMAIL_TOKEN_KEY"];
 
 const { VERCEL_ENV, VERCEL_GIT_COMMIT_REF, VERCEL_BRANCH_URL, VERCEL_URL } = process.env;
 if (VERCEL_ENV !== "preview") process.exit(0);
