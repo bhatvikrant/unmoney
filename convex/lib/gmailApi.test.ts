@@ -1,0 +1,35 @@
+import { afterEach, expect, test, vi } from "vitest";
+import { listMessageIds } from "./gmailApi";
+
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+const limited = () => Response.json({ error: { code: 403, status: "PERMISSION_DENIED", errors: [{ reason: "rateLimitExceeded" }], details: [{ reason: "RATE_LIMIT_EXCEEDED" }] } }, { status: 403 });
+
+test("a rate-limited call backs off and retries until Gmail answers", async () => {
+  vi.useFakeTimers();
+  const answers = [limited(), new Response("{}", { status: 429 }), Response.json({ messages: [{ id: "a" }, { id: "b" }] })];
+  const fetch = vi.fn(async () => answers.shift()!);
+  vi.stubGlobal("fetch", fetch);
+  const ids = listMessageIds("tok", "q", 10);
+  await vi.runAllTimersAsync();
+  expect(await ids).toEqual(["a", "b"]);
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+
+test("after five backoffs it gives up with a plain rate-limit error", async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn(async () => limited());
+  vi.stubGlobal("fetch", fetch);
+  const ids = listMessageIds("tok", "q", 10);
+  const outcome = expect(ids).rejects.toThrow(/rate limit reached/);
+  await vi.runAllTimersAsync();
+  await outcome;
+  expect(fetch).toHaveBeenCalledTimes(6);
+});
+
+test("a 403 that is not a rate limit is not retried", async () => {
+  const fetch = vi.fn(async () => Response.json({ error: { errors: [{ reason: "accessNotConfigured" }] } }, { status: 403 }));
+  vi.stubGlobal("fetch", fetch);
+  await expect(listMessageIds("tok", "q", 10)).rejects.toThrow(/not enabled/);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
