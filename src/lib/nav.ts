@@ -47,6 +47,7 @@ export function useOpenEntry() {
       // and like the ledger the entry takes the list's place in history.
       const params = new URLSearchParams(search);
       params.delete("bookmark");
+      params.delete("draft");
       for (const [k, v] of Object.entries(extra)) params.set(k, v);
       const query = params.toString();
       nav(`${list}/t/${id}${query ? `?${query}` : ""}`, { replace: true });
@@ -77,6 +78,7 @@ export function useCloseEntry() {
     if (list && pathname !== list) {
       const params = new URLSearchParams(search);
       params.delete("bookmark");
+      params.delete("draft");
       const query = params.toString();
       nav(`${list}${query ? `?${query}` : ""}`, { replace: true });
     } else if (new URLSearchParams(search).get("from") === "ledger") nav(`/${listQuery(search)}`, { replace: true });
