@@ -7,7 +7,7 @@ import { senderAddress, senderDomain } from "./mail";
 /** Senders a new connection starts with: Indian banks and cards, UPI apps, and the shops the rules know. One entry is an address or a domain. */
 export const DEFAULT_SENDERS: string[] = [
   "hdfcbank.net", "hdfcbank.com", "icicibank.com", "axisbank.com", "sbi.co.in", "sbicard.com", "kotak.com", "kotakbank.com",
-  "idfcfirstbank.com", "yesbank.in", "indusind.com", "federalbank.co.in", "hsbc.co.in",
+  "idfcfirstbank.com", "yesbank.in", "indusind.com", "federalbank.co.in", "hsbc.bank.in", "hsbc.co.in",
   "phonepe.com", "paytm.com", "paytmmail.com", "payments-noreply@google.com", "npci.org.in",
   "amazon.in", "flipkart.com", "swiggy.in", "zomato.com", "uber.com", "olacabs.com",
   "apple.com", "netflix.com", "spotify.com", "googleplay-noreply@google.com",
