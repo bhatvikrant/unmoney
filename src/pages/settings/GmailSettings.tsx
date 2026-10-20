@@ -62,6 +62,8 @@ export default function GmailSettings() {
     if (!outcome) return;
     if (outcome === "connected") toast.success("Gmail connected");
     else if (outcome === "denied") toast("Gmail was not connected.");
+    else if (outcome === "no-scope") toast.error("Google didn't give UnMoney access to your mail. Connect again and tick the Gmail box on Google's screen.", { duration: 10000 });
+    else if (outcome === "api-off") toast.error("Gmail can't be connected yet: the Gmail API is switched off in UnMoney's Google Cloud project.", { duration: 10000 });
     else toast.error("Could not connect Gmail. Try again.");
     const n = new URLSearchParams(sp);
     n.delete("gmail");
