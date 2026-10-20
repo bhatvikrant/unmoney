@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
+import { Link } from "react-router";
 import { ArrowLeftRight, CloudOff, Lock, RefreshCw } from "lucide-react";
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, useTransform, type Transition } from "framer-motion";
 import { Logo } from "@/components/shell/Logo";
@@ -111,6 +112,10 @@ export default function SignIn() {
 
         <motion.p {...rise(0.5, 6)} className="mt-5 max-w-xs text-center text-xs text-muted-foreground/80">
           Track income, expenses and transfers across every account. Your ledger stays on this device and syncs when you are online.
+          If you like, connect Gmail and UnMoney turns the payment mails from your bank and shops into entries you check and save.
+        </motion.p>
+        <motion.p {...rise(0.55, 6)} className="mt-3 text-xs text-muted-foreground/80">
+          <Link to="/privacy" className="underline underline-offset-2 hover:text-foreground">Privacy policy</Link>
         </motion.p>
       </div>
     </div>

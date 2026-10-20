@@ -129,7 +129,7 @@ Setup, once per deployment:
 npx convex env set GMAIL_TOKEN_KEY "$(openssl rand -base64 32)"        # add --prod for production
 ```
 
-and in Google Cloud add a second redirect URI to the same OAuth client: `https://<deployment>.convex.site/gmail/callback`. The Gmail scope is a restricted one: until the consent screen passes Google's verification (privacy policy, demo video, CASA assessment), Google shows an "unverified app" warning that Advanced › Continue gets past, and caps the app at 100 users. Keep the consent screen's publishing status at "In production", not "Testing": in Testing, refresh tokens expire after 7 days.
+and in Google Cloud add a second redirect URI to the same OAuth client: `https://<deployment>.convex.site/gmail/callback`. The Gmail scope is a restricted one: until the consent screen passes Google's verification (privacy policy, demo video, CASA assessment), Google shows an "unverified app" warning that Advanced › Continue gets past, and caps the app at 100 users. Keep the consent screen's publishing status at "In production", not "Testing": in Testing, refresh tokens expire after 7 days. The steps to get verified (consent screen fields, scope justification, demo video, CASA) are in [docs/google-verification.md](docs/google-verification.md); the privacy policy it points to is `/privacy` ([src/pages/legal/PrivacyPage.tsx](src/pages/legal/PrivacyPage.tsx)).
 
 To see what a check would make of your own inbox without writing anything: `npx convex run gmail:dryRun '{"userId":"<your users id>"}'`.
 
