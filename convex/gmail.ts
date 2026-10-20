@@ -419,7 +419,8 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   let aiCalls = 0, aiSkipped = 0, aiDropped = 0;
   if (forAi.length && !process.env.ANTHROPIC_API_KEY) {
     aiSkipped = forAi.length;
-    notes.push("AI reading is not set up on this server");
+    // say how many, so a mail no rule knows does not just vanish
+    notes.push(`${forAi.length} ${forAi.length === 1 ? "mail looked like money but no rule could read it" : "mails looked like money but no rule could read them"} (AI reading is not set up)`);
   } else if (forAi.length) {
     const used = c.aiMonth === monthOf(startedAt) ? c.aiCalls : 0;
     for (let i = 0; i < forAi.length; i += AI_BATCH) {

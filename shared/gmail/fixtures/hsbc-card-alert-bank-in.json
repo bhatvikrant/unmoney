@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hsbc",
+    "type": "debit",
+    "amount": 1391,
+    "currency": "INR",
+    "date": "2026-10-20",
+    "dateSource": "mail",
+    "last4": "4417",
+    "bankName": "HSBC",
+    "channel": "card",
+    "merchantRaw": "ISKCON GOVINDAS"
+  }
+}
