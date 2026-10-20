@@ -94,18 +94,31 @@ export async function revoke(token: string): Promise<void> {
   await fetch(`${REVOKE_URL}?token=${encodeURIComponent(token)}`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" } }).catch(() => undefined);
 }
 
+/** Gmail's "slow down": 429, or a 403 whose reason is a rate limit (common right after the API is switched on). */
+const RATE_LIMIT = /rateLimitExceeded|userRateLimitExceeded|RATE_LIMIT_EXCEEDED|RESOURCE_EXHAUSTED|concurrentLimitExceeded/i;
+/** Waits before each retry of a rate-limited call; Google asks for exponential backoff. */
+export const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function api<T>(token: string, path: string): Promise<{ status: number; json: T }> {
-  const res = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 401) throw new GmailAuthError("Gmail refused the access token. Reconnect Gmail.");
-  if (res.status === 429) throw new Error("Gmail rate limit reached; the next check will retry.");
-  const json = (await res.json().catch(() => ({}))) as T;
-  if (!res.ok) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (res.status === 401) throw new GmailAuthError("Gmail refused the access token. Reconnect Gmail.");
+    const json = (await res.json().catch(() => ({}))) as T;
+    if (res.ok) return { status: res.status, json };
     const reason = reasonOf(json);
+    const limited = res.status === 429 || (res.status === 403 && RATE_LIMIT.test(reason));
+    if (limited && attempt < BACKOFF_MS.length) {
+      // the wait Google suggests, else ours, with a little jitter so parallel calls spread out
+      const after = Number(res.headers.get("Retry-After"));
+      await sleep((Number.isFinite(after) && after > 0 ? after * 1000 : BACKOFF_MS[attempt]) + Math.floor(Math.random() * 250));
+      continue;
+    }
+    if (limited) throw new Error("Gmail rate limit reached; the next check will retry.");
     if (res.status === 403 && /accessNotConfigured|SERVICE_DISABLED/i.test(reason)) throw new GmailSetupError("api-off", "The Gmail API is not enabled in UnMoney's Google Cloud project.");
     if (res.status === 403 && /insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(reason)) throw new GmailSetupError("no-scope", "Google did not grant access to Gmail.");
     throw new Error(`Gmail API ${path.split("?")[0]} failed: ${res.status}${reason ? ` ${reason}` : ""}`);
   }
-  return { status: res.status, json };
 }
 
 export async function profile(token: string): Promise<{ email: string }> {
