@@ -47,7 +47,7 @@ test("a check's drafts are written once each, folds reach open drafts, and the c
   const cid = await connect();
   const at = Date.parse("2026-10-20T10:00:00Z");
   const write = (inserts: ReturnType<typeof insert>[], extra: Partial<{ updates: { id: Id<"drafts">; extraMessageIds: string[]; note?: string }[]; aiCalls: number; note: string }> = {}) =>
-    t.mutation(internal.gmail.writeSync, { userId, startedAt: at, inserts, updates: [], learned: {}, aiCalls: 0, scanned: 12, ...extra });
+    t.mutation(internal.gmail.writeSync, { userId, startedAt: at, inserts, updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 12, ...extra });
   await write([insert("m1"), insert("m2", { matchedTransactionId: undefined })], { aiCalls: 2 });
   let drafts = await t.run((ctx) => ctx.db.query("drafts").collect());
   expect(drafts.map((d) => [d.messageId, d.status])).toEqual([["m1", "open"], ["m2", "open"]]);
@@ -64,8 +64,28 @@ test("a check's drafts are written once each, folds reach open drafts, and the c
   expect(c.syncedUpTo).toBe(at);
   expect(c.log.map((l) => [l.scanned, l.found, l.note])).toEqual([[12, 1, "monthly AI limit reached"], [12, 2, undefined]]);
   // what the user picked is learned
-  await t.mutation(internal.gmail.writeSync, { userId, startedAt: at, inserts: [], updates: [], learned: { "hdfcbank.net|4521": accounts[0]._id }, aiCalls: 0, scanned: 0 });
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: at, inserts: [], updates: [], matches: [], learned: { "hdfcbank.net|4521": accounts[0]._id }, aiCalls: 0, scanned: 0 });
   expect((await t.run((ctx) => ctx.db.get(cid)))!.accountMap).toEqual({ "hdfcbank.net|4521": accounts[0]._id });
+});
+
+test("a check matches open drafts to entries typed in since, but never undoes \"no, it's new\"", async () => {
+  const { t, userId, accounts, connect, insert } = await setup();
+  await connect();
+  const typed = (extra: Partial<Doc<"transactions">> = {}) => t.run((ctx) => ctx.db.insert("transactions", { userId, type: "expense", date: "2026-10-18", accountId: accounts[0]._id, amount: 48500, note: "Swiggy", tags: [], photoIds: [], ...extra }));
+  const write = (matches: { id: Id<"drafts">; transactionId: Id<"transactions"> }[], inserts: ReturnType<typeof insert>[] = []) =>
+    t.mutation(internal.gmail.writeSync, { userId, startedAt: 5, inserts, updates: [], matches, learned: {}, aiCalls: 0, scanned: 0 });
+  await write([], [insert("m1"), insert("m2"), insert("m3"), insert("m4")]);
+  const [m1, m2, m3, m4] = await t.run((ctx) => ctx.db.query("drafts").collect());
+  const tx = await typed();
+  const fromMail = await typed({ source: { app: "gmail", messageId: "x" } });
+  // while the check ran: m2 was kept as new, m3 was saved
+  await t.run(async (ctx) => {
+    await ctx.db.patch(m2._id, { keptNew: true });
+    await ctx.db.patch(m3._id, { status: "accepted" });
+  });
+  await write([{ id: m1._id, transactionId: tx }, { id: m2._id, transactionId: tx }, { id: m3._id, transactionId: tx }, { id: m4._id, transactionId: fromMail }]);
+  const after = await t.run((ctx) => ctx.db.query("drafts").collect());
+  expect(after.map((d) => [d.messageId, d.matchedTransactionId])).toEqual([["m1", tx], ["m2", undefined], ["m3", undefined], ["m4", undefined]]);
 });
 
 test("failures are logged; three in a row pause the connection, a dead grant asks to reconnect", async () => {
@@ -103,7 +123,7 @@ test("status shows the app a safe projection, and disconnecting removes the conn
   expect((await as.query(api.gmail.status))?.connected).toBe(false);
   await connect();
   const txId = await t.run((ctx) => ctx.db.insert("transactions", { userId, type: "expense", date: "2026-10-18", accountId: accounts[0]._id, amount: 48500, note: "Swiggy", tags: [], photoIds: [] }));
-  await t.mutation(internal.gmail.writeSync, { userId, startedAt: 5, inserts: [insert("m1"), insert("m2", { matchedTransactionId: txId })], updates: [], learned: {}, aiCalls: 0, scanned: 2 });
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: 5, inserts: [insert("m1"), insert("m2", { matchedTransactionId: txId })], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 2 });
   const [m1] = await t.run((ctx) => ctx.db.query("drafts").collect());
   await t.run((ctx) => ctx.db.patch(m1._id, { status: "accepted" }));
   const s = (await as.query(api.gmail.status))!;

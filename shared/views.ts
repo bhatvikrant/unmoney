@@ -10,6 +10,7 @@ import {
 import type { AccountKind } from "./defaults";
 import { addDays, addMonths, daysInMonth, make, parts, todayISO } from "./dates";
 import { elapsedFraction, periodRange, type Range } from "./period";
+import { laterMatches } from "./gmail/dedup";
 
 export type Tx = Doc<"transactions">;
 
@@ -57,9 +58,20 @@ export function notesRange(snap: Snapshot, from: string, to: string): Doc<"notes
   return snap.notes.filter((n) => n.date >= from && n.date <= to);
 }
 
+/**
+ * The entry each open draft looks like ("already added?"): the one the check found, or one the
+ * user typed in since, before the next check records it.
+ */
+export function draftMatches(snap: Snapshot): Map<Id<"drafts">, Id<"transactions">> {
+  const out = laterMatches(snap.drafts, snap.transactions, snap.accounts);
+  for (const d of snap.drafts) if (d.status === "open" && d.matchedTransactionId) out.set(d._id, d.matchedTransactionId);
+  return out;
+}
+
 /** Open drafts from Gmail dated in the range, for the ledger's faded rows. Ones matched to an entry the user already has are left out. */
 export function draftsRange(snap: Snapshot, from: string, to: string): Doc<"drafts">[] {
-  return snap.drafts.filter((d) => d.status === "open" && !d.matchedTransactionId && d.proposal.date >= from && d.proposal.date <= to).sort(byDraftDesc);
+  const matched = draftMatches(snap);
+  return snap.drafts.filter((d) => d.status === "open" && !matched.has(d._id) && d.proposal.date >= from && d.proposal.date <= to).sort(byDraftDesc);
 }
 
 /** Newest mail first within a day; days are grouped by the caller. */
