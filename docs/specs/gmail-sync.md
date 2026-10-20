@@ -45,7 +45,7 @@ into an entry you can check and save.
 • Keeps the amount, date, merchant and which card: never the mail itself.
 • Disconnect any time; saved entries stay, drafts are removed.
 
-Look back   [7 days] [30 days] [90 days]
+Look back   [From now] [7 days] [30 days] [90 days]
 [Connect Gmail]
 ```
 
