@@ -36,6 +36,19 @@ function amountAfter(text: string, label: RegExp): Amount | null {
   return a ? { ...a, index: a.index + m.index + m[0].length } : null;
 }
 
+/** A rupee total below this is a ₹1 deal or membership line, not what the order cost, whenever a larger total is also labelled. */
+const MIN_INR_TOTAL = 5;
+
+/**
+ * A receipt's total: the amount after the first label in `labels` (best first) that the text
+ * has. A total under ₹5 gives way to the best-ranked label whose amount is larger.
+ */
+export function receiptTotal(text: string, labels: RegExp[]): Amount | null {
+  const found = labels.map((re) => amountAfter(text, re)).filter((a): a is Amount => a !== null);
+  const tooSmall = (a: Amount) => a.currency === "INR" && a.amount < MIN_INR_TOTAL;
+  return found.find((a) => !tooSmall(a)) ?? found[0] ?? null;
+}
+
 const MONTHS: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
 const year4 = (y: string) => (y.length === 2 ? 2000 + Number(y) : Number(y));
 const iso = (y: number, m: number, d: number) => (m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null);
@@ -82,7 +95,7 @@ export function findLast4(text: string): string | undefined {
 }
 
 const BANK_NAMES: [RegExp, string][] = [
-  [/\bHDFC\b/i, "HDFC"], [/\bICICI\b/i, "ICICI"], [/\bAxis\b/i, "Axis"], [/\b(SBI|State Bank)\b/i, "SBI"], [/\bKotak\b/i, "Kotak"],
+  [/\bHDFC\b/i, "HDFC"], [/\bICICI\b/i, "ICICI"], [/\bAxis\b/i, "Axis"], [/\b(SBI|State Bank)\b/i, "SBI"], [/\bKotak\b/i, "Kotak"], [/\bHSBC\b/i, "HSBC"],
   [/\bYes Bank\b/i, "Yes Bank"], [/\bIDFC\b/i, "IDFC First"], [/\bIndusInd\b/i, "IndusInd"], [/\bFederal\b/i, "Federal"], [/\bPNB\b/i, "PNB"], [/\bCanara\b/i, "Canara"], [/\bBank of Baroda\b/i, "Bank of Baroda"],
 ];
 
@@ -137,6 +150,11 @@ const BANKS: Bank[] = [
   ] },
   { name: "Kotak", rule: "kotak", domains: ["kotak.com", "kotakbank.com"], merchant: [
     /\bto\s+(?<vpa>\S+@\S+)\s+on\b/i, /\bfrom\s+(?<vpa>\S+@\S+)\s+on\b/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
+  ] },
+  // card spends go through ANY_BANK's "at MERCHANT on 17-10-26"; "from your HSBC account" is the user's own side, never the counterparty
+  { name: "HSBC", rule: "hsbc", domains: ["hsbc.co.in", "mail.hsbc.co.in", "hsbc.com"], merchant: [
+    /\bto\s+(?<vpa>[a-z0-9.\-_]+@[a-z]+)\b/i, /\b(?:to|from)\s+(?!your\b)(?<m>[^()]{1,60}?)\s*\((?:Ref|UPI|NEFT|IMPS|RTGS)\b/i,
+    /\bto\s+(?!your\b)(?<m>.+?)\s+on\b/i, /\bfrom\s+(?!your\b)(?<m>.+?)\s+on\b/i, /\bby\s+(?!your\b)(?<m>.+?)\s+on\b/i,
   ] },
 ];
 
@@ -238,7 +256,9 @@ type Shop = { name: string; rule: string; domains: string[]; subject?: RegExp; t
 const SHOPS: Shop[] = [
   { name: "Amazon", rule: "amazon", domains: ["amazon.in", "amazon.com"], total: [/\b(?:Order|Grand) Total:?/i, /\bTotal:?/i] },
   { name: "Flipkart", rule: "flipkart", domains: ["flipkart.com"], total: [/\bAmount Paid:?/i, /\bTotal(?: Amount)?:?/i] },
-  { name: "Swiggy", rule: "swiggy", domains: ["swiggy.in", "swiggy.com"], total: [/\bGrand Total:?/i, /\bTotal Paid:?/i, /\bBill Total:?/i, /\bTotal:?/i] },
+  { name: "Swiggy", rule: "swiggy", domains: ["swiggy.in", "swiggy.com"], total: [
+    /\bGrand Total:?/i, /\b(?:Total|Amount) Paid:?/i, /\bOrder Total:?/i, /\bBill Total:?/i, /\bTo Pay:?/i, /\bTotal:?/i,
+  ] },
   { name: "Zomato", rule: "zomato", domains: ["zomato.com"], total: [/\b(?:Total|Amount) Paid:?/i, /\bGrand Total:?/i, /\bTotal:?/i] },
   { name: "Uber", rule: "uber", domains: ["uber.com"], total: [/\bTotal:?/i] },
   { name: "Ola", rule: "ola", domains: ["olacabs.com", "olamoney.com"], total: [/\bTotal Fare:?/i, /\bTotal:?/i] },
@@ -265,9 +285,7 @@ export function isShopMail(mail: { from: string; subject: string }): boolean {
 
 /** "ending in 4521", "Visa •••• 4521", "HDFC Bank Credit Card-4521", "Paid via UPI". */
 function receipt(mail: Mail, text: string, shop: Shop, timeZone?: string): Parsed | null {
-  let amt: Amount | null = null;
-  for (const re of shop.total) if ((amt = amountAfter(text, re))) break;
-  amt ??= amounts(text)[0] ?? null;
+  const amt = receiptTotal(text, shop.total) ?? amounts(text)[0] ?? null;
   if (!amt) return null;
   const type: ParsedKind = /\brefund/i.test(mail.subject) || /\brefund (?:of|has been|is being|initiated|processed)\b/i.test(text) ? "refund" : "debit";
   const item = shop.item ? tidy(text.match(shop.item)?.[1] ?? "") || undefined : undefined;

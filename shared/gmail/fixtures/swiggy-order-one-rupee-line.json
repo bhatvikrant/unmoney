@@ -1,0 +1,14 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "swiggy",
+    "type": "debit",
+    "amount": 379.5,
+    "currency": "INR",
+    "date": "2026-10-12",
+    "dateSource": "mail",
+    "time": "13:20",
+    "channel": "upi",
+    "merchantRaw": "Swiggy"
+  }
+}

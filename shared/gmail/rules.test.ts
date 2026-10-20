@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { fixtures } from "./fixtures/load";
 import { isoDateIn, senderDomain } from "./mail";
-import { findDate, findLast4, findTime, isShopMail, parseMail, sourceLabel } from "./rules";
+import { findDate, findLast4, findTime, isShopMail, parseMail, receiptTotal, sourceLabel } from "./rules";
 
 const defined = (o: object) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 
@@ -69,8 +69,19 @@ test("senders are told apart by domain, shops from banks", () => {
   expect(isShopMail({ from: "googleplay-noreply@google.com", subject: "Your Google Play Order Receipt" })).toBe(true);
 });
 
+test("a receipt's total is the best-labelled amount, and a total under ₹5 gives way to a larger one", () => {
+  const labels = [/\bGrand Total:?/i, /\bOrder Total:?/i, /\bTotal:?/i];
+  expect(receiptTotal("Item Total ₹350.00 Order Total ₹379.50 Grand Total ₹385.00", labels)?.amount).toBe(385);
+  expect(receiptTotal("Membership Total ₹1.00 Order Total ₹379.50", labels)?.amount).toBe(379.5);
+  expect(receiptTotal("Grand Total ₹1.00 (Swiggy One Lite) Order Total ₹379.50", labels)?.amount).toBe(379.5);
+  expect(receiptTotal("Grand Total ₹1.00", labels)?.amount).toBe(1);
+  expect(receiptTotal("Grand Total $1.99 Total $12.00", labels)?.amount).toBe(1.99);
+  expect(receiptTotal("Thanks for ordering", labels)).toBeNull();
+});
+
 test("provenance labels", () => {
   expect(sourceLabel({ rule: "hdfc", bankName: "HDFC", merchantRaw: "SWIGGY" })).toBe("HDFC alert");
+  expect(sourceLabel({ rule: "hsbc", bankName: "HSBC", merchantRaw: "ZEPTO MARKETPLACE" })).toBe("HSBC alert");
   expect(sourceLabel({ rule: "google-pay", merchantRaw: "Swiggy" })).toBe("Google Pay");
   expect(sourceLabel({ rule: "swiggy", merchantRaw: "Swiggy" })).toBe("Swiggy receipt");
 });

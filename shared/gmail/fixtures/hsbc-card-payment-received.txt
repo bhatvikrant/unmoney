@@ -1,0 +1,10 @@
+From: HSBC India <alerts@mail.hsbc.co.in>
+Subject: Payment received on your HSBC Credit Card
+Received: 2026-10-12T05:40:00Z
+
+Dear Customer,
+
+We have received your payment of INR 32,500.00 towards your HSBC Premier Credit Card ending with 7731 on 12-10-26. It will reflect in your available limit shortly.
+
+Yours sincerely,
+HSBC India
