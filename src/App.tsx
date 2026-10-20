@@ -48,6 +48,7 @@ import PaymentMethodsSettings from "@/pages/settings/PaymentMethodsSettings";
 import PreferencesSettings from "@/pages/settings/PreferencesSettings";
 import GmailSettings from "@/pages/settings/GmailSettings";
 import GmailReviewPage from "@/pages/transactions/GmailReviewPage";
+import PrivacyPage from "@/pages/legal/PrivacyPage";
 
 function Splash({ text = "Loading…" }: { text?: string }) {
   return <div className="min-h-dvh flex items-center justify-center text-sm text-muted-foreground">{text}</div>;
@@ -188,6 +189,9 @@ function Gate() {
 export default function App() {
   const { ready, hasLocal, status } = useStore();
   const { isLoading, isAuthenticated } = useConvexAuth();
+  const { pathname } = useLocation();
+  // public, signed in or not: Google's verification links to it
+  if (pathname === "/privacy") return <PrivacyPage />;
   if (!ready) return <Splash />;
   // A copy of the ledger on this device: use it, whatever the network is doing.
   if (hasLocal) {
