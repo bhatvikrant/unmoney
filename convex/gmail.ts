@@ -42,6 +42,8 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 /** Entries this far back are read for "already added?" matching and for the category a merchant had last time. */
 const HISTORY_DAYS = 365;
 const MAX_SENDERS = 60;
+/** Mails fetched in parallel. */
+const FETCH_AT_ONCE = 3;
 
 const lookbackArg = v.union(...LOOKBACKS.map((d) => v.literal(d)));
 const redirectUri = () => `${process.env.CONVEX_SITE_URL}/gmail/callback`;
@@ -369,7 +371,8 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   const seen = new Set(await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids }));
   const fresh = ids.filter((id) => !seen.has(id));
   const mails: Mail[] = [];
-  for (let i = 0; i < fresh.length; i += 5) mails.push(...(await Promise.all(fresh.slice(i, i + 5).map((id) => gmailApi.getMail(token, id)))));
+  // a few at a time: Gmail rate-limits bursts per user, and each call backs off on its own
+  for (let i = 0; i < fresh.length; i += FETCH_AT_ONCE) mails.push(...(await Promise.all(fresh.slice(i, i + FETCH_AT_ONCE).map((id) => gmailApi.getMail(token, id)))));
 
   const rctx: ResolveCtx = { accounts: prep.accounts, categories: prep.categories, transactions: prep.transactions, settings: prep.settings, currencies: prep.currencies, accountMap: c.accountMap };
   const candidates: DraftCandidate[] = [];
