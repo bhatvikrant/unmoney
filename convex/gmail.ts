@@ -23,7 +23,7 @@ import type { Mail } from "../shared/gmail/mail";
 import { triage } from "../shared/gmail/triage";
 import { parseMail } from "../shared/gmail/rules";
 import { accountMapKey, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
-import { foldDrafts, matchEntry, type DraftCandidate } from "../shared/gmail/dedup";
+import { foldDrafts, laterMatches, matchEntry, type DraftCandidate } from "../shared/gmail/dedup";
 import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, normaliseSender, type Lookback } from "../shared/gmail/query";
 import { AI_BATCH, AI_MODEL, AI_MONTHLY_CAP, buildAiInput, lowerConfidence, OUTPUT_SCHEMA, SYSTEM_PROMPT, validateAiResults, type AiRead } from "../shared/gmail/ai";
 
@@ -304,6 +304,8 @@ type Collected = {
   scanned: number;
   inserts: (DraftCandidate & { matchedTransactionId?: Id<"transactions"> })[];
   updates: ReturnType<typeof foldDrafts>["updates"];
+  /** Open drafts that look like an entry the user typed in since the draft was written. */
+  matches: { id: Id<"drafts">; transactionId: Id<"transactions"> }[];
   learned: Record<string, Id<"accounts">>;
   aiCalls: number;
   aiSkipped: number;
@@ -415,6 +417,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     scanned: ids.length,
     inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, prep.transactions, prep.accounts) })),
     updates,
+    matches: [...laterMatches(prep.openDrafts, prep.transactions, prep.accounts)].map(([id, transactionId]) => ({ id, transactionId })),
     learned: learnAccounts(prep),
     aiCalls, aiSkipped, aiDropped, notes,
   };
@@ -431,7 +434,7 @@ export const syncUser = internalAction({
       const got = await collect(ctx, prep, startedAt);
       await ctx.runMutation(internal.gmail.writeSync, {
         userId, startedAt,
-        inserts: got.inserts, updates: got.updates, learned: got.learned,
+        inserts: got.inserts, updates: got.updates, matches: got.matches, learned: got.learned,
         aiCalls: got.aiCalls, scanned: got.scanned, note: got.notes.join(" · ") || undefined,
       });
       return { ran: true, found: got.inserts.length };
@@ -461,15 +464,19 @@ const insertArg = v.object({
   receivedAt: draftFields.receivedAt, from: draftFields.from, subject: draftFields.subject, proposal: draftFields.proposal,
   confidence: draftFields.confidence, how: draftFields.how, matchedTransactionId: v.optional(v.id("transactions")),
 });
+const matchArg = v.object({ id: v.id("drafts"), transactionId: v.id("transactions") });
 const updateArg = v.object({ id: v.id("drafts"), extraMessageIds: v.array(v.string()), note: v.optional(v.string()), categoryId: v.optional(v.id("categories")), subcategoryId: v.optional(v.id("categories")) });
 
-/** The outcome of a check: new drafts (once each), folded mails, what was learned, and the connection's bookkeeping. */
+/**
+ * The outcome of a check: new drafts (once each), folded mails, open drafts that now match an
+ * entry, what was learned, and the connection's bookkeeping.
+ */
 export const writeSync = internalMutation({
   args: {
-    userId: v.id("users"), startedAt: v.number(), inserts: v.array(insertArg), updates: v.array(updateArg),
+    userId: v.id("users"), startedAt: v.number(), inserts: v.array(insertArg), updates: v.array(updateArg), matches: v.array(matchArg),
     learned: v.record(v.string(), v.id("accounts")), aiCalls: v.number(), scanned: v.number(), note: v.optional(v.string()),
   },
-  handler: async (ctx, { userId, startedAt, inserts, updates, learned, aiCalls, scanned, note }) => {
+  handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, aiCalls, scanned, note }) => {
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!c) return;
     let found = 0;
@@ -486,6 +493,14 @@ export const writeSync = internalMutation({
       if (u.note) proposal.note = u.note;
       if (u.categoryId) { proposal.categoryId = u.categoryId; proposal.subcategoryId = u.subcategoryId; }
       await ctx.db.patch(u.id, { extraMessageIds: [...new Set([...d.extraMessageIds, ...u.extraMessageIds])], proposal });
+    }
+    // the user may have saved, linked or said "it's new" while the check ran
+    for (const m of matches) {
+      const d = await ctx.db.get(m.id);
+      if (!d || d.userId !== userId || d.status !== "open" || d.matchedTransactionId || d.keptNew) continue;
+      const tx = await ctx.db.get(m.transactionId);
+      if (!tx || tx.userId !== userId || tx.source) continue;
+      await ctx.db.patch(m.id, { matchedTransactionId: m.transactionId });
     }
     const month = monthOf(startedAt);
     const entry = { at: startedAt, scanned, found, ...(note ? { note } : {}) };

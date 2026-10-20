@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
-import { foldDrafts, matchEntry, samePayment, type DraftCandidate } from "./dedup";
+import { foldDrafts, laterMatches, matchEntry, samePayment, type DraftCandidate } from "./dedup";
 
 const ALERT = "HDFC Bank <alerts@hdfcbank.net>";
 const RECEIPT = "Swiggy <noreply@swiggy.in>";
@@ -94,4 +94,21 @@ test("a bank account, its debit card and its linked UPIs are the same money when
   expect(matchEntry(cand({ id: "a", accountId: "hdfc" }), [tx("t1", "wallet")], accounts)).toBeUndefined();
   // on the same day, the exact method wins over a sibling, even an older one
   expect(matchEntry(cand({ id: "a", accountId: "gpay" }), [tx("t1", "gpay"), tx("t2", "phonepe")], accounts)).toBe("t1");
+});
+
+test("open drafts find an entry typed in after them, unless already matched or kept as new", () => {
+  const accounts = [{ _id: "hdfc", kind: "bank" }, { _id: "gpay", kind: "upi", linkedAccountId: "hdfc" }] as unknown as Doc<"accounts">[];
+  const tx = (id: string, extra: Partial<Doc<"transactions">> = {}): Doc<"transactions"> => ({
+    _id: id as Id<"transactions">, _creationTime: 1, userId: "u" as Id<"users">, type: "expense", date: "2026-10-18", accountId: "gpay" as Id<"accounts">, amount: 48500, note: "Swiggy", tags: [], photoIds: [], ...extra,
+  });
+  const drafts = [
+    open({ id: "a", accountId: "hdfc" }),
+    { ...open({ id: "b" }), matchedTransactionId: "t0" as Id<"transactions"> },
+    { ...open({ id: "c" }), keptNew: true },
+    open({ id: "d" }, "dismissed"),
+    open({ id: "e", amount: 9900 }),
+  ];
+  const typed = [tx("t1"), tx("t2", { amount: 9900, source: { app: "gmail", messageId: "x" } })];
+  expect([...laterMatches(drafts, typed, accounts)]).toEqual([["d-a", "t1"]]);
+  expect(laterMatches(drafts, [], accounts).size).toBe(0);
 });
