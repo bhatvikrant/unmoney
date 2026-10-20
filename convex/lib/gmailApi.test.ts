@@ -16,7 +16,7 @@ test("a rate-limited call backs off and retries until Gmail answers", async () =
   expect(fetch).toHaveBeenCalledTimes(3);
 });
 
-test("after five backoffs it gives up with a plain rate-limit error", async () => {
+test("after five backoffs (over a minute) it gives up with a plain rate-limit error", async () => {
   vi.useFakeTimers();
   const fetch = vi.fn(async () => limited());
   vi.stubGlobal("fetch", fetch);

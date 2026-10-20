@@ -42,8 +42,9 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 /** Entries this far back are read for "already added?" matching and for the category a merchant had last time. */
 const HISTORY_DAYS = 365;
 const MAX_SENDERS = 60;
-/** Mails fetched in parallel. */
+/** Mails fetched in parallel, and the least time each such batch takes: 3 per 300 ms is 50 quota units a second. */
 const FETCH_AT_ONCE = 3;
+const FETCH_BATCH_MS = 300;
 
 const lookbackArg = v.union(...LOOKBACKS.map((d) => v.literal(d)));
 const redirectUri = () => `${process.env.CONVEX_SITE_URL}/gmail/callback`;
@@ -371,8 +372,17 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   const seen = new Set(await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids }));
   const fresh = ids.filter((id) => !seen.has(id));
   const mails: Mail[] = [];
-  // a few at a time: Gmail rate-limits bursts per user, and each call backs off on its own
-  for (let i = 0; i < fresh.length; i += FETCH_AT_ONCE) mails.push(...(await Promise.all(fresh.slice(i, i + FETCH_AT_ONCE).map((id) => gmailApi.getMail(token, id)))));
+  // Paced to about half of Gmail's per-user quota (6,000 units a minute, 5 per mail), so even a
+  // first check of 300 mails never trips it; a call that is still refused backs off on its own.
+  for (let i = 0; i < fresh.length; i += FETCH_AT_ONCE) {
+    const started = Date.now();
+    const got = await Promise.allSettled(fresh.slice(i, i + FETCH_AT_ONCE).map((id) => gmailApi.getMail(token, id)));
+    const failed = got.find((r) => r.status === "rejected");
+    if (failed) throw failed.reason;
+    for (const r of got) if (r.status === "fulfilled") mails.push(r.value);
+    const wait = FETCH_BATCH_MS - (Date.now() - started);
+    if (wait > 0 && i + FETCH_AT_ONCE < fresh.length) await new Promise((r) => setTimeout(r, wait));
+  }
 
   const rctx: ResolveCtx = { accounts: prep.accounts, categories: prep.categories, transactions: prep.transactions, settings: prep.settings, currencies: prep.currencies, accountMap: c.accountMap };
   const candidates: DraftCandidate[] = [];
