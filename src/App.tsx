@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router";
+import { Navigate, Route, Routes, useLocation, useNavigationType } from "react-router";
 import { useConvexAuth } from "@convex-dev/auth/react";
 import { AppDataProvider } from "@/lib/app";
 import { useStore } from "@/lib/store";
@@ -217,18 +217,71 @@ function splitSectionOf(pathname: string): string | undefined {
   return SPLIT_SECTIONS.find((s) => pathname === s || pathname.startsWith(`${s}/`));
 }
 
+const SCROLL_KEY = "unmoney:scroll";
+function readScrolls(): Record<string, number> {
+  try { return JSON.parse(sessionStorage.getItem(SCROLL_KEY) ?? "{}"); } catch { return {}; }
+}
+
 /**
- * Every page change, including back/forward, starts at the top; except, on a wide screen, opening
- * or switching items beside a list, which stays where it was.
+ * A new page starts at the top; back/forward returns to where that page was left. On a wide screen,
+ * opening or switching items beside a list leaves the list where it was.
  */
 function ScrollToTop() {
-  const { pathname } = useLocation();
-  const wide = useMediaQuery(WIDE);
+  const location = useLocation();
+  const { pathname, key } = location;
+  const navType = useNavigationType();
+  const isWide = useMediaQuery(WIDE);
+  // Read through a ref so crossing the breakpoint doesn't count as a page change.
+  const wide = useRef(isWide);
+  useLayoutEffect(() => { wide.current = isWide; }, [isWide]);
   const prev = useRef(pathname);
+  const keyRef = useRef(key);
+  const scrolls = useRef<Record<string, number>>(readScrolls());
+
+  // The browser's own restoration runs before the new page has rendered, so it lands in the wrong place.
+  useEffect(() => {
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+  }, []);
+
+  // Remember each entry's position as it scrolls: by the time the route changes, the old page is gone.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = () => {
+      scrolls.current[keyRef.current] = window.scrollY;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify(scrolls.current)); } catch { /* storage unavailable */ }
+      }, 200);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => { window.removeEventListener("scroll", onScroll); clearTimeout(timer); };
+  }, []);
+
   useLayoutEffect(() => {
+    keyRef.current = key;
     const section = splitSectionOf(prev.current);
-    if (!(wide && section && section === splitSectionOf(pathname))) window.scrollTo(0, 0);
     prev.current = pathname;
-  }, [pathname, wide]);
+    if (wide.current && section && section === splitSectionOf(pathname)) return;
+    const target = navType === "POP" ? scrolls.current[key] ?? 0 : 0;
+    window.scrollTo(0, target);
+    if (!target) return;
+    // The page may still be growing (charts, long lists); keep trying for a moment until it is tall enough.
+    let frame = 0;
+    let tries = 0;
+    const retry = () => {
+      if (Math.abs(window.scrollY - target) < 2 || ++tries > 30) return;
+      window.scrollTo(0, target);
+      frame = requestAnimationFrame(retry);
+    };
+    frame = requestAnimationFrame(retry);
+    const stop = () => cancelAnimationFrame(frame);
+    window.addEventListener("wheel", stop, { once: true, passive: true });
+    window.addEventListener("touchstart", stop, { once: true, passive: true });
+    return () => {
+      stop();
+      window.removeEventListener("wheel", stop);
+      window.removeEventListener("touchstart", stop);
+    };
+  }, [key, pathname, navType]);
   return null;
 }
