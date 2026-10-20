@@ -121,7 +121,6 @@ function Gate() {
   if (lock.locked) return <Lock hash={s.passcodeHash!} salt={s.passcodeSalt!} resetRequested={lock.resetRequested} onUnlock={lock.unlock} />;
   return (
     <AppDataProvider settings={s} user={user}>
-      <ScrollToTop />
       <Routes>
         {/* full screen, beside the shell: no sidebar or tab bar behind the story cards */}
         <Route path="recap/:key" element={<RecapPage />} />
@@ -187,6 +186,16 @@ function Gate() {
 }
 
 export default function App() {
+  // Above every early return, so the privacy page, sign-in and onboarding get it too.
+  return (
+    <>
+      <ScrollToTop />
+      <Screens />
+    </>
+  );
+}
+
+function Screens() {
   const { ready, hasLocal, status } = useStore();
   const { isLoading, isAuthenticated } = useConvexAuth();
   const { pathname } = useLocation();
