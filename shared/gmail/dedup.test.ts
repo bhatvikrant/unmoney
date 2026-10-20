@@ -74,3 +74,24 @@ test("an entry the user typed in is matched by amount, a day's distance and meth
   // a draft without a method matches any method; a schedule's entry counts too
   expect(matchEntry(cand({ id: "b" }), [tx("t1", { accountId: "cash" as Id<"accounts">, repeatId: "r" as Id<"repeats"> })])).toBe("t1");
 });
+
+test("a bank account, its debit card and its linked UPIs are the same money when matching", () => {
+  const acc = (id: string, extra: Partial<Doc<"accounts">> = {}) => ({ _id: id as Id<"accounts">, kind: "bank", ...extra }) as Doc<"accounts">;
+  const accounts = [
+    acc("hdfc"), acc("phonepe", { kind: "upi", linkedAccountId: "hdfc" as Id<"accounts"> }), acc("gpay", { kind: "upi", linkedAccountId: "hdfc" as Id<"accounts"> }),
+    acc("debit", { kind: "debitCard", linkedAccountId: "hdfc" as Id<"accounts"> }), acc("wallet", { kind: "upi" }), acc("card", { kind: "card" }), acc("icici"),
+  ];
+  const tx = (id: string, accountId: string, extra: Partial<Doc<"transactions">> = {}): Doc<"transactions"> => ({
+    _id: id as Id<"transactions">, _creationTime: Number(id.replace(/\D/g, "")), userId: "u" as Id<"users">, type: "expense", date: "2026-10-18", accountId: accountId as Id<"accounts">, amount: 48500, note: "Swiggy", tags: [], photoIds: [], ...extra,
+  });
+  // read as the bank, typed in under a UPI that draws from it (and the other way round)
+  expect(matchEntry(cand({ id: "a", accountId: "hdfc" }), [tx("t1", "phonepe")], accounts)).toBe("t1");
+  expect(matchEntry(cand({ id: "a", accountId: "gpay" }), [tx("t1", "phonepe")], accounts)).toBe("t1");
+  expect(matchEntry(cand({ id: "a", accountId: "debit" }), [tx("t1", "hdfc")], accounts)).toBe("t1");
+  // other money stays apart: another bank, a credit card, a UPI wallet with its own balance
+  expect(matchEntry(cand({ id: "a", accountId: "hdfc" }), [tx("t1", "icici")], accounts)).toBeUndefined();
+  expect(matchEntry(cand({ id: "a", accountId: "hdfc" }), [tx("t1", "card")], accounts)).toBeUndefined();
+  expect(matchEntry(cand({ id: "a", accountId: "hdfc" }), [tx("t1", "wallet")], accounts)).toBeUndefined();
+  // on the same day, the exact method wins over a sibling, even an older one
+  expect(matchEntry(cand({ id: "a", accountId: "gpay" }), [tx("t1", "gpay"), tx("t2", "phonepe")], accounts)).toBe("t1");
+});
