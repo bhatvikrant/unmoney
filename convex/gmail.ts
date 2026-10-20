@@ -16,7 +16,7 @@ import schema from "./schema";
 import { requireUser } from "./lib/auth";
 import { decryptText, encryptText, hasTokenKey, sign, verify } from "./lib/gmailCrypto";
 import * as gmailApi from "./lib/gmailApi";
-import { GmailAuthError } from "./lib/gmailApi";
+import { GmailAuthError, GmailSetupError, SCOPE } from "./lib/gmailApi";
 import { addDays, todayISO } from "../shared/dates";
 import { clean } from "../shared/ops";
 import type { Mail } from "../shared/gmail/mail";
@@ -125,6 +125,8 @@ export const callback = httpAction(async (ctx, req) => {
   if (!code) return back("error");
   try {
     const tokens = await gmailApi.exchangeCode(code, redirectUri());
+    // Google's consent screen lets the user untick Gmail and still continue
+    if (tokens.scopes.length && !tokens.scopes.includes(SCOPE)) return back("no-scope");
     if (!tokens.refreshToken) throw new Error("Google returned no refresh token");
     const { email } = await gmailApi.profile(tokens.accessToken);
     const { enc, iv } = await encryptText(tokens.refreshToken);
@@ -133,7 +135,7 @@ export const callback = httpAction(async (ctx, req) => {
     return back("connected");
   } catch (e) {
     console.error("gmail connect failed", e instanceof Error ? e.message : e);
-    return back("error");
+    return back(e instanceof GmailSetupError ? e.kind : "error");
   }
 });
 
