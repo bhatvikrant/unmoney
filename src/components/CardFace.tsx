@@ -3,7 +3,7 @@
  * masked number with the last 4 digits, and the card's name. In the editor the same card is the
  * form: the bank, the digits and the name are typed straight onto it.
  */
-import { useRef, type CSSProperties, type ReactNode } from "react";
+import { type CSSProperties, type ReactNode } from "react";
 import { Check, Nfc, Pipette } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CARD_COLORS } from "../../shared/defaults";
@@ -109,7 +109,6 @@ export function CardThumb({ color, className }: { color: string; className?: str
 
 /** The colours a card can take, plus any colour from the system picker. */
 export function CardColorPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
-  const custom = useRef<HTMLInputElement>(null);
   const isPreset = CARD_COLORS.some((c) => c.value === value.toLowerCase());
   const swatch = "relative size-8 shrink-0 rounded-full ring-1 ring-black/15 transition-transform hover:scale-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
   return (
@@ -123,13 +122,15 @@ export function CardColorPicker({ value, onChange }: { value: string; onChange: 
           </button>
         );
       })}
-      <button type="button" role="radio" aria-checked={!isPreset} aria-label="Pick any colour" title="Pick any colour" onClick={() => custom.current?.click()}
-        className={cn(swatch, "flex items-center justify-center bg-[conic-gradient(from_180deg,#ef4444,#eab308,#22c55e,#06b6d4,#6366f1,#d946ef,#ef4444)]", !isPreset && "ring-2 ring-foreground ring-offset-2 ring-offset-background")}>
-        <span className="flex size-5 items-center justify-center rounded-full" style={!isPreset ? { backgroundColor: value } : { backgroundColor: "white" }}>
+      {/* The real colour input sits invisibly over the swatch: iOS only opens its picker on a direct tap, not a scripted click. */}
+      <label title="Pick any colour"
+        className={cn(swatch, "flex cursor-pointer items-center justify-center bg-[conic-gradient(from_180deg,#ef4444,#eab308,#22c55e,#06b6d4,#6366f1,#d946ef,#ef4444)] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring", !isPreset && "ring-2 ring-foreground ring-offset-2 ring-offset-background")}>
+        <span className="pointer-events-none flex size-5 items-center justify-center rounded-full" style={!isPreset ? { backgroundColor: value } : { backgroundColor: "white" }}>
           <Pipette className="size-3" style={{ color: !isPreset ? inkOn(value).ink : "#1c1917" }} />
         </span>
-      </button>
-      <input ref={custom} type="color" tabIndex={-1} aria-hidden className="sr-only" value={value} onChange={(e) => onChange(e.target.value)} />
+        <input type="color" aria-label="Pick any colour" value={value} onChange={(e) => onChange(e.target.value)}
+          className="absolute inset-0 size-full cursor-pointer appearance-none rounded-full opacity-0" />
+      </label>
     </div>
   );
 }
