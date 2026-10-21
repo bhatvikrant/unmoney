@@ -1,15 +1,24 @@
 import { useNavigate } from "react-router";
 import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useGoBack } from "@/lib/nav";
 import { cn } from "@/lib/utils";
+import { SyncStrip } from "./SyncStatus";
 
 export function PageHeader({ title, back, left, right, className, sub }: {
   title?: ReactNode; back?: boolean | string; left?: ReactNode; right?: ReactNode; className?: string; sub?: ReactNode;
 }) {
   const nav = useNavigate();
   const goBack = useGoBack();
+  // the tab and the screen reader say which screen this is
+  useEffect(() => {
+    if (typeof title !== "string" || !title) return;
+    // beside a list (an entry, a category) the list's own title comes back when this closes
+    const before = document.title;
+    document.title = `${title} · UnMoney`;
+    return () => { document.title = before; };
+  }, [title]);
   return (
     <header className={cn("sticky top-0 z-30 bg-background border-b", className)}>
       <div className="mx-auto max-w-3xl flex h-12 items-center px-2 gap-1">
@@ -21,9 +30,10 @@ export function PageHeader({ title, back, left, right, className, sub }: {
           ) : null}
           {left}
         </div>
-        <div className="flex-1 text-center font-semibold truncate">{title}</div>
+        {title ? <h1 className="flex-1 text-center font-semibold truncate">{title}</h1> : <div className="flex-1" />}
         <div className="flex items-center justify-end w-24 gap-0.5">{right}</div>
       </div>
+      <SyncStrip />
       {sub}
     </header>
   );
