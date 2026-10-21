@@ -27,6 +27,7 @@ import { Row, Section } from "@/components/shell/misc";
 import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { ColumnMapping } from "./ColumnMapping";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -60,7 +61,7 @@ export default function ImportPage() {
     setReading(true);
     try {
       const parsed = await readImportFile(file, name);
-      if (!parsed.rows.length) throw new Error("No entries found in that file.");
+      if (!parsed.rows.length && !parsed.bank) throw new Error("No entries found in that file.");
       setLoaded({ ...parsed, name, origin });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not read that file");
@@ -114,7 +115,12 @@ export default function ImportPage() {
     <>
       <PageHeader back="/settings" title="Import" />
       <Page className="pb-10">
-        {loaded ? (
+        {loaded?.bank ? (
+          // a bank statement: its columns first, then the same review
+          <ColumnMapping name={loaded.name} grid={loaded.bank.grid} headerRow={loaded.bank.headerRow}
+            onCancel={async () => { if (loaded.origin.kind === "share") await finish(loaded.origin); closeReview(); }}
+            onContinue={(rows, noAmount) => setLoaded({ ...loaded, rows, noAmount, bank: undefined })} />
+        ) : loaded ? (
           <Review
             loaded={loaded}
             onCancel={async () => { if (loaded.origin.kind === "share") await finish(loaded.origin); closeReview(); }}
@@ -145,7 +151,7 @@ export default function ImportPage() {
             <Section title="Or pick the file">
               <Row
                 label="Choose a file"
-                hint="Money Manager's Excel export, or a CSV / TSV with Date, Account, Category, Amount and Income/Expense columns"
+                hint="Money Manager's Excel export, or a bank statement (CSV or Excel): you match its columns next"
                 right={<Button size="sm" variant="outline" disabled={reading} onClick={() => pickRef.current?.click()}>{reading ? "Reading…" : "Choose"}</Button>}
               />
               <input
@@ -437,6 +443,7 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
             <div className="truncate text-sm font-medium">{loaded.name}</div>
             <div className="text-xs text-muted-foreground">
               {loaded.rows.length} rows{loaded.skippedTransferIn ? ` · ${loaded.skippedTransferIn} Transfer-In ${loaded.skippedTransferIn === 1 ? "row" : "rows"} left out (each transfer is already in its Transfer-Out row)` : ""}
+              {loaded.noAmount ? ` · ${loaded.noAmount} ${loaded.noAmount === 1 ? "row" : "rows"} without an amount left out` : ""}
             </div>
           </div>
         </div>
