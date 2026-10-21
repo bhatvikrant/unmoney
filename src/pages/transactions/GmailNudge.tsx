@@ -31,12 +31,13 @@ export function GmailNudge({ from, to }: { from: string; to: string }) {
 
 /**
  * One tappable line, shaped like the "Filtered" strip under the summary bar: the whole row is the
- * target. Tinted with the accent (red when it is a warning) so it does not read as a day header.
+ * target. Tinted amber like the other Gmail notices (red when it is a warning), whatever the accent,
+ * so it does not read as a day header.
  */
 function Strip({ label, extra, action, warn, onClick }: { label: string; extra?: string; action: string; warn?: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={cn("flex w-full items-center gap-2 border-b px-4 py-2 text-left text-xs", warn ? "bg-destructive/10 text-destructive active:bg-destructive/20" : "bg-primary/10 active:bg-primary/20")}>
-      <Mail className={cn("size-3.5 shrink-0", !warn && "text-primary")} />
+    <button type="button" onClick={onClick} className={cn("flex w-full items-center gap-2 border-b px-4 py-2 text-left text-xs", warn ? "bg-destructive/10 text-destructive active:bg-destructive/20" : "bg-amber-50 active:bg-amber-100 dark:bg-amber-950/30 dark:active:bg-amber-950/50")}>
+      <Mail className={cn("size-3.5 shrink-0", !warn && "text-amber-600 dark:text-amber-400")} />
       <span className="truncate font-medium">{label}</span>
       {extra ? <span className="shrink-0 text-muted-foreground">· {extra}</span> : null}
       <span className="ml-auto flex shrink-0 items-center text-muted-foreground">{action}<ChevronRight className="size-3.5" /></span>
