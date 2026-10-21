@@ -8,6 +8,7 @@ import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { TrendBars } from "./charts";
 import { useStatPeriod } from "./period";
 import { StatsHeaderBar } from "./PeriodBar";
+import { useColumn } from "@/components/shell/SplitLayout";
 import { TransactionList } from "@/components/tx/TransactionList";
 import { Money } from "@/components/shell/Money";
 
@@ -16,6 +17,8 @@ export default function CategoryDetail() {
   const [sp] = useSearchParams();
   const { search } = useLocation();
   const nav = useNavigate();
+  // beside the Stats list (wide screens) its period bar is right there; on its own screen it gets one
+  const alone = useColumn() !== "detail";
   const type = (sp.get("type") as "income" | "expense") || "expense";
   const { categoryById, accountName } = useApp();
   const p = useStatPeriod();
@@ -37,7 +40,7 @@ export default function CategoryDetail() {
   const pick = (i: number) => { const k = ranges[i]?.key; if (!k) return; if (p.period === "custom") p.set({ period: "monthly", month: k }); else p.go(k); };
   return (
     <>
-      <PageHeader back title={name} sub={<StatsHeaderBar tabs={false} />} />
+      <PageHeader back title={name} sub={alone ? <StatsHeaderBar tabs={false} /> : undefined} />
       <Page className="pb-8">
         <div className="flex items-baseline justify-between px-4 pt-3"><span className="text-sm text-muted-foreground">{p.label}</span><Money amount={item?.amount ?? 0} kind={type} className="text-lg font-semibold" /></div>
         <div className="px-2 py-2">{trend ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} color={type === "income" ? "var(--income)" : "var(--expense)"} onPick={pick} /> : <div className="h-48" />}</div>
