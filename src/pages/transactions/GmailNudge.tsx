@@ -1,16 +1,16 @@
 /**
  * On the ledger, under the recap card: how many drafts from Gmail wait in the month shown, with
- * the way to the review page; or, when the connection broke, the way to reconnect. A card, never
- * a dialog, like the recap nudge.
+ * the way to the review page; or, when the connection broke, the way to reconnect. One tappable
+ * line, never a card or a dialog, so the ledger keeps the screen (spec §6.1).
  */
-import { useMemo, type ReactNode } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router";
 import { useQuery } from "convex/react";
-import { Mail } from "lucide-react";
+import { ChevronRight, Mail } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import { useView } from "@/lib/store";
 import { draftMatches, draftsRange } from "../../../shared/views";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export function GmailNudge({ from, to }: { from: string; to: string }) {
   const nav = useNavigate();
@@ -20,33 +20,23 @@ export function GmailNudge({ from, to }: { from: string; to: string }) {
   const here = useMemo(() => draftsRange(view, from, to).length, [view, from, to]);
   const matched = useMemo(() => draftMatches(view).size, [view]);
   if (status?.connected && status.status === "reauth") {
-    return (
-      <Card title="Gmail needs reconnecting" hint="Google no longer accepts the saved access, so new money mail is not being read.">
-        <Button size="sm" onClick={() => nav("/settings/gmail")}>Reconnect</Button>
-      </Card>
-    );
+    return <Strip warn label="Gmail needs reconnecting" action="Reconnect" onClick={() => nav("/settings/gmail")} />;
   }
   if (!here && !matched) return null;
-  const title = here ? `${here} ${here === 1 ? "entry" : "entries"} found in Gmail` : `Gmail found ${matched} ${matched === 1 ? "entry" : "entries"} you may already have`;
-  const hint = here
-    ? `Pick which to import, or tap a faded row to check one.${matched ? ` ${matched} more may already be added.` : ""}`
-    : "Each one looks like an entry you typed in. Say whether it is the same or new.";
-  return (
-    <Card title={title} hint={hint}>
-      <Button size="sm" onClick={() => nav("/gmail")}>Pick what to import</Button>
-    </Card>
-  );
+  const label = here ? `${here} ${here === 1 ? "entry" : "entries"} found in Gmail` : `Gmail found ${matched} you may already have`;
+  // the "may already be added" count rides along, muted, so the strip stays one line
+  const extra = here && matched ? `+${matched} maybe added` : undefined;
+  return <Strip label={label} extra={extra} action="Review" onClick={() => nav("/gmail")} />;
 }
 
-function Card({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+/** One tappable line, like the "Filtered" strip under the summary bar: the whole row is the target. */
+function Strip({ label, extra, action, warn, onClick }: { label: string; extra?: string; action: string; warn?: boolean; onClick: () => void }) {
   return (
-    <div className="mx-3 my-2.5 flex items-start gap-3 rounded-lg border bg-card p-3 pl-3.5">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted"><Mail className="size-4" /></span>
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium">{title}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>
-        <div className="mt-2.5 flex gap-2">{children}</div>
-      </div>
-    </div>
+    <button type="button" onClick={onClick} className={cn("flex w-full items-center gap-2 border-b bg-muted/50 px-4 py-2 text-left text-xs active:bg-muted", warn && "text-destructive")}>
+      <Mail className="size-3.5 shrink-0" />
+      <span className="truncate font-medium">{label}</span>
+      {extra ? <span className="shrink-0 text-muted-foreground">· {extra}</span> : null}
+      <span className="ml-auto flex shrink-0 items-center text-muted-foreground">{action}<ChevronRight className="size-3.5" /></span>
+    </button>
   );
 }
