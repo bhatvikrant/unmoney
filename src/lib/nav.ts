@@ -3,15 +3,32 @@ import { useLocation, useNavigate } from "react-router";
 import { useMediaQuery, WIDE } from "@/lib/media";
 
 /**
+ * The open entry form sets this while it has unsaved changes, so leaving it through the app (Back,
+ * Close, Esc, another row) asks first. Resolves true when it is fine to go.
+ */
+let leaveGuard: (() => Promise<boolean>) | null = null;
+export function setLeaveGuard(g: (() => Promise<boolean>) | null) { leaveGuard = g; }
+export function clearLeaveGuard(g: () => Promise<boolean>) { if (leaveGuard === g) leaveGuard = null; }
+/** Run `go` now, or once the form's owner agrees to drop its changes. Synchronous when nothing is unsaved, so a tap still counts as one (iOS keyboard). */
+function leave(go: () => void) {
+  if (!leaveGuard) return go();
+  void leaveGuard().then((ok) => {
+    if (!ok) return;
+    leaveGuard = null;
+    go();
+  });
+}
+
+/**
  * Back to the previous screen, or to `fallback` when UnMoney was opened straight on this one
  * (the home-screen "Add" shortcut, a link): going back from there would leave the app.
  */
 export function useGoBack() {
   const nav = useNavigate();
-  return useCallback((fallback = "/") => {
+  return useCallback((fallback = "/") => leave(() => {
     if ((window.history.state as { idx?: number } | null)?.idx) nav(-1);
     else nav(fallback, { replace: true });
-  }, [nav]);
+  }), [nav]);
 }
 
 /** Lists other than the ledger that show an entry beside them on a wide screen, at <list>/t/<id>. */
@@ -40,7 +57,7 @@ export function useOpenEntry() {
   const nav = useNavigate();
   const { pathname, search } = useLocation();
   const wide = useMediaQuery(WIDE);
-  return useCallback((id: string, extra: Record<string, string> = {}) => {
+  return useCallback((id: string, extra: Record<string, string> = {}) => leave(() => {
     const list = wide ? entryListOf(pathname) : undefined;
     if (list) {
       // Beside Search or Bookmarks: the list keeps its own query (the search), the previous entry's bookmark goes,
@@ -62,7 +79,7 @@ export function useOpenEntry() {
     if (besideLedger) params.set("from", "ledger");
     const query = params.toString();
     nav(`/t/${id}${query ? `?${query}` : ""}`, { replace: besideLedger || pathname.startsWith("/t/") });
-  }, [nav, pathname, search, wide]);
+  }), [nav, pathname, search, wide]);
 }
 
 /**
@@ -73,7 +90,7 @@ export function useCloseEntry() {
   const nav = useNavigate();
   const goBack = useGoBack();
   const { pathname, search } = useLocation();
-  return useCallback(() => {
+  return useCallback(() => leave(() => {
     const list = entryListOf(pathname);
     if (list && pathname !== list) {
       const params = new URLSearchParams(search);
@@ -83,5 +100,5 @@ export function useCloseEntry() {
       nav(`${list}${query ? `?${query}` : ""}`, { replace: true });
     } else if (new URLSearchParams(search).get("from") === "ledger") nav(`/${listQuery(search)}`, { replace: true });
     else goBack();
-  }, [nav, goBack, pathname, search]);
+  }), [nav, goBack, pathname, search]);
 }
