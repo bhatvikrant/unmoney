@@ -19,7 +19,7 @@ export function toCSV(rows: Record<string, unknown>[], delimiter = ","): string 
 }
 
 /** The ' that toCSV puts before a would-be formula comes off again, so an export imports back as it was. */
-const unescapeFormula = (v: string) => (/^'[=+\-@\t\r]/.test(v) ? v.slice(1) : v);
+export const unescapeFormula = (v: string) => (/^'[=+\-@\t\r]/.test(v) ? v.slice(1) : v);
 
 export function parseTable(text: string): { headers: string[]; rows: Record<string, string>[] } {
   const res = Papa.parse<Record<string, string>>(text.trim(), { header: true, skipEmptyLines: true, delimiter: "", transform: unescapeFormula });

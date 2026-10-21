@@ -4,7 +4,7 @@
  */
 import type { ImportRow } from "../../shared/ops";
 import Papa from "papaparse";
-import { mapImportRow } from "./csv";
+import { mapImportRow, unescapeFormula } from "./csv";
 import { findHeaderRow, headerNames, isMoneyManagerHeader, type Grid } from "./bankImport";
 
 export type ParsedImport = {
@@ -78,7 +78,7 @@ async function readSheet(file: Blob): Promise<Grid> {
 
 /** A CSV/TSV's cells, the delimiter guessed. */
 function readText(text: string): Grid {
-  return (Papa.parse<string[]>(text.trim(), { header: false, skipEmptyLines: true, delimiter: "" }).data ?? []).map((r) => r.map((c) => String(c ?? "")));
+  return (Papa.parse<string[]>(text.trim(), { header: false, skipEmptyLines: true, delimiter: "", transform: unescapeFormula }).data ?? []).map((r) => r.map((c) => String(c ?? "")));
 }
 
 /**
