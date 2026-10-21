@@ -17,13 +17,15 @@ import { Label } from "@/components/ui/label";
 import { BalanceLine } from "@/pages/stats/charts";
 import { TransactionList } from "@/components/tx/TransactionList";
 import { useMonthParam, useMonthsWithData, usePeriodNeighbours } from "@/lib/period-hooks";
-import { amountInput, dateLabel, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
+import { amountInput, dateLabel, monthLabel, reconciledLabel, LOCALE_DECIMAL } from "@/lib/format";
+import { drawsFromLinked } from "../../../shared/ledger";
 import { monthKey, parseMonthKey, yearRange } from "../../../shared/period";
 import { todayISO } from "../../../shared/dates";
 import { useToday } from "@/lib/today";
 import { toMinor } from "../../../shared/money";
 import { cardColorOf } from "../../../shared/defaults";
 import { CardFace } from "@/components/CardFace";
+import { AdjustBalanceDialog } from "./AdjustBalanceDialog";
 
 export default function AccountDetail() {
   const { id } = useParams();
@@ -45,6 +47,7 @@ export default function AccountDetail() {
   const payCard = useOp("accounts.payCard");
   const setArchived = useOp("accounts.setArchived");
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
+  const [adjusting, setAdjusting] = useState(false);
   if (!data) return <><PageHeader back="/payment-methods" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Payment method not found</div></>;
   const a = data.account;
   // a debit card or linked UPI spends from its bank: its own balance means nothing, its usage does
@@ -80,6 +83,13 @@ export default function AccountDetail() {
             <div className="text-xs text-muted-foreground">{data.kind === "card" ? "Card balance today" : "Balance today"}</div>
             <Money amount={data.balance} kind={data.balance < 0 ? "expense" : "income"} className="text-xl font-semibold" />
             {data.upcoming ? <div className="text-xs text-muted-foreground">Upcoming <Money amount={data.upcoming} sign muted /> · then <Money amount={data.balance + data.upcoming} muted /></div> : null}
+            {/* a debit card or linked UPI has no balance of its own: its bank is the one to check */}
+            {!drawsFromLinked({ kind: data.kind, linkedAccountId: a.linkedAccountId }) ? (
+              <div className="text-xs text-muted-foreground">
+                {a.reconciledAt ? `${reconciledLabel(a.reconciledAt, today)} · ` : null}
+                <button type="button" className="underline underline-offset-4 hover:text-foreground" onClick={() => setAdjusting(true)}>Adjust balance</button>
+              </div>
+            ) : null}
           </div>
           {data.card ? (
             <div className="text-right text-xs">
@@ -105,6 +115,7 @@ export default function AccountDetail() {
         <div className="mt-4 px-4 py-1 text-xs text-muted-foreground">Transactions</div>
         <TransactionList txs={data.transactions} emptyText="No transactions in this period" />
       </Page>
+      <AdjustBalanceDialog open={adjusting} onOpenChange={setAdjusting} account={a} kind={data.kind} balance={data.balance} today={today} />
       <Dialog open={!!pay} onOpenChange={(o) => !o && setPay(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>Pay {a.name}</DialogTitle></DialogHeader>

@@ -114,6 +114,11 @@ const describers: Partial<Record<OpKind, Describe>> = {
     if (r.droppedTransfers) extra.push(`${r.droppedTransfers} ${r.droppedTransfers === 1 ? "transfer" : "transfers"} between them removed`);
     return pm(`Merged ${from} into ${names(before).accountName(a.targetId)} (${extra.join(", ")})`);
   },
+  "accounts.adjustBalance": (a, before, after) => {
+    const name = names(before).accountName(a.id);
+    const delta = a.delta as number;
+    return pm(delta ? `Adjusted ${name} to ${money(after, a.balance as number)} (${delta > 0 ? "+" : "−"}${money(after, Math.abs(delta))})` : `Checked ${name}: it matched`);
+  },
   "settings.setDefaultAccount": (a, before) => pm(a.id ? `Made ${names(before).accountName(a.id)} the default payment method` : "New entries start on the first payment method again"),
 
   // ---- groups (shown with payment methods) ----
