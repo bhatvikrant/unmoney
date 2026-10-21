@@ -16,6 +16,8 @@ import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useUndoableDelete } from "@/lib/undo";
 import { DeleteSeriesEntryDialog } from "./DeleteSeriesEntryDialog";
+import { UpcomingRow, UpcomingSheet } from "./Upcoming";
+import type { Occurrence } from "../../../shared/upcoming";
 
 export type Tx = Doc<"transactions">;
 export type Draft = Doc<"drafts">;
@@ -51,6 +53,8 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
   return (
     <div className={cn("flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm", onClick && "cursor-pointer hover:bg-accent/40 active:bg-accent", onLongPress && "select-none [-webkit-touch-callout:none]", selected && "bg-primary/10", open && "bg-accent", className)}
       aria-current={open || undefined}
+      role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onClick(); } } : undefined}
       onClick={() => { if (press.current.fired) { press.current.fired = false; return; } onClick?.(); }} {...pressProps}>
       {onSelect ? <Checkbox checked={!!selected} onCheckedChange={(v) => onSelect(!!v)} onClick={(e) => e.stopPropagation()} /> : null}
       <div className="w-20 shrink-0 text-xs text-muted-foreground leading-tight line-clamp-2">
@@ -80,7 +84,8 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
   );
 }
 
-export function DayHeader({ date, income, expense }: { date: string; income: number; expense: number }) {
+/** `totals: false` for a day with nothing saved yet (only drafts or upcoming rows): there is nothing to add up. */
+export function DayHeader({ date, income, expense, totals = true }: { date: string; income: number; expense: number; totals?: boolean }) {
   const { d, y, m } = parts(date);
   return (
     <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/40 border-b text-sm">
@@ -88,8 +93,12 @@ export function DayHeader({ date, income, expense }: { date: string; income: num
       <span className="text-[11px] text-muted-foreground">{String(m).padStart(2, "0")}/{y}</span>
       <span className="text-[10px] rounded bg-muted-foreground/70 text-background px-1.5 py-0.5">{WEEKDAY_SHORT[weekday(date)]}</span>
       <span className="flex-1" />
-      <Money amount={income} kind="income" className="text-xs opacity-60" />
-      <Money amount={expense} kind="expense" className="text-xs w-24 text-right opacity-60" />
+      {totals ? (
+        <>
+          <Money amount={income} kind="income" className="text-xs opacity-60" />
+          <Money amount={expense} kind="expense" className="text-xs w-24 text-right opacity-60" />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -139,12 +148,13 @@ function Fade({ faded, children }: { faded: boolean; children: ReactNode }) {
 }
 
 /**
- * Entries grouped by day, with any drafts from Gmail at the end of their day. Every entry row
+ * Entries grouped by day, with any drafts from Gmail and coming dates of repeats (`upcoming`) at the
+ * end of their day, faded. Every entry row
  * slides left to uncover Delete (off while selecting), wherever the list is shown: the month, a
  * day, a search, a payment method, a category. Day totals count entries only.
  */
-export function TransactionList({ txs, drafts, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className }: {
-  txs: Tx[]; drafts?: Draft[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void;
+export function TransactionList({ txs, drafts, upcoming, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className }: {
+  txs: Tx[]; drafts?: Draft[]; upcoming?: Occurrence[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void;
   emptyText?: string; className?: string;
 }) {
   const undoable = useUndoableDelete();
@@ -152,6 +162,7 @@ export function TransactionList({ txs, drafts, selectable, selected, onToggle, o
   /** The row swiped open, and an entry of a series waiting on "only this one / this and future". */
   const swipe = useSwipedRow();
   const [series, setSeries] = useState<Tx | null>(null);
+  const [occ, setOcc] = useState<Occurrence | null>(null);
   // Deletes like the editor does: at once with Undo in the toast, or asking first for an entry in a series.
   const remove = (t: Tx) => {
     if (t.repeatId) setSeries(t);
@@ -164,24 +175,25 @@ export function TransactionList({ txs, drafts, selectable, selected, onToggle, o
   const { ledger } = useApp();
   const bookmarked = useBookmarkedIds();
   const groups = useMemo(() => {
-    const map = new Map<string, { txs: Tx[]; drafts: Draft[] }>();
+    const map = new Map<string, { txs: Tx[]; drafts: Draft[]; upcoming: Occurrence[] }>();
     const day = (date: string) => {
       let g = map.get(date);
-      if (!g) { g = { txs: [], drafts: [] }; map.set(date, g); }
+      if (!g) { g = { txs: [], drafts: [], upcoming: [] }; map.set(date, g); }
       return g;
     };
     for (const t of txs) day(t.date).txs.push(t);
     for (const d of drafts ?? []) day(d.proposal.date).drafts.push(d);
+    for (const o of upcoming ?? []) day(o.date).upcoming.push(o);
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [txs, drafts]);
-  if (!txs.length && !drafts?.length) return <div className="py-12 text-center text-sm text-muted-foreground">{emptyText}</div>;
+  }, [txs, drafts, upcoming]);
+  if (!txs.length && !drafts?.length && !upcoming?.length) return <div className="py-12 text-center text-sm text-muted-foreground">{emptyText}</div>;
   return (
     <div className={className}>
-      {groups.map(([date, { txs: list, drafts: dayDrafts }]) => {
+      {groups.map(([date, { txs: list, drafts: dayDrafts, upcoming: dayUpcoming }]) => {
         const k = sumKinds(list, ledger);
         return (
           <Fragment key={date}>
-            <DayHeader date={date} income={k.income} expense={k.expense} />
+            <DayHeader date={date} income={k.income} expense={k.expense} totals={list.length > 0} />
             {list.map((t) => (
               <Fade key={rowKey(t)} faded={false}>
                 <SwipeToDelete className="border-b last:border-b-0" disabled={selectable} {...swipe.row(t._id)} onDelete={() => remove(t)}>
@@ -203,11 +215,17 @@ export function TransactionList({ txs, drafts, selectable, selected, onToggle, o
                 <DraftRow draft={d} onClick={selectable ? undefined : () => openEntry("new", { draft: d._id })} />
               </Fade>
             ))}
+            {dayUpcoming.map((o) => (
+              <Fade key={`r:${o.repeat._id}:${o.date}`} faded>
+                <UpcomingRow occ={o} onClick={selectable ? undefined : () => setOcc(o)} />
+              </Fade>
+            ))}
           </Fragment>
         );
       })}
       <DeleteSeriesEntryDialog open={!!series} onOpenChange={(o) => { if (!o) { setSeries(null); swipe.close(); } }}
         onPick={(scope) => { if (series) void undoable.entry(series._id, scope); }} />
+      <UpcomingSheet occ={occ} onOpenChange={(o) => { if (!o) setOcc(null); }} />
     </div>
   );
 }
