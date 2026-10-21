@@ -368,7 +368,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "drafts.link": ["drafts", "transactions"],
   "drafts.unmatch": ["drafts"],
   "drafts.reopen": ["drafts", "transactions"],
-  "repeats.update": ["repeats"],
+  "repeats.update": ["repeats", "accounts", "categories"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions", "accounts", "categories"],
   "repeats.addNext": ["repeats", "transactions", "accounts", "categories"],
@@ -650,7 +650,7 @@ const nextOrder = (docs: { order: number }[]) => Math.max(-1, ...docs.map((d) =>
  * `was`: the entry being edited. Its own account and category may have been deleted since; any
  * other deleted account or category is refused, so nothing new lands where the user cannot see it.
  */
-function validateTx(w: Work, t: TxFields, was?: Doc<"transactions">): TxFields {
+function validateTx(w: Work, t: TxFields, was?: Pick<Doc<"transactions">, "accountId" | "toAccountId" | "categoryId" | "subcategoryId">): TxFields {
   if (!isDate(t.date)) throw new Error("Bad date");
   const kept = new Set([was?.accountId, was?.toAccountId, was?.categoryId, was?.subcategoryId].filter(Boolean));
   for (const [table, id, what] of [["accounts", t.accountId, "account"], ["accounts", t.type === "transfer" ? t.toAccountId : undefined, "account"],
@@ -726,6 +726,18 @@ const FREQUENCIES: Record<Frequency, true> = { daily: true, weekly: true, biweek
 function moveRepeatOn(w: Work, rep: Doc<"repeats">, date: string) {
   const next = nextOccurrence(date, rep.startDate, rep.frequency);
   w.patch("repeats", rep._id, rep.endDate && next > rep.endDate ? { nextDate: next, active: false } : { nextDate: next });
+}
+
+/**
+ * Where `date`, a later date of `rep`'s schedule than `from`, goes when `from` moves to `to`: as many
+ * steps after `to` as it was after `from`, on a schedule anchored on `to`.
+ */
+function shiftOccurrence(date: string, from: string, to: string, rep: Pick<Doc<"repeats">, "startDate" | "frequency">): string {
+  let steps = 0;
+  for (let d = from; d < date && steps < 4000; steps++) d = nextOccurrence(d, rep.startDate, rep.frequency);
+  let out = to;
+  for (let i = 0; i < steps; i++) out = nextOccurrence(out, to, rep.frequency);
+  return out;
 }
 
 const templateOf = (t: TxFields): Template => ({
@@ -1430,13 +1442,16 @@ const handlers: Handlers = {
       if (n < 2 || n > 60) throw new Error("Installments must be between 2 and 60 months");
       const per = Math.floor(t.amount / n);
       const first = t.amount - per * (n - 1);
+      // the foreign-currency amount is split the same way, remainder on the first
+      const subPer = t.subAmount === undefined ? undefined : Math.trunc(t.subAmount / n);
+      const subFirst = subPer === undefined ? undefined : t.subAmount! - subPer * (n - 1);
       const repeatId = w.insert("repeats", {
         kind: "installment", frequency: "monthly", startDate: date, nextDate: addMonths(date, n - 1), installmentCount: n, template: { ...template, amount: t.amount }, active: false,
       });
       let firstId: Id<"transactions"> | null = null;
       for (let i = 0; i < n; i++) {
         const id = w.insert("transactions", {
-          ...rest, date: addMonths(date, i), amount: i === 0 ? first : per, repeatId, installmentIndex: i + 1, installmentCount: n, installmentTotal: t.amount, photoIds: i === 0 ? t.photoIds : [],
+          ...rest, date: addMonths(date, i), amount: i === 0 ? first : per, subAmount: i === 0 ? subFirst : subPer, repeatId, installmentIndex: i + 1, installmentCount: n, installmentTotal: t.amount, photoIds: i === 0 ? t.photoIds : [],
         });
         if (i === 0) firstId = id;
       }
@@ -1456,15 +1471,23 @@ const handlers: Handlers = {
     const t = validateTx(w, input, existing);
     w.patch("transactions", id, { ...t });
     if (scope === "future" && existing.repeatId) {
+      const rep = w.get("repeats", existing.repeatId);
+      // a new date moves the rest of the series with it: each later entry, and the schedule's next
+      // date, to the same place on the schedule counted from the new date
+      const moved = rep && t.date !== existing.date ? (d: string) => shiftOccurrence(d, existing.date, t.date, rep) : undefined;
       for (const s of [...w.snap.transactions]) {
         if (s.repeatId !== existing.repeatId || s._id === id || s.date <= existing.date) continue;
         w.patch("transactions", s._id, {
           type: t.type, accountId: t.accountId, toAccountId: t.toAccountId, categoryId: t.categoryId, subcategoryId: t.subcategoryId,
           note: t.note, description: t.description, tags: t.tags, feeAmount: t.feeAmount, ...(s.installmentIndex ? {} : { amount: t.amount }),
+          ...(moved ? { date: moved(s.date) } : {}),
         });
       }
-      const rep = w.get("repeats", existing.repeatId);
-      if (rep && rep.kind === "repeat") w.patch("repeats", rep._id, { template: templateOf(t) });
+      if (rep && rep.kind === "repeat") {
+        w.patch("repeats", rep._id, { template: templateOf(t), ...(moved ? { startDate: t.date, nextDate: rep.nextDate > existing.date ? moved(rep.nextDate) : rep.nextDate } : {}) });
+      } else if (rep && moved) {
+        w.patch("repeats", rep._id, { ...(existing.installmentIndex === 1 ? { startDate: t.date } : {}), nextDate: rep.nextDate > existing.date ? moved(rep.nextDate) : t.date });
+      }
     }
   },
 
@@ -1767,13 +1790,17 @@ const handlers: Handlers = {
   },
 
   "repeats.update": (w, { id, ...patch }) => {
-    w.must("repeats", id);
+    const rep = w.must("repeats", id);
     const c: Partial<Doc<"repeats">> = {};
     if (patch.frequency) c.frequency = patch.frequency;
     if (patch.endDate !== undefined) c.endDate = patch.endDate ?? undefined;
     if (patch.nextDate) c.nextDate = patch.nextDate;
     if (patch.active !== undefined) c.active = patch.active;
-    if (patch.template) c.template = patch.template;
+    if (patch.template) {
+      // checked like any entry it will add, and an empty amount is refused rather than adding 0 every period
+      if (!patch.template.amount) throw new Error("Enter an amount");
+      c.template = templateOf(validateTx(w, { ...patch.template, date: rep.nextDate, photoIds: [] }, rep.template));
+    }
     w.patch("repeats", id, c);
   },
   "repeats.remove": (w, { id }) => {
