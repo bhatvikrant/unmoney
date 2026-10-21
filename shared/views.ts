@@ -3,7 +3,7 @@
  * functions so every screen can render from the local replica without a network.
  */
 import type { Doc, Id } from "../convex/_generated/dataModel";
-import type { Snapshot } from "./ops";
+import { PASSCODE_FIELDS, type Snapshot } from "./ops";
 import {
   buildCtx, cardStatus, computeBalances, cycleTotals, debitMonthlyUsage, drawsFromLinked, holderOf, kindsOf, resolveKind, statementCycles, statementDue, type Ctx as LedgerCtx,
 } from "./ledger";
@@ -413,11 +413,18 @@ export function txCsvRows(snap: Snapshot, from?: string, to?: string): Record<st
   }));
 }
 
+const omit = <T extends object, K extends string>(o: T, keys: readonly K[]): Omit<T, K> => {
+  const out = { ...o };
+  for (const k of keys) delete (out as Record<string, unknown>)[k];
+  return out;
+};
+
 export function backupExport(snap: Snapshot) {
+  const settings = settingsOf(snap);
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
-    settings: settingsOf(snap),
+    settings: settings && omit(settings, PASSCODE_FIELDS),
     accountGroups: snap.accountGroups,
     accounts: snap.accounts,
     categories: snap.categories,
@@ -448,9 +455,21 @@ export function statsEntries(snap: Snapshot, from: string, to: string, type: "in
     const k = kindsOf(t, ledger);
     const amount = type === "income" ? k.income : k.expense;
     if (!amount) continue;
-    const bucket = t.type === "transfer" ? `transfer:${t.toAccountId ?? ""}` : t.type !== type ? "fees" : t.categoryId && catIds.has(t.categoryId) ? t.categoryId : "none";
-    out.push({ t, amount, bucket });
+    for (const b of entryBuckets(t, amount, catIds)) out.push({ t, ...b });
   }
+  return out;
+}
+
+/**
+ * Splits what an entry counts into its Stats buckets. A transfer counts its amount (when the target
+ * counts as spending) under "transfer:<account>" and its fee under "fees", so one transfer can be two.
+ */
+function entryBuckets(t: Doc<"transactions">, amount: number, catIds: Set<string>): { bucket: string; amount: number }[] {
+  if (t.type !== "transfer") return [{ bucket: t.categoryId && catIds.has(t.categoryId) ? t.categoryId : "none", amount }];
+  const fee = Math.min(t.feeAmount ?? 0, amount);
+  const out: { bucket: string; amount: number }[] = [];
+  if (amount - fee) out.push({ bucket: `transfer:${t.toAccountId ?? ""}`, amount: amount - fee });
+  if (fee) out.push({ bucket: "fees", amount: fee });
   return out;
 }
 
@@ -495,18 +514,21 @@ export function statsTrend(snap: Snapshot, type: "income" | "expense", categoryI
   if (!ranges.length) return [];
   const ledger = ledgerOf(snap);
   const parentOf = new Map(snap.categories.filter((c) => c.type === type).map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
+  const catIds = new Set(parentOf.keys());
   return ranges.map((r) => {
     let amount = 0;
     for (const t of snap.transactions) {
       if (t.date < r.from || t.date > r.to) continue;
       const k = kindsOf(t, ledger);
-      const a = type === "income" ? k.income : k.expense;
+      let a = type === "income" ? k.income : k.expense;
       if (!a) continue;
       if (categoryId) {
-        if (categoryId.startsWith("transfer:")) {
-          if (t.type !== "transfer" || `transfer:${t.toAccountId ?? ""}` !== categoryId) continue;
+        if (t.type === "transfer") {
+          // only the part of the transfer in this bucket: the amount, or the fee for "fees"
+          a = entryBuckets(t, a, catIds).reduce((s, b) => s + (b.bucket === categoryId ? b.amount : 0), 0);
+          if (!a) continue;
         } else {
-          if (t.type !== type) continue;
+          if (t.type !== type || categoryId.startsWith("transfer:") || categoryId === "fees") continue;
           const main = t.categoryId ? parentOf.get(t.categoryId) ?? t.categoryId : "none";
           if (main !== categoryId && t.subcategoryId !== categoryId) continue;
         }

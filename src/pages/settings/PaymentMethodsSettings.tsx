@@ -1,6 +1,8 @@
 import { useLocation, useNavigate } from "react-router";
 import { ChevronRight } from "lucide-react";
-import { useOp } from "@/lib/store";
+import { useMemo } from "react";
+import { useOp, useView } from "@/lib/store";
+import { accountsListDeleted } from "../../../shared/views";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
@@ -11,7 +13,10 @@ import type { Id } from "../../../convex/_generated/dataModel";
 export default function PaymentMethodsSettings() {
   const nav = useNavigate();
   const { pathname } = useLocation();
-  const { settings: s, accounts, archivedAccounts } = useApp();
+  const { settings: s, accounts } = useApp();
+  // what the Deleted payment methods page lists: deleted methods and groups, not archived ones
+  const view = useView();
+  const deleted = useMemo(() => { const d = accountsListDeleted(view); return d.accounts.length + d.groups.length; }, [view]);
   const update = useOp("settings.update");
   const setDefaultAccount = useOp("settings.setDefaultAccount");
   const visibleAccounts = accounts.filter((a) => !a.hidden && !a.archivedAt);
@@ -35,7 +40,7 @@ export default function PaymentMethodsSettings() {
           {link("Totals & visibility", "/settings/transfer-expense", undefined, "Per payment method: whether it counts in your totals, whether it is shown, and whether money moved into it (savings, loans, investments) counts as spending.")}
         </Section>
         <Section>
-          {link("Deleted payment methods", "/settings/deleted-payment-methods", archivedAccounts.length ? `${archivedAccounts.length}` : undefined, "Payment methods you have deleted, with their transactions kept. Restore one to bring it back, or delete it permanently.")}
+          {link("Deleted payment methods", "/settings/deleted-payment-methods", deleted ? `${deleted}` : undefined, "Payment methods you have deleted, with their transactions kept. Restore one to bring it back, or delete it permanently.")}
         </Section>
       </Page>
     </>

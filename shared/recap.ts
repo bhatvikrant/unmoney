@@ -5,7 +5,7 @@
  * See docs/specs/monthly-recap.md and docs/specs/yearly-recap.md.
  */
 import type { Snapshot } from "./ops";
-import { addDays, diffDays, MONTH_LONG, weekday, type ISODate } from "./dates";
+import { addDays, diffDays, make, MONTH_LONG, weekday, type ISODate } from "./dates";
 import { monthKey, monthKeyForDate, monthRange, parseMonthKey, shiftMonthKey, yearRange, type MonthKey, type Range } from "./period";
 import { budgetStatus, settingsOf, statsByCategory, statsEntries, type Tx } from "./views";
 
@@ -144,10 +144,16 @@ export function recapQualifies(snap: Snapshot, month: MonthKey): boolean {
   return statsEntries(snap, r.from, r.to, "expense").length >= RECAP_MIN_ENTRIES;
 }
 
+const localDate = (ms: number) => { const d = new Date(ms); return make(d.getFullYear(), d.getMonth() + 1, d.getDate()); };
+
 function budgetsOf(snap: Snapshot, month: MonthKey): RecapBudgets | undefined {
   const status = budgetStatus(snap, "monthly", month);
   if (!status) return undefined;
-  const items = [...(status.total ? [status.total] : []), ...status.perCategory];
+  // only budgets that already existed in that month: made by its end, or with that month's own
+  // limit or carry-over set (a restored budget is new, but its overrides show it was there)
+  const existed = (b: (typeof status.perCategory)[number]["budget"]) =>
+    localDate(b._creationTime) <= status.range.to || b.overrides[month] !== undefined || (!!b.rolloverFrom && b.rolloverFrom <= month);
+  const items = [...(status.total ? [status.total] : []), ...status.perCategory].filter((i) => existed(i.budget));
   if (!items.length) return undefined;
   const catName = new Map(snap.categories.map((c) => [c._id as string, c.name]));
   const over = items.filter((i) => i.remaining < 0).sort((a, b) => a.remaining - b.remaining);
