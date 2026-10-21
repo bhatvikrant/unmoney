@@ -24,7 +24,10 @@ import { triage } from "../shared/gmail/triage";
 import { parseMail } from "../shared/gmail/rules";
 import { accountMapKey, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
 import { foldDrafts, laterMatches, matchEntry, type DraftCandidate } from "../shared/gmail/dedup";
-import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, normaliseSender, OVERLAP_MS, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
+import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, matchesSender, normaliseSender, OVERLAP_MS, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
+import { applyMerchantMemory, learnMerchants, mergeMerchants, type MerchantMemory } from "../shared/gmail/learn";
+import { PAIRED_NOTE } from "../shared/gmail/dedup";
+import { senderAddress } from "../shared/gmail/mail";
 import { AI_BATCH, AI_MODEL, AI_MONTHLY_CAP, buildAiInput, lowerConfidence, OUTPUT_SCHEMA, SYSTEM_PROMPT, validateAiResults, type AiRead } from "../shared/gmail/ai";
 
 type Connection = Doc<"gmailConnections">;
@@ -70,6 +73,7 @@ export const status = query({
       lastError: c?.lastError ?? null,
       lookbackDays: (c?.lookbackDays ?? 30) as Lookback,
       senders: c?.senders ?? DEFAULT_SENDERS,
+      muted: c?.muted ?? [],
       scanPurchases: c?.scanPurchases ?? true,
       log: c?.log ?? [],
       aiCalls: c && c.aiMonth === month ? c.aiCalls : 0,
@@ -227,6 +231,26 @@ export const updateSettings = mutation({
 });
 
 /**
+ * "Not money mail from this sender" (the review list), or bringing a sender back (Settings): a muted
+ * address is left out of the search and never read. It comes off the allowlist too when it is on it
+ * by that exact address. The review page dismisses its open drafts itself, as ops.
+ */
+export const muteSender = mutation({
+  args: { from: v.string(), muted: v.boolean() },
+  handler: async (ctx, { from, muted }) => {
+    const userId = await requireUser(ctx);
+    const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (!c) throw new ConvexError("Gmail is not connected");
+    const address = normaliseSender(senderAddress(from));
+    if (!address.includes("@")) throw new ConvexError("That isn't a mail address");
+    const list = new Set(c.muted ?? []);
+    if (muted) list.add(address);
+    else list.delete(address);
+    await ctx.db.patch(c._id, { muted: [...list].slice(-MAX_SENDERS), ...(muted ? { senders: c.senders.filter((s) => s !== address) } : {}) });
+  },
+});
+
+/**
  * One-off, after DEFAULT_SENDERS grows: give every existing connection the new defaults, since
  * a connection keeps the list it was made with. It only adds: every default missing from a list is
  * appended (a default the user once removed comes back too), and nothing the user added is touched.
@@ -374,6 +398,7 @@ type Collected = {
   /** Open drafts that look like an entry the user typed in since the draft was written. */
   matches: { id: Id<"drafts">; transactionId: Id<"transactions"> }[];
   learned: Record<string, Id<"accounts">>;
+  learnedMerchants: Record<string, MerchantMemory>;
   /** Mails read that made no draft, so later checks skip them. */
   processed: { id: string; receivedAt: number }[];
   /** Where the next check may start from: before the oldest mail the AI could not read this time, so it is retried. */
@@ -384,10 +409,11 @@ type Collected = {
   notes: string[];
 };
 
-function candidateOf(mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai"): DraftCandidate {
+function candidateOf(mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai", merchant?: string): DraftCandidate {
   return {
     source: "gmail",
     messageId: mail.id,
+    ...(merchant ? { merchant: merchant.slice(0, 120) } : {}),
     extraMessageIds: [],
     threadId: mail.threadId,
     receivedAt: mail.receivedAt,
@@ -434,7 +460,8 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   const token = await gmailApi.accessToken(await decryptText(c.refreshTokenEnc, c.iv));
   const first = !c.syncedUpTo;
   const afterMs = windowStart(c, startedAt);
-  const q = buildQuery({ senders: c.senders, scanPurchases: c.scanPurchases, afterSeconds: afterMs / 1000 });
+  const muted = c.muted ?? [];
+  const q = buildQuery({ senders: c.senders, scanPurchases: c.scanPurchases, afterSeconds: afterMs / 1000, muted });
   const ids = await gmailApi.listMessageIds(token, q, first ? FIRST_SYNC_MAX : SYNC_MAX);
   const seen = new Set(await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids }));
   const fresh = ids.filter((id) => !seen.has(id));
@@ -457,10 +484,13 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   const notes: string[] = [];
   const processed: { id: string; receivedAt: number }[] = [];
   const retry: Mail[] = [];
+  // what the user taught about a merchant wins over the rules' and the model's guesses; the merchant as read is kept to learn under
+  const remember = (mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai") =>
+    candidateOf(mail, { ...resolved, proposal: applyMerchantMemory(resolved.proposal, resolved.proposal.note, c.merchantMap, prep.categories) }, how, resolved.proposal.note);
   for (const mail of mails) {
-    if (!triage(mail).keep) { processed.push({ id: mail.id, receivedAt: mail.receivedAt }); continue; }
+    if (!triage(mail).keep || matchesSender(mail.from, muted)) { processed.push({ id: mail.id, receivedAt: mail.receivedAt }); continue; }
     const parsed = parseMail(mail);
-    if (parsed) candidates.push(candidateOf(mail, resolveParsed(parsed, mail, rctx), "rule"));
+    if (parsed) candidates.push(remember(mail, resolveParsed(parsed, mail, rctx), "rule"));
     else forAi.push(mail);
   }
 
@@ -488,7 +518,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
           const p = resolved.proposal;
           if (!p.accountId && r.accountId && p.type !== "transfer") p.accountId = r.accountId;
           if (!p.categoryId && r.categoryId && p.type !== "transfer") p.categoryId = r.categoryId;
-          candidates.push(candidateOf(mail, { proposal: p, confidence: lowerConfidence(resolved.confidence, r.confidence) }, "ai"));
+          candidates.push(remember(mail, { proposal: p, confidence: lowerConfidence(resolved.confidence, r.confidence) }, "ai"));
         }
       } catch (e) {
         console.error("gmail-ai failed", e instanceof Error ? e.message : e);
@@ -500,13 +530,14 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     if (aiSkipped && used + aiCalls >= AI_MONTHLY_CAP) notes.push(`monthly AI limit reached, ${aiSkipped} mails waiting`);
   }
 
-  const { inserts, updates } = foldDrafts(candidates, prep.openDrafts);
+  const { inserts, updates } = foldDrafts(candidates, prep.openDrafts, prep.accounts.filter((a) => !a.deletedAt));
   return {
     scanned: ids.length,
     inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, prep.transactions, prep.accounts) })),
     updates,
     matches: [...laterMatches(prep.openDrafts, prep.transactions, prep.accounts)].map(([id, transactionId]) => ({ id, transactionId })),
     learned: learnAccounts(prep),
+    learnedMerchants: learnMerchants(prep.accepted, c.merchantMap ?? {}, prep.categories),
     aiCalls, aiSkipped, aiDropped, notes, processed,
     // a check starts OVERLAP_MS before syncedUpTo: hold it back so the mail skipped this time is in the next window
     syncedUpTo: Math.min(startedAt, ...retry.map((m) => m.receivedAt + OVERLAP_MS)),
@@ -524,7 +555,7 @@ export const syncUser = internalAction({
       const got = await collect(ctx, prep, startedAt);
       await ctx.runMutation(internal.gmail.writeSync, {
         userId, startedAt,
-        inserts: got.inserts, updates: got.updates, matches: got.matches, learned: got.learned,
+        inserts: got.inserts, updates: got.updates, matches: got.matches, learned: got.learned, learnedMerchants: got.learnedMerchants,
         aiCalls: got.aiCalls, scanned: got.scanned, note: got.notes.join(" · ") || undefined,
         processed: got.processed, syncedUpTo: got.syncedUpTo,
       });
@@ -552,11 +583,15 @@ export const dryRun = internalAction({
 const draftFields = schema.tables.drafts.validator.fields;
 const insertArg = v.object({
   source: draftFields.source, messageId: draftFields.messageId, extraMessageIds: draftFields.extraMessageIds, threadId: draftFields.threadId,
-  receivedAt: draftFields.receivedAt, from: draftFields.from, subject: draftFields.subject, proposal: draftFields.proposal,
+  receivedAt: draftFields.receivedAt, from: draftFields.from, subject: draftFields.subject, proposal: draftFields.proposal, merchant: draftFields.merchant,
   confidence: draftFields.confidence, how: draftFields.how, matchedTransactionId: v.optional(v.id("transactions")),
 });
 const matchArg = v.object({ id: v.id("drafts"), transactionId: v.id("transactions") });
-const updateArg = v.object({ id: v.id("drafts"), extraMessageIds: v.array(v.string()), note: v.optional(v.string()), categoryId: v.optional(v.id("categories")), subcategoryId: v.optional(v.id("categories")) });
+const updateArg = v.object({
+  id: v.id("drafts"), extraMessageIds: v.array(v.string()), note: v.optional(v.string()), categoryId: v.optional(v.id("categories")), subcategoryId: v.optional(v.id("categories")),
+  transfer: v.optional(v.object({ accountId: v.id("accounts"), toAccountId: v.id("accounts") })),
+});
+const merchantArg = schema.tables.gmailConnections.validator.fields.merchantMap;
 
 /**
  * The outcome of a check: new drafts (once each), folded mails, open drafts that now match an
@@ -565,12 +600,12 @@ const updateArg = v.object({ id: v.id("drafts"), extraMessageIds: v.array(v.stri
 export const writeSync = internalMutation({
   args: {
     userId: v.id("users"), startedAt: v.number(), inserts: v.array(insertArg), updates: v.array(updateArg), matches: v.array(matchArg),
-    learned: v.record(v.string(), v.id("accounts")), aiCalls: v.number(), scanned: v.number(), note: v.optional(v.string()),
+    learned: v.record(v.string(), v.id("accounts")), learnedMerchants: merchantArg, aiCalls: v.number(), scanned: v.number(), note: v.optional(v.string()),
     processed: v.optional(v.array(v.object({ id: v.string(), receivedAt: v.number() }))),
     /** Defaults to startedAt; earlier when some mail is to be retried. */
     syncedUpTo: v.optional(v.number()),
   },
-  handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, aiCalls, scanned, note, processed = [], syncedUpTo = startedAt }) => {
+  handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, learnedMerchants = {}, aiCalls, scanned, note, processed = [], syncedUpTo = startedAt }) => {
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!c) return;
     let found = 0;
@@ -586,6 +621,11 @@ export const writeSync = internalMutation({
       const proposal = { ...d.proposal };
       if (u.note) proposal.note = u.note;
       if (u.categoryId) { proposal.categoryId = u.categoryId; proposal.subcategoryId = u.subcategoryId; }
+      // the other side of a move between the user's own methods arrived: the draft is that transfer now
+      if (u.transfer) {
+        Object.assign(proposal, { type: "transfer" as const, accountId: u.transfer.accountId, toAccountId: u.transfer.toAccountId, categoryId: undefined, subcategoryId: undefined });
+        if (!proposal.description?.includes(PAIRED_NOTE)) proposal.description = [proposal.description, PAIRED_NOTE].filter(Boolean).join(" · ");
+      }
       await ctx.db.patch(u.id, { extraMessageIds: [...new Set([...d.extraMessageIds, ...u.extraMessageIds])], proposal });
     }
     // the user may have saved, linked or said "it's new" while the check ran
@@ -606,6 +646,7 @@ export const writeSync = internalMutation({
       processed: [...(c.processed ?? []).filter((p) => !known.has(p.id)), ...processed].filter((p) => p.receivedAt >= reach),
       aiMonth: month, aiCalls: (c.aiMonth === month ? c.aiCalls : 0) + aiCalls,
       accountMap: { ...c.accountMap, ...learned },
+      ...(Object.keys(learnedMerchants).length ? { merchantMap: mergeMerchants(c.merchantMap ?? {}, learnedMerchants) } : {}),
       log: [entry, ...c.log].slice(0, LOG_KEEP),
     });
   },
