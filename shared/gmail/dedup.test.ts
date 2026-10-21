@@ -112,3 +112,52 @@ test("open drafts find an entry typed in after them, unless already matched or k
   expect([...laterMatches(drafts, typed, accounts)]).toEqual([["d-a", "t1"]]);
   expect(laterMatches(drafts, [], accounts).size).toBe(0);
 });
+
+// ---- money moved between the user's own methods ----
+
+const HDFC = "acc-hdfc" as Id<"accounts">, ICICI = "acc-icici" as Id<"accounts">, GPAY = "acc-gpay" as Id<"accounts">, CARD = "acc-card" as Id<"accounts">;
+const accounts = [
+  { _id: HDFC, kind: "bank" }, { _id: ICICI, kind: "bank" }, { _id: GPAY, kind: "upi", linkedAccountId: HDFC }, { _id: CARD, kind: "card" },
+] as Pick<Doc<"accounts">, "_id" | "kind" | "linkedAccountId">[];
+const ICICI_ALERT = "ICICI <alerts@icicibank.com>";
+
+test("a debit from one account and a credit into another for the same amount are one transfer draft", () => {
+  const out = alert("a", { note: "NEFT ICICI", accountId: HDFC, amount: 2500000 });
+  const inn = cand({ id: "b", from: ICICI_ALERT, type: "income", accountId: ICICI, amount: 2500000, note: "NEFT from Vikrant", at: 5, date: "2026-10-19" });
+  const r = foldDrafts([inn, out], [], accounts);
+  expect(r.inserts).toHaveLength(1);
+  const d = r.inserts[0];
+  expect([d.messageId, d.extraMessageIds, d.proposal.type, d.proposal.accountId, d.proposal.toAccountId, d.proposal.categoryId, d.confidence]).toEqual(["a", ["b"], "transfer", HDFC, ICICI, undefined, "medium"]);
+  expect(d.proposal.description).toContain("paired with the other side's mail");
+});
+
+test("not paired: the same money (a bank and its UPI), a shop's receipt, other amounts or days, refunds, or unknown methods", () => {
+  const out = (x: Partial<Short> = {}) => alert("a", { accountId: HDFC, ...x });
+  const inn = (x: Partial<Short> = {}) => cand({ id: "b", from: ICICI_ALERT, type: "income", accountId: ICICI, at: 5, ...x });
+  expect(foldDrafts([out(), inn({ accountId: GPAY })], [], accounts).inserts).toHaveLength(2);
+  expect(foldDrafts([out(), cand({ id: "b", from: RECEIPT, type: "income", accountId: ICICI })], [], accounts).inserts).toHaveLength(2);
+  expect(foldDrafts([out(), inn({ amount: 1 })], [], accounts).inserts).toHaveLength(2);
+  expect(foldDrafts([out(), inn({ date: "2026-10-21" })], [], accounts).inserts).toHaveLength(2);
+  expect(foldDrafts([out({ amount: -48500 }), inn({ amount: -48500 })], [], accounts).inserts).toHaveLength(2);
+  expect(foldDrafts([out({ accountId: undefined }), inn()], [], accounts).inserts).toHaveLength(2);
+  // without the user's methods nothing pairs (older callers)
+  expect(foldDrafts([out(), inn()], []).inserts).toHaveLength(2);
+});
+
+test("a bank's 'debited towards your card' folds into the card's 'payment received' transfer, from the account the bank names", () => {
+  const debit = alert("a", { accountId: ICICI, note: "Credit card payment", amount: 1400000 });
+  const paid = cand({ id: "b", from: "HDFC Card <cards@hdfcbank.net>", type: "transfer", accountId: HDFC, amount: 1400000, at: 5 });
+  paid.proposal.toAccountId = CARD;
+  const r = foldDrafts([debit, paid], [], accounts);
+  expect(r.inserts.map((d) => [d.messageId, d.extraMessageIds, d.proposal.type, d.proposal.accountId, d.proposal.toAccountId])).toEqual([["a", ["b"], "transfer", ICICI, CARD]]);
+});
+
+test("the other side arriving after the first was already a draft turns that draft into the transfer", () => {
+  const existing = open({ id: "a", accountId: HDFC, amount: 2500000, note: "NEFT ICICI" });
+  const r = foldDrafts([cand({ id: "b", from: ICICI_ALERT, type: "income", accountId: ICICI, amount: 2500000 })], [existing], accounts);
+  expect(r.inserts).toEqual([]);
+  expect(r.updates).toEqual([{ id: existing._id, extraMessageIds: ["b"], transfer: { accountId: HDFC, toAccountId: ICICI } }]);
+  // and the other way round: the credit was the draft
+  const credit = open({ id: "c", from: ICICI_ALERT, type: "income", accountId: ICICI, amount: 2500000 });
+  expect(foldDrafts([alert("d", { accountId: HDFC, amount: 2500000 })], [credit], accounts).updates[0].transfer).toEqual({ accountId: HDFC, toAccountId: ICICI });
+});

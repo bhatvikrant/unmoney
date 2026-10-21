@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { buildQuery, DEFAULT_SENDERS, matchesSender, normaliseSender, windowStart, withNewDefaults } from "./query";
+import { buildQuery, DEFAULT_SENDERS, matchesSender, MONEY_SUBJECT_WORDS, normaliseSender, windowStart, withNewDefaults } from "./query";
 
 test("the query narrows to the window, the senders, Purchases and money subjects", () => {
   const q = buildQuery({ senders: ["hdfcbank.net", "Alerts@AxisBank.com"], scanPurchases: true, afterSeconds: 1_700_000_000.9 });
@@ -54,4 +54,10 @@ test("an existing connection gains the defaults it lacks, after its own entries,
   // covered already: a parent domain takes in an address under it
   expect(withNewDefaults(["google.com"])).not.toContain("payments-noreply@google.com");
   expect(withNewDefaults([])).toEqual(DEFAULT_SENDERS);
+});
+
+test("muted senders are left out of the search", () => {
+  const q = buildQuery({ senders: ["hdfcbank.net"], scanPurchases: false, afterSeconds: 100, muted: ["Offers <Offers@Swiggy.in>"] });
+  expect(q).toBe(`after:100 (from:(hdfcbank.net) OR subject:(${MONEY_SUBJECT_WORDS.join(" OR ")})) -from:(offers@swiggy.in)`);
+  expect(buildQuery({ senders: [], scanPurchases: false, afterSeconds: 100, muted: [] })).not.toContain("-from");
 });
