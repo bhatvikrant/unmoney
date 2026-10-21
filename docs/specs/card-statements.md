@@ -10,7 +10,7 @@ Credit cards are already strong in UnMoney (settlement day, payment day, payable
 
 | Where | What |
 |---|---|
-| Ledger (current month) | A reminder card per credit card with something payable that is due within **3 days** or **overdue**: "HDFC Regalia: ₹14,000 · Due Fri, Oct 23" / "Due tomorrow" / "Overdue since Oct 23", with **Pay** and a hide button. Hiding lasts until that card's next due date (on this device). |
+| Payment methods (top) | One collapsed line while a credit card has something payable that is due within **3 days** or **overdue**: "Card bills · 2 overdue · ₹43,000". Opened (remembered on this device), it lists each card with "Due Fri, Oct 23" / "Due tomorrow" / "Overdue since Oct 23" and **Pay**. It used to be a card per bill at the top of the ledger, which took too much room. |
 | Pay (from the reminder) | Opens the card page with the payment dialog already open and prefilled with what is payable (`/payment-methods/<id>?pay=1`). |
 | Card page | **Statements**: the open cycle ("Oct 5 – Nov 4 · Open · so far") and the last five closed ones ("Sep 5 – Oct 4 · Due Oct 23 · paid ₹10,000"), each with its charges. Quiet cycles are left out. Tapping one shows that cycle's entries instead of the month's ("Transactions · Sep 5 – Oct 4 · Show the month"). |
 | Card page, with a limit | The card face shows **Available ₹72,055** bottom right (the unused `CardFace.footer` slot). A thin bar under the balance shows "Available ₹72,055 · 28% of ₹1,00,000 used" (green under 30%, then warmer, red from 80%). |
