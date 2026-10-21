@@ -53,7 +53,7 @@ test("an ICICI layout with one amount and a Dr/Cr column", () => {
   const m = guessMapping(grid, 0);
   expect(m).toMatchObject({ date: 1, description: 2, mode: "single", amount: 3, sign: "drcr", drcr: 4 });
   const { rows } = toImportRows(grid, m, { account: "ICICI" });
-  expect(rows.map((r) => [r.date, r.type, r.amount])).toEqual([["2026-10-01", "Expenses", "350.00"], ["2026-10-03", "Income", "120.50"]]);
+  expect(rows.map((r) => [r.date, r.type, r.amount])).toEqual([["2026-10-01", "Expenses", "350.00"], ["2026-10-03", "Refund", "120.50"]]);
 });
 
 test("a card statement lists purchases as positive; a bank's single column uses the minus sign", () => {
@@ -98,4 +98,34 @@ test("Money Manager's own layout keeps the old path; a bank statement goes to th
   const csv = HDFC.map((r) => r.map((c) => (c.includes(",") ? `"${c}"` : c)).join(",")).join("\n");
   const bank = await readImportFile(new Blob([csv]), "Acct_Statement.csv");
   expect([bank.rows.length, bank.bank?.headerRow]).toEqual([0, 3]);
+});
+
+test("money in that says refund or reversal imports as a refund in the merchant's spending category", () => {
+  const grid: Grid = [
+    ["Date", "Narration", "Withdrawal Amt.", "Deposit Amt."],
+    ["03/10/26", "POS MYNTRA DESIGNS", "2,499.00", ""],
+    ["06/10/26", "REFUND - MYNTRA DESIGNS", "", "899.00"],
+    ["07/10/26", "UPI/REV/123456/SWIGGY", "", "485.00"],
+    ["08/10/26", "SALARY OCT", "", "1,20,000.00"],
+    ["09/10/26", "REVATHI STORES", "", "300.00"],
+  ];
+  const history: Record<string, string> = { "expense|POS MYNTRA DESIGNS": "Apparel", "expense|MYNTRA DESIGNS": "Apparel" };
+  const categoryFor = (note: string, type: "income" | "expense") => history[`${type}|${note}`];
+  const on = toImportRows(grid, guessMapping(grid, 0), { account: "Bank", categoryFor, spent: [["Swiggy", "Food"], ["Swig", "Wrong"], ["Uber", "Transport"]] });
+  expect(on.refunds).toBe(2);
+  expect(on.rows.map((r) => [r.note, r.type, r.category])).toEqual([
+    ["POS MYNTRA DESIGNS", "Expenses", "Apparel"],
+    ["REFUND - MYNTRA DESIGNS", "Refund", "Apparel"],
+    ["UPI/REV/123456/SWIGGY", "Refund", "Food"],
+    ["SALARY OCT", "Income", "Other"],
+    ["REVATHI STORES", "Income", "Other"],
+  ]);
+  const off = toImportRows(grid, guessMapping(grid, 0), { account: "Bank", categoryFor, refunds: false });
+  expect([off.refunds, off.rows.filter((r) => r.type === "Refund").length]).toEqual([0, 0]);
+
+  // stored as an expense below zero, so it nets against the purchase
+  let s = run(emptySnapshot(), "settings.completeOnboarding", { currency: "INR" }).snap;
+  s = run(s, "transactions.importRows", { rows: on.rows, format: detectImportFormat(on.rows, { dateOrder: "mdy", decimal: "." }), createMissing: true, skipInvalid: true }).snap;
+  const myntra = s.transactions.filter((t) => t.note.includes("MYNTRA")).map((t) => [t.type, t.amount]);
+  expect(myntra.sort()).toEqual([["expense", -89900], ["expense", 249900]]);
 });

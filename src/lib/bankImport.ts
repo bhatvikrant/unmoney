@@ -137,18 +137,44 @@ export function normaliseBankDate(raw: string): string {
 /** A note keeps the first 80 characters of a long bank narration; the whole of it goes in the description. */
 export const NOTE_MAX = 80;
 
-export type BankRows = { rows: ImportRow[]; noAmount: number };
+/** Money in that a statement calls a refund or a reversal ("REFUND MYNTRA", "UPI/REV/…", "CHARGEBACK"): money back on an expense. */
+const REFUND_WORDS = /\b(refund(ed)?|reversal|reversed|rev|chargeback|charge back)\b/gi;
+export const isRefundText = (text: string) => new RegExp(REFUND_WORDS.source, "i").test(text);
+/** The merchant once the refund wording is taken off ("Refund - Myntra" → "Myntra"), to find what the user files it under. */
+export const withoutRefundWords = (text: string) => text.replace(REFUND_WORDS, " ").replace(/^[\s\-/:.,]+|[\s\-/:.,]+$/g, "").replace(/\s+/g, " ");
+
+const words = (s: string) => ` ${s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+
+/**
+ * The category of the longest past spending note (3+ characters) that appears in `text` as whole
+ * words: a refund's narration names the merchant among codes ("UPI/REV/123456/Swiggy" → Swiggy's).
+ */
+export function categoryInText(text: string, spent: [note: string, category: string][]): string | undefined {
+  const t = words(text);
+  let best: [number, string] | undefined;
+  for (const [note, category] of spent) {
+    const n = words(note);
+    if (n.trim().length >= 3 && t.includes(n) && (!best || n.length > best[0])) best = [n.length, category];
+  }
+  return best?.[1];
+}
+
+export type BankRows = { rows: ImportRow[]; noAmount: number; refunds: number };
 
 /**
  * The rows for transactions.importRows. Every row goes to `account`. Money out is an expense and
  * money in an income. The category is the mapped column, else `categoryFor` (what the user's
- * history files that note under), else "Other". Blank rows and rows with no amount (or 0) are
+ * history files that note under), else "Other". With `refunds` (on unless false), money in whose
+ * description says refund or reversal is a refund instead: an expense below zero in the category the
+ * user files that merchant's spending under (the note, the note without the refund words, or a past
+ * spending note named in it: `spent`), so it nets against it. Blank rows and rows with no amount (or 0) are
  * left out and counted. A row whose date doesn't read (opening and closing balance lines) goes
  * through, and the review lists it as skipped with the reason.
  */
-export function toImportRows(grid: Grid, m: BankMapping, opts: { account: string; categoryFor?: (note: string, type: "income" | "expense") => string | undefined }): BankRows {
+export function toImportRows(grid: Grid, m: BankMapping, opts: { account: string; categoryFor?: (note: string, type: "income" | "expense") => string | undefined; refunds?: boolean; spent?: [note: string, category: string][] }): BankRows {
   const rows: ImportRow[] = [];
   let noAmount = 0;
+  let refunds = 0;
   const cell = (r: string[], c: Col) => (c >= 0 ? (r[c] ?? "").trim() : "");
   for (const r of grid.slice(m.headerRow + 1)) {
     if (!r.some((c) => c.trim())) continue;
@@ -170,16 +196,18 @@ export function toImportRows(grid: Grid, m: BankMapping, opts: { account: string
       }
     }
     if (out === null) { noAmount++; continue; }
-    const type = out ? "expense" : "income";
     const text = cell(r, m.description).replace(/\s+/g, " ");
+    const refund = !out && opts.refunds !== false && isRefundText(text);
+    if (refund) refunds++;
+    const type = out || refund ? "expense" : "income";
     const note = text.length > NOTE_MAX ? text.slice(0, NOTE_MAX).trim() : text;
-    const category = cell(r, m.category) || opts.categoryFor?.(note, type) || "Other";
+    const category = cell(r, m.category) || opts.categoryFor?.(note, type) || (refund ? opts.categoryFor?.(withoutRefundWords(note), "expense") || categoryInText(text, opts.spent ?? []) : undefined) || "Other";
     rows.push({
       date: normaliseBankDate(cell(r, m.date)), account: opts.account, category, note,
       amount: raw.replace(/^[-+]\s*|\s*(dr|cr)\.?$/gi, "").replace(/^\((.*)\)$/, "$1"),
-      type: type === "expense" ? "Expenses" : "Income",
+      type: refund ? "Refund" : type === "expense" ? "Expenses" : "Income",
       ...(text.length > NOTE_MAX ? { description: text } : {}),
     });
   }
-  return { rows, noAmount };
+  return { rows, noAmount, refunds };
 }
