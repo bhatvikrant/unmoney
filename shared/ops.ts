@@ -1161,7 +1161,15 @@ const handlers: Handlers = {
     w.patch("accounts", id, { hidden });
   },
   "accounts.remove": (w, { id }) => {
-    w.must("accounts", id);
+    const a = w.must("accounts", id);
+    // A card billed to it, or a debit card or UPI spending from it, would keep moving money in a
+    // method nobody can see: they must point elsewhere first (merge refuses the same way).
+    for (const x of w.snap.accounts) {
+      if (x.deletedAt || x._id === id) continue;
+      const kind = resolveKind(x, w.snap.accountGroups);
+      if (kind === "card" && x.billingAccountId === id) throw new Error(`${x.name} is billed to ${a.name}. Change ${x.name}'s billing account first`);
+      if (drawsFromLinked({ kind, linkedAccountId: x.linkedAccountId }) && x.linkedAccountId === id) throw new Error(`${x.name} spends from ${a.name}. Change or delete ${x.name} first`);
+    }
     w.patch("accounts", id, { deletedAt: Date.now() });
   },
   "accounts.restore": (w, { id }) => {
@@ -1293,7 +1301,10 @@ const handlers: Handlers = {
     if (!from) throw new Error("No billing account set on this card");
     if (!Number.isInteger(amount) || amount <= 0) throw new Error("Amount must be positive");
     if (!isDate(date)) throw new Error("Bad date");
-    w.must("accounts", from);
+    // money from a deleted method would come from nowhere: no visible balance goes down
+    const source = w.must("accounts", from, "Pick an account to pay from");
+    if (source.deletedAt) throw new Error(`${source.name} has been deleted. Pick another account to pay from`);
+    if (from === id || resolveKind(source, w.snap.accountGroups) === "card") throw new Error("A card can't be paid from itself or another credit card");
     return w.insert("transactions", { type: "transfer", date, accountId: from, toAccountId: id, amount, note: `${card.name} payment`, tags: [], photoIds: [] });
   },
 
