@@ -5,10 +5,10 @@
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { Snapshot } from "./ops";
 import {
-  buildCtx, cardStatus, computeBalances, debitMonthlyUsage, drawsFromLinked, holderOf, kindsOf, resolveKind, statementDue, type Ctx as LedgerCtx,
+  buildCtx, cardStatus, computeBalances, cycleTotals, debitMonthlyUsage, drawsFromLinked, holderOf, kindsOf, resolveKind, statementCycles, statementDue, type Ctx as LedgerCtx,
 } from "./ledger";
 import type { AccountKind } from "./defaults";
-import { addDays, addMonths, daysInMonth, make, parts, todayISO } from "./dates";
+import { addDays, addMonths, daysInMonth, diffDays, make, parts, todayISO } from "./dates";
 import { elapsedFraction, periodRange, type Range } from "./period";
 import { laterMatches } from "./gmail/dedup";
 
@@ -151,6 +151,39 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
     section(NO_GROUP, NO_GROUP_NAME, null, inUse.filter((r) => !r.groupId)),
   ].filter((g) => g.accounts.length > 0);
   return { groups, archived: rows.filter((r) => r.archivedAt), accounts: rows, assets, liabilities, total: assets - liabilities };
+}
+
+/** Days before a card's due date that the ledger starts reminding. */
+export const CARD_DUE_SOON_DAYS = 3;
+
+export type CardDue = { account: AccountRow; due: string; payable: number; overdue: boolean; days: number };
+
+/**
+ * Credit cards with something payable that is due within the next few days, or overdue: what the
+ * ledger's reminder lists, soonest first. Archived and hidden cards are left out.
+ */
+export function cardsDue(rows: AccountRow[], today: string, within = CARD_DUE_SOON_DAYS): CardDue[] {
+  const out: CardDue[] = [];
+  for (const a of rows) {
+    if (a.kind !== "card" || a.archivedAt || a.hidden || !a.nextPayment || !(a.payable && a.payable > 0)) continue;
+    const days = diffDays(today, a.nextPayment);
+    if (days > within) continue;
+    out.push({ account: a, due: a.nextPayment, payable: a.payable, overdue: days < 0, days });
+  }
+  return out.sort((x, y) => x.due.localeCompare(y.due));
+}
+
+/** A card's last `count` statements, newest (the open cycle) first, with their charges and payments. */
+export function cardStatements(snap: Snapshot, id: string, today: string, count = 6) {
+  const a = snap.accounts.find((x) => x._id === id);
+  if (!a || a.kind !== "card") return [];
+  return statementCycles(a, today, count).map((c) => ({ ...c, ...cycleTotals(id, snap.transactions, c) }));
+}
+
+/** What a card can still be charged: its limit less what it owes, future charges (later installments) included. */
+export function creditAvailable(a: Pick<AccountRow, "creditLimit" | "balance" | "upcoming">): number | undefined {
+  if (a.creditLimit === undefined) return undefined;
+  return a.creditLimit - Math.max(0, -(a.balance + Math.min(0, a.upcoming)));
 }
 
 export function accountsListDeleted(snap: Snapshot) {
