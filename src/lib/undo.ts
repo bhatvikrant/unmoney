@@ -17,6 +17,12 @@ export function offerUndo(message: string, undo: () => Promise<unknown>) {
 
 export function useUndoableDelete() {
   const { view, dispatch } = useStore();
+  // restoreRows gives the entries new ids: each says which one it was, so a bookmark made from it points at the copy
+  const restore = (gone: Doc<"transactions">[]) => {
+    const ids = new Set<string>(gone.map((t) => t._id));
+    const bookmarks = Object.fromEntries(view.bookmarks.filter((b) => b.transactionId && ids.has(b.transactionId)).map((b) => [b.transactionId as string, b._id as string]));
+    return dispatch("transactions.restoreRows", { rows: gone.map((t) => ({ ...t, fromBackupId: t._id })), bookmarks });
+  };
 
   return {
     /** One entry, or with `scope` the rest of its repeat / installment series too. */
@@ -28,7 +34,7 @@ export function useUndoableDelete() {
       const schedule = series ? view.repeats.find((r) => r._id === tx.repeatId && r.active) : undefined;
       await dispatch("transactions.remove", { id: id as Id<"transactions">, scope });
       offerUndo(gone.length === 1 ? "Entry deleted" : `${gone.length} entries deleted`, async () => {
-        await dispatch("transactions.restoreRows", { rows: gone });
+        await restore(gone);
         if (schedule) await dispatch("repeats.update", { id: schedule._id, active: true });
       });
     },
@@ -37,7 +43,7 @@ export function useUndoableDelete() {
       const set = new Set(ids);
       const gone = view.transactions.filter((t) => set.has(t._id));
       await dispatch("transactions.bulkRemove", { ids: ids as Id<"transactions">[] });
-      offerUndo(`Deleted ${gone.length} ${gone.length === 1 ? "entry" : "entries"}`, () => dispatch("transactions.restoreRows", { rows: gone }));
+      offerUndo(`Deleted ${gone.length} ${gone.length === 1 ? "entry" : "entries"}`, () => restore(gone));
     },
 
     async note(note: Doc<"notes">) {
