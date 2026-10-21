@@ -68,3 +68,13 @@ describe("importing a European CSV", () => {
     expect(importRows([row("2026-03-25", "1,234.50"), row("03/25/2026", "-7")]).tx).toEqual([["2026-03-25", 123450], ["2026-03-25", 700]]);
   });
 });
+
+test("a second-currency amount keeps the rate the file's two amounts imply, not today's", () => {
+  const s = run(onboarded(), "currencies.add", { code: "USD", name: "US Dollar", symbol: "$", decimals: 2, rate: 1.2, symbolPosition: "before" }).snap;
+  const rows = [{ ...row("2026-03-25", "84.50"), subAmount: "100", subCurrency: "USD" }];
+  const t = run(s, "transactions.importRows", { rows, skipInvalid: true }).snap.transactions[0];
+  expect([t.amount, t.subAmount, t.subCurrency]).toEqual([8450, 10000, "USD"]);
+  // the editor works the main amount out as sub ÷ rate: it must come back to 84.50
+  expect(t.exchangeRate).toBeCloseTo(100 / 84.5);
+  expect(Math.round((t.subAmount! / 100 / t.exchangeRate!) * 100)).toBe(8450);
+});
