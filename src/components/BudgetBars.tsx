@@ -2,7 +2,7 @@ import { useApp } from "@/lib/app";
 import { Money } from "@/components/shell/Money";
 import { cn } from "@/lib/utils";
 
-export type BudgetItem = { budget: { _id: string; categoryId?: string; period: string }; limit: number; spent: number; remaining: number; isOverride?: boolean };
+export type BudgetItem = { budget: { _id: string; categoryId?: string; period: string }; limit: number; spent: number; remaining: number; isOverride?: boolean; carry?: number };
 
 export function BudgetBar({ item, label, elapsed, onClick }: { item: BudgetItem; label: string; elapsed: number; onClick?: () => void }) {
   const { fmt } = useApp();
@@ -14,7 +14,7 @@ export function BudgetBar({ item, label, elapsed, onClick }: { item: BudgetItem;
     <Wrapper type={onClick ? "button" : undefined} onClick={onClick} className={cn("w-full text-left px-4 py-3 border-b last:border-b-0", onClick && "hover:bg-accent/40")}>
       <div className="flex items-end justify-between text-sm mb-1">
         <div>
-          <div className="text-xs text-muted-foreground">{label}{item.isOverride ? " · this period" : ""}</div>
+          <div className="text-xs text-muted-foreground">{label}{item.isOverride ? " · this period" : ""}{item.carry ? <> · <Money amount={item.carry} sign muted /> carried over</> : null}</div>
           <div className="font-medium tabular">{fmt(item.limit)} <span className="text-xs font-normal text-muted-foreground">budget</span></div>
         </div>
         <div className="text-right text-xs">
