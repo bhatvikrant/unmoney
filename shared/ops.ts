@@ -225,6 +225,8 @@ export interface Ops {
   "drafts.link": { args: { id: Id<"drafts">; transactionId: Id<"transactions"> }; result: void };
   /** "No, it's new": the draft stops pointing at the entry it looked like, goes back to the ledger and is never matched again. */
   "drafts.unmatch": { args: { id: Id<"drafts"> }; result: void };
+  /** Undo an import or a dismiss: the drafts are open again, and the entries in `transactionIds` that an import made from them are deleted. */
+  "drafts.reopen": { args: { ids: Id<"drafts">[]; transactionIds?: Id<"transactions">[] }; result: void };
 
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
   "repeats.remove": { args: { id: Id<"repeats"> }; result: void };
@@ -338,6 +340,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "drafts.dismiss": ["drafts"],
   "drafts.link": ["drafts", "transactions"],
   "drafts.unmatch": ["drafts"],
+  "drafts.reopen": ["drafts", "transactions"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions", "accounts", "categories"],
@@ -398,6 +401,7 @@ export function txScope(op: Op): TxScope {
     case "transactions.copy": return { ids: [id] };
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
     case "drafts.link": return { ids: [a.transactionId as string] };
+    case "drafts.reopen": return { ids: (a.transactionIds as string[] | undefined) ?? [] };
     case "repeats.remove": return { repeatIds: [id] };
     case "accounts.permanentlyDelete": return { accountIds: [id] };
     // a merge moves every entry from or to the methods being merged
@@ -1670,6 +1674,17 @@ const handlers: Handlers = {
   "drafts.unmatch": (w, { id }) => {
     const draft = w.must("drafts", id, "That draft is gone");
     if (draft.status === "open") w.patch("drafts", id, { matchedTransactionId: undefined, keptNew: true });
+  },
+  "drafts.reopen": (w, { ids, transactionIds = [] }) => {
+    const made = new Set<string>(transactionIds);
+    for (const id of ids) {
+      const d = w.get("drafts", id);
+      if (!d || d.status === "open") continue;
+      // only an entry this draft's import made: never one it was linked to
+      const t = d.transactionId && made.has(d.transactionId) ? w.get("transactions", d.transactionId) : undefined;
+      if (t && t.source?.messageId === d.messageId) w.delete("transactions", t._id);
+      w.patch("drafts", id, { status: "open", transactionId: undefined, resolvedAt: undefined });
+    }
   },
   "drafts.link": (w, { id, transactionId }) => {
     const draft = w.must("drafts", id, "That draft is gone");
