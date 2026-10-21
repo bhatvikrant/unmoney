@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { useOp, useView } from "@/lib/store";
@@ -74,6 +75,16 @@ export default function RepeatSettings() {
       setEdit(null);
     } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
   };
+  // "Edit schedule" from an upcoming row opens that schedule straight away
+  const [sp, setSp] = useSearchParams();
+  const wanted = sp.get("id");
+  useEffect(() => {
+    if (!wanted) return;
+    const r = list.find((x) => x._id === wanted);
+    if (r) openEdit(r);
+    setSp((p) => { const n = new URLSearchParams(p); n.delete("id"); return n; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted]);
   const editType = edit?.r.template.type;
   return (
     <>
