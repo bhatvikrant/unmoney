@@ -42,6 +42,7 @@ export default function GmailSettings() {
   const disconnect = useAction(api.gmail.disconnect);
   const syncNow = useAction(api.gmail.syncNow);
   const update = useMutation(api.gmail.updateSettings);
+  const muteSender = useMutation(api.gmail.muteSender);
   const claimConnection = useMutation(api.gmail.claimConnection);
   const confirm = useConfirm();
   const [sp, setSp] = useSearchParams();
@@ -257,6 +258,20 @@ export default function GmailSettings() {
                   <Button size="sm" variant="outline" onClick={addSender} disabled={!newSender.trim()}>Add</Button>
                 </div>
               </div>
+              {s.muted.length ? (
+                <div className="border-t px-4 py-3">
+                  <div className="text-sm">Never read</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">Senders you said send no money mail. Remove one to read its mail again.</div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {s.muted.map((x) => (
+                      <span key={x} className="inline-flex items-center gap-1 rounded-full border bg-muted/40 pl-2.5 pr-1 py-0.5 text-xs">
+                        {x}
+                        <button type="button" aria-label={`Read mail from ${x} again`} className="rounded-full p-0.5 text-muted-foreground hover:text-foreground" onClick={() => void muteSender({ from: x, muted: false }).catch(() => toast.error("Could not change it"))}><X className="size-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </Section>
 
             <Section title="Recent checks">
