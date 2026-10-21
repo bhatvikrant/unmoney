@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { ChartPie, ReceiptText, Settings, WalletCards } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MONTH_SHORT, parts, todayISO } from "../../../shared/dates";
@@ -8,6 +8,8 @@ import { Avatar } from "./Avatar";
 import { SyncDot, SyncLine } from "./SyncStatus";
 import { useIosInstallHint } from "@/lib/pwa";
 import { MoneyManagerPrompt, usePendingImportToasts } from "@/components/MoneyManagerPrompt";
+import { useGmailCheckOnFocus } from "@/pages/transactions/GmailNudge";
+import { useView } from "@/lib/store";
 
 const tabs = [
   { to: "/", icon: ReceiptText, label: "Trans." },
@@ -22,6 +24,11 @@ function isActive(pathname: string, to: string) {
   return pathname.startsWith(to);
 }
 
+/** How many Gmail drafts wait, on the More tab. */
+function ReviewCount({ n }: { n: number }) {
+  return <span className="absolute -top-1.5 -right-2.5 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-medium text-primary-foreground tabular" aria-label={`${n} from Gmail to review`}>{n > 99 ? "99+" : n}</span>;
+}
+
 export default function AppShell() {
   useCatchUpRepeats();
   useAdoptAccountKinds();
@@ -29,6 +36,10 @@ export default function AppShell() {
   const nav = useNavigate();
   useIosInstallHint(useCallback(() => nav("/settings"), [nav]));
   usePendingImportToasts();
+  useGmailCheckOnFocus();
+  // drafts from Gmail waiting to be reviewed: a count on More, where the way to them is
+  const drafts = useView().drafts;
+  const toReview = useMemo(() => drafts.filter((d) => d.status === "open").length, [drafts]);
   const { pathname } = useLocation();
   const { user } = useApp();
   const { d, m } = parts(todayISO());
@@ -48,6 +59,7 @@ export default function AppShell() {
           >
             <t.icon className="size-4" />
             {t.to === "/" ? "Transactions" : t.label}
+            {t.to === "/settings" && toReview ? <span className="ml-auto text-xs tabular text-muted-foreground" aria-label={`${toReview} from Gmail to review`}>{toReview}</span> : null}
           </NavLink>
         ))}
         <SyncLine className="mt-auto" />
@@ -66,7 +78,7 @@ export default function AppShell() {
             const active = isActive(pathname, t.to);
             return (
               <NavLink key={t.to} to={t.to} className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", active ? "text-primary" : "text-muted-foreground")}>
-                <span className="relative"><t.icon className="size-5" strokeWidth={active ? 2.4 : 1.8} />{t.to === "/settings" ? <SyncDot /> : null}</span>
+                <span className="relative"><t.icon className="size-5" strokeWidth={active ? 2.4 : 1.8} />{t.to === "/settings" ? (toReview ? <ReviewCount n={toReview} /> : <SyncDot />) : null}</span>
                 <span>{t.to === "/" ? today : t.label}</span>
               </NavLink>
             );
