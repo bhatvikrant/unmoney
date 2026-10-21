@@ -43,11 +43,11 @@ export default function AccountOrder() {
               <div className="bg-card border-y">
                 {items.map((a) => (
                   <div key={a._id} className="flex items-center gap-1 px-2 py-1.5 border-b last:border-b-0 text-sm">
-                    <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(a._id, -1)}><ArrowUp className="size-4" /></Button>
-                    <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(a._id, 1)}><ArrowDown className="size-4" /></Button>
+                    <Button variant="ghost" size="icon" className="size-7" aria-label={`Move ${a.name} up`} onClick={() => move(a._id, -1)}><ArrowUp className="size-4" /></Button>
+                    <Button variant="ghost" size="icon" className="size-7" aria-label={`Move ${a.name} down`} onClick={() => move(a._id, 1)}><ArrowDown className="size-4" /></Button>
                     <span className="flex-1 truncate px-1">{a.name}</span>
                     <Select value={a.groupId ?? NO_GROUP} onValueChange={(v) => changeGroup(a._id, v)}><SelectTrigger className="h-7 w-32 text-xs" aria-label={`Group of ${a.name}`}><SelectValue /></SelectTrigger><SelectContent>{sections.map((x) => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}</SelectContent></Select>
-                    <Button variant="ghost" size="icon" className="size-7" aria-label={a.hidden ? "Show" : "Hide"} onClick={() => setHidden({ id: a._id, hidden: !a.hidden })}>{a.hidden ? <EyeOff className="size-4 text-muted-foreground" /> : <Eye className="size-4" />}</Button>
+                    <Button variant="ghost" size="icon" className="size-7" aria-label={`${a.hidden ? "Show" : "Hide"} ${a.name}`} onClick={() => setHidden({ id: a._id, hidden: !a.hidden })}>{a.hidden ? <EyeOff className="size-4 text-muted-foreground" /> : <Eye className="size-4" />}</Button>
                   </div>
                 ))}
               </div>

@@ -18,6 +18,18 @@ import { Money } from "@/components/shell/Money";
 import { cn } from "@/lib/utils";
 import { dateLabel, monthLabel } from "@/lib/format";
 
+/** What was kept of the income: "Saved X (Y%)", or what spending went over it. */
+function SavedLine({ income, expense }: { income: number; expense: number }) {
+  const net = income - expense;
+  return (
+    <div className="flex items-center justify-center gap-1 border-b py-1.5 text-xs text-muted-foreground">
+      <span>{net >= 0 ? "Saved" : "Overspent"}</span>
+      <Money amount={Math.abs(net)} kind={net >= 0 ? "income" : "expense"} />
+      {income > 0 ? <span>({Math.round((net / income) * 100)}% of income)</span> : null}
+    </div>
+  );
+}
+
 export default function StatsPage() {
   const nav = useNavigate();
   const { pathname } = useLocation();
@@ -60,6 +72,7 @@ export default function StatsPage() {
             </button>
           ))}
         </div>
+        {income.total || expense.total ? <SavedLine income={income.total} expense={expense.total} /> : null}
         {recap ? (
           <div className="border-b bg-card">
             <Row icon={<Sparkles />} label={`${longMonth(p.month)} recap`} hint={`${recap.cards.length} cards · what you spent, where, what changed`} right={<ChevronRight className="size-4 text-muted-foreground" />} onClick={() => nav(`/recap/${p.month}`)} />

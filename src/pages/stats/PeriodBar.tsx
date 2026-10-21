@@ -6,7 +6,8 @@ import { useStatPeriod } from "./period";
 import { useMonthsWithData, usePeriodNeighbours } from "@/lib/period-hooks";
 import { cn } from "@/lib/utils";
 
-export function StatsHeaderBar() {
+/** `tabs={false}`: only the period, for a screen opened from Stats (a category). */
+export function StatsHeaderBar({ tabs: withTabs = true }: { tabs?: boolean } = {}) {
   const nav = useNavigate();
   const { pathname, search } = useLocation();
   const p = useStatPeriod();
@@ -17,14 +18,16 @@ export function StatsHeaderBar() {
   return (
     <div className="mx-auto max-w-3xl">
       <div className="flex items-center gap-2 px-3 py-2">
-        <div className="flex rounded-md bg-muted p-0.5 text-sm">
-          {tabs.map((t) => (
-            <button key={t.to} type="button" onClick={() => nav(t.to + (t.to === "/notes" ? "" : search))} className={cn("px-4 py-1 rounded-[5px]", pathname.startsWith(t.to) ? "bg-background shadow-sm font-medium" : "text-muted-foreground")}>{t.label}</button>
-          ))}
-        </div>
+        {withTabs ? (
+          <div className="flex rounded-md bg-muted p-0.5 text-sm">
+            {tabs.map((t) => (
+              <button key={t.to} type="button" onClick={() => nav(t.to + (t.to === "/notes" ? "" : search))} className={cn("px-4 py-1 rounded-[5px]", pathname.startsWith(t.to) ? "bg-background shadow-sm font-medium" : "text-muted-foreground")}>{t.label}</button>
+            ))}
+          </div>
+        ) : null}
         <span className="flex-1" />
         <Select value={p.period} onValueChange={(v) => p.setPeriod(v as typeof p.period)}>
-          <SelectTrigger className="w-28 h-8"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-28 h-8" aria-label="Period"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="weekly">Weekly</SelectItem><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="yearly">Annually</SelectItem>
             {pathname.startsWith("/stats") ? <SelectItem value="custom">Period</SelectItem> : null}

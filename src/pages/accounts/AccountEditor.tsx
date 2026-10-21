@@ -18,6 +18,7 @@ import { toMinor } from "../../../shared/money";
 import { ACCOUNT_KINDS, cardColorOf, type AccountKind } from "../../../shared/defaults";
 import { CardColorPicker, CardFace } from "@/components/CardFace";
 import { NO_GROUP, NO_GROUP_NAME } from "../../../shared/views";
+import { drawsFromLinked } from "../../../shared/ledger";
 
 /** Select value for "no linked account" (a Select item cannot have an empty value). */
 const NONE = "none";
@@ -41,6 +42,7 @@ export default function AccountEditor() {
     billingAccountId: (existing?.billingAccountId ?? "") as string,
     settlementDay: String(existing?.settlementDay ?? 1),
     paymentDay: String(existing?.paymentDay ?? 15),
+    creditLimit: existing?.creditLimit !== undefined ? amountInput(existing.creditLimit, settings.decimals) : "",
     linkedAccountId: (existing?.linkedAccountId ?? "") as string,
     bankName: existing?.bankName ?? "",
     last4: existing?.last4 ?? "",
@@ -53,6 +55,7 @@ export default function AccountEditor() {
   const kind = f.kind;
   const isCard = kind === "card" || kind === "debitCard";
   const transferable = !["cash", "bank", "card", "debitCard", "upi"].includes(kind);
+  const linked = drawsFromLinked({ kind, linkedAccountId: f.linkedAccountId && f.linkedAccountId !== NONE ? f.linkedAccountId : undefined });
   // Something a card can bill or a linked method can draw from: not a card, and not itself drawing from another account.
   // Archived methods are not offered, unless one is already the billing or linked account.
   const others = accounts.filter((a) => a._id !== id && a.kind !== "card" && !a.linked && (!a.archivedAt || a._id === f.billingAccountId || a._id === f.linkedAccountId));
@@ -71,6 +74,7 @@ export default function AccountEditor() {
         transferAsExpense: !!transferable && f.transferAsExpense, description: f.description || undefined,
         billingAccountId: kind === "card" && f.billingAccountId ? (f.billingAccountId as Id<"accounts">) : undefined,
         settlementDay: kind === "card" ? Number(f.settlementDay) : undefined, paymentDay: kind === "card" ? Number(f.paymentDay) : undefined,
+        creditLimit: kind === "card" ? (f.creditLimit.trim() ? toMinor(f.creditLimit, settings.decimals, LOCALE_DECIMAL) : null) : undefined,
         linkedAccountId: (kind === "debitCard" || kind === "upi") && f.linkedAccountId && f.linkedAccountId !== NONE ? (f.linkedAccountId as Id<"accounts">) : undefined,
         bankName: isCard ? f.bankName.trim() || undefined : undefined,
         last4: isCard ? f.last4 || undefined : undefined,
@@ -106,7 +110,10 @@ export default function AccountEditor() {
         ) : (
           <div className="space-y-1.5"><Label htmlFor="pm-name">Name</Label><Input id="pm-name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus={!id} /></div>
         )}
-        <div className="space-y-1.5"><Label>{id ? "Opening balance" : "Current balance"} ({settings.mainCurrency})</Label><Input inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /><p className="text-xs text-muted-foreground">A negative amount records a liability (loan, overdraft, card debt).</p></div>
+        {/* a debit card or linked UPI spends from its bank: no balance of its own */}
+        {linked ? null : (
+          <div className="space-y-1.5"><Label htmlFor="pm-balance">Opening balance ({settings.mainCurrency})</Label><Input id="pm-balance" inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /><p className="text-xs text-muted-foreground">The balance before your first entry here. A negative amount records a liability (loan, overdraft, card debt).</p></div>
+        )}
         {kind === "card" ? (
           <div className="rounded-lg border p-3 space-y-3">
             <div className="text-sm font-medium">Credit card</div>
@@ -118,6 +125,7 @@ export default function AccountEditor() {
               <div className="space-y-1.5"><Label>Payment day</Label><Input type="number" min={1} max={31} value={f.paymentDay} onChange={(e) => setF({ ...f, paymentDay: e.target.value })} /></div>
             </div>
             <p className="text-xs text-muted-foreground">Spending from the settlement day onward is "outstanding"; everything before it is "payable" on the payment day.</p>
+            <div className="space-y-1.5"><Label htmlFor="pm-limit">Credit limit (optional)</Label><Input id="pm-limit" inputMode="decimal" placeholder="Shows available credit" value={f.creditLimit} onChange={(e) => setF({ ...f, creditLimit: e.target.value })} /></div>
           </div>
         ) : null}
         {kind === "debitCard" || kind === "upi" ? (
@@ -132,7 +140,7 @@ export default function AccountEditor() {
           </div>
         ) : null}
         <div className="rounded-lg border divide-y">
-          <label className="flex items-center justify-between px-3 py-2.5 text-sm"><span>Include in totals</span><Switch checked={f.includeInTotals} onCheckedChange={(v) => setF({ ...f, includeInTotals: v })} /></label>
+          {linked ? null : <label className="flex items-center justify-between px-3 py-2.5 text-sm"><span>Include in totals</span><Switch checked={f.includeInTotals} onCheckedChange={(v) => setF({ ...f, includeInTotals: v })} /></label>}
           <label className="flex items-center justify-between px-3 py-2.5 text-sm"><span>Hide from lists</span><Switch checked={f.hidden} onCheckedChange={(v) => setF({ ...f, hidden: v })} /></label>
           {transferable ? <label className="flex items-center justify-between px-3 py-2.5 text-sm"><span>Count transfers in as expenses<div className="text-xs text-muted-foreground">For savings, insurance, investments and loans</div></span><Switch checked={f.transferAsExpense} onCheckedChange={(v) => setF({ ...f, transferAsExpense: v })} /></label> : null}
         </div>

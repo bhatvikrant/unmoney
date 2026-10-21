@@ -4,6 +4,8 @@ import { useAuthActions } from "@convex-dev/auth/react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
 import { useStore } from "@/lib/store";
+import { backupExport } from "../../../shared/views";
+import { downloadText } from "@/lib/csv";
 import { clearUnlock } from "@/lib/passcode";
 import { Row } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
@@ -12,7 +14,7 @@ import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescript
 
 /** Delete the account and everything in it, on the server and on this device. */
 export function DeleteAccountRow() {
-  const { status, clearLocal } = useStore();
+  const { status, clearLocal, view } = useStore();
   const { signOut } = useAuthActions();
   const deleteAccount = useMutation(api.account.deleteMyAccount);
   const [open, setOpen] = useState(false);
@@ -44,6 +46,7 @@ export function DeleteAccountRow() {
               Every entry, account, budget, note and receipt photo is deleted from the server and from this device, and you are signed out. This cannot be undone; download a backup first if you may want it later.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <Button variant="outline" size="sm" className="justify-self-start" onClick={() => downloadText(`UnMoney-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(backupExport(view), null, 1), "application/json")}>Download backup</Button>
           <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type DELETE to confirm" aria-label="Type DELETE to confirm" autoComplete="off" />
           {!status.connected ? <p className="text-xs text-destructive">Deleting needs a connection.</p> : null}
           <AlertDialogFooter>
