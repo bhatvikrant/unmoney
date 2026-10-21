@@ -12,8 +12,14 @@ import { isShopMail } from "./rules";
 export type DraftCandidate = Omit<Doc<"drafts">, "_id" | "_creationTime" | "userId" | "status" | "transactionId" | "resolvedAt" | "keptNew">;
 type Draftish = Pick<DraftCandidate, "from" | "subject" | "messageId" | "receivedAt" | "proposal">;
 
-/** Folding one draft into another: the one that stays, and what it takes over. */
-export type Fold = { extraMessageIds: string[]; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories"> };
+/** Folding one draft into another: the one that stays, and what it takes over. `transfer`: it becomes a transfer between these two methods. */
+export type Fold = {
+  extraMessageIds: string[]; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">;
+  transfer?: { accountId: Id<"accounts">; toAccountId: Id<"accounts"> };
+};
+type Acc = Pick<Doc<"accounts">, "_id" | "kind" | "linkedAccountId">;
+/** Said on a draft made from two mails about money moving between the user's own methods. */
+export const PAIRED_NOTE = "paired with the other side's mail";
 export type FoldResult = {
   /** New drafts to insert, folded among themselves. */
   inserts: DraftCandidate[];
@@ -54,7 +60,37 @@ function better(keep: Draftish, other: Draftish): Omit<Fold, "extraMessageIds"> 
  * with the account information (a bank alert) is the one that stays; the receipt's message id
  * goes into `extraMessageIds` and its merchant name becomes the note.
  */
-export function foldDrafts(batch: DraftCandidate[], open: Doc<"drafts">[]): FoldResult {
+/**
+ * Money moved between two of the user's own methods arrives as two mails: HDFC's "debited" and
+ * ICICI's "credited", or the bank's "debited towards your card" and the card's "payment received".
+ * Saved as they come that is an expense and an income (or an expense and a transfer): counted
+ * twice. The transfer they are, when the two match (same amount, within a day, neither a shop's
+ * receipt): from the method the debit names to the one credited.
+ */
+export function transferBetween(a: Draftish, b: Draftish, accounts: Acc[]): Fold["transfer"] | null {
+  const pa = a.proposal, pb = b.proposal;
+  if (!(pa.amount > 0) || pa.amount !== pb.amount || !withinADay(pa.date, pb.date) || isShopMail(a) || isShopMail(b)) return null;
+  const byId = new Map(accounts.map((x) => [x._id as string, x]));
+  const holder = (id: Id<"accounts">) => { const x = byId.get(id); return x && drawsFromLinked(x) && x.linkedAccountId ? x.linkedAccountId : id; };
+  const isCard = (id: Id<"accounts">) => byId.get(id)?.kind === "card";
+  for (const [x, y] of [[pa, pb], [pb, pa]] as const) {
+    if (x.type !== "expense" || !x.accountId || !byId.has(x.accountId) || isCard(x.accountId)) continue;
+    // a debit from one method and a credit into another
+    if (y.type === "income" && y.accountId && byId.has(y.accountId) && !isCard(y.accountId) && holder(x.accountId) !== holder(y.accountId)) return { accountId: x.accountId, toAccountId: y.accountId };
+    // a bank debit and the card's "payment received" (already a transfer): one transfer, from the account the bank names
+    if (y.type === "transfer" && y.toAccountId && isCard(y.toAccountId)) return { accountId: x.accountId, toAccountId: y.toAccountId };
+  }
+  return null;
+}
+
+/** A draft turned into the transfer it pairs into. */
+function asTransfer<T extends Draftish>(d: T, t: NonNullable<Fold["transfer"]>, other: Draftish): T {
+  const p = d.proposal;
+  const description = [p.description, PAIRED_NOTE].filter(Boolean).join(" · ");
+  return { ...d, proposal: { ...p, type: "transfer", accountId: t.accountId, toAccountId: t.toAccountId, categoryId: undefined, subcategoryId: undefined, note: p.note || other.proposal.note, description } };
+}
+
+export function foldDrafts(batch: DraftCandidate[], open: Doc<"drafts">[], accounts: Acc[] = []): FoldResult {
   const inserts: DraftCandidate[] = [];
   const updates = new Map<Id<"drafts">, { id: Id<"drafts"> } & Fold>();
   const openLive = open.filter((d) => d.status === "open");
@@ -82,7 +118,28 @@ export function foldDrafts(batch: DraftCandidate[], open: Doc<"drafts">[]): Fold
       proposal: { ...stay.proposal, ...(take.note ? { note: take.note } : {}), ...(take.categoryId ? { categoryId: take.categoryId, subcategoryId: take.subcategoryId } : {}) },
     };
   }
-  return { inserts, updates: [...updates.values()] };
+  // then the two sides of a move between the user's own methods: against open drafts first, then among the new ones
+  const paired: DraftCandidate[] = [];
+  for (const c of inserts) {
+    const d = openLive.find((o) => !updates.get(o._id)?.transfer && transferBetween(o, c, accounts));
+    const t = d ? transferBetween(d, c, accounts) : null;
+    if (d && t) {
+      const u = updates.get(d._id) ?? { id: d._id, extraMessageIds: [...d.extraMessageIds] };
+      for (const m of [c.messageId, ...c.extraMessageIds]) if (!u.extraMessageIds.includes(m)) u.extraMessageIds.push(m);
+      u.transfer = t;
+      if (!d.proposal.note && c.proposal.note) u.note = c.proposal.note;
+      updates.set(d._id, u);
+      continue;
+    }
+    const j = paired.findIndex((p) => transferBetween(p, c, accounts));
+    if (j < 0) { paired.push(c); continue; }
+    const kept = paired[j];
+    const tr = transferBetween(kept, c, accounts)!;
+    // the debit's mail stays (it names where the money left); the other side's id goes into its extras
+    const [stay, fold] = kept.proposal.type === "expense" ? [kept, c] : [c, kept];
+    paired[j] = { ...asTransfer(stay, tr, fold), extraMessageIds: [...new Set([...stay.extraMessageIds, fold.messageId, ...fold.extraMessageIds])], confidence: stay.confidence === "high" ? "medium" : stay.confidence };
+  }
+  return { inserts: paired, updates: [...updates.values()] };
 }
 
 /**

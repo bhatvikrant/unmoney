@@ -276,3 +276,36 @@ test("a grant from Google attaches only to the account that started connecting, 
   expect((await connections()).map((c) => [c.userId, c.email])).toEqual([[userId, "victim@gmail.com"]]);
   expect(await t.run((ctx) => ctx.db.query("gmailPending").collect())).toEqual([]);
 });
+
+test("a check can turn a draft into the transfer its other side shows, and keeps what it learned about merchants", async () => {
+  const { t, as, userId, accounts, connect, insert } = await setup();
+  const cid = await connect();
+  const [cash, bank] = accounts;
+  const at = Date.parse("2026-10-20T10:00:00Z");
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: at, inserts: [insert("m1", { merchant: "NEFT ICICI" })], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 1 });
+  const [d] = await t.run((ctx) => ctx.db.query("drafts").collect());
+  expect(d.merchant).toBe("NEFT ICICI");
+  const food = ((await as.query(api.sync.table, { table: "categories" })) as Doc<"categories">[]).find((c) => c.name === "Food")!._id;
+  await t.mutation(internal.gmail.writeSync, {
+    userId, startedAt: at, inserts: [], matches: [], learned: {}, aiCalls: 0, scanned: 1,
+    updates: [{ id: d._id, extraMessageIds: ["m2"], transfer: { accountId: cash._id, toAccountId: bank._id } }],
+    learnedMerchants: { paytmqr2812: { note: "Chai stall", categoryId: food } },
+  });
+  const after = (await t.run((ctx) => ctx.db.get(d._id)))!;
+  expect([after.proposal.type, after.proposal.accountId, after.proposal.toAccountId, after.proposal.categoryId, after.extraMessageIds]).toEqual(["transfer", cash._id, bank._id, undefined, ["m2"]]);
+  expect(after.proposal.description).toContain("paired with the other side's mail");
+  expect((await t.run((ctx) => ctx.db.get(cid)))!.merchantMap).toEqual({ paytmqr2812: { note: "Chai stall", categoryId: food } });
+});
+
+test("muting a sender takes it off the allowlist and shows in status; unmuting brings it back to the search only", async () => {
+  const { t, as, connect } = await setup();
+  const cid = await connect({ senders: ["hdfcbank.net", "offers@swiggy.in"] });
+  await as.mutation(api.gmail.muteSender, { from: "Swiggy Offers <Offers@Swiggy.in>", muted: true });
+  let c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect([c.muted, c.senders]).toEqual([["offers@swiggy.in"], ["hdfcbank.net"]]);
+  expect((await as.query(api.gmail.status))!.muted).toEqual(["offers@swiggy.in"]);
+  await as.mutation(api.gmail.muteSender, { from: "offers@swiggy.in", muted: false });
+  c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect([c.muted, c.senders]).toEqual([[], ["hdfcbank.net"]]);
+  await expect(as.mutation(api.gmail.muteSender, { from: "swiggy.in", muted: true })).rejects.toThrow(/mail address/);
+});

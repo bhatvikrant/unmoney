@@ -357,6 +357,10 @@ export default defineSchema({
      * a later check's overlap does not fetch them and ask the AI again. Kept while a window can still reach them.
      */
     processed: v.optional(v.array(v.object({ id: v.string(), receivedAt: v.number() }))),
+    /** Merchant (as mail names it, shared/gmail/learn.ts merchantKey) → the note and category the user saves it with. */
+    merchantMap: v.optional(v.record(v.string(), v.object({ note: v.string(), categoryId: v.optional(v.id("categories")), subcategoryId: v.optional(v.id("categories")) }))),
+    /** Senders the user said send no money mail: left out of the search and never read. */
+    muted: v.optional(v.array(v.string())),
   }).index("by_user", ["userId"]),
 
   /**
@@ -382,6 +386,8 @@ export default defineSchema({
     source: v.literal("gmail"),
     /** The primary Gmail message. */
     messageId: v.string(),
+    /** The merchant as the mail named it (cleaned), before what the user taught replaced the note: the key merchant memory learns under. */
+    merchant: v.optional(v.string()),
     /** Mails folded into this one: the receipt that went with the bank alert, etc. */
     extraMessageIds: v.array(v.string()),
     threadId: v.string(),
