@@ -43,6 +43,7 @@ export default function AccountEditor() {
     settlementDay: String(existing?.settlementDay ?? 1),
     paymentDay: String(existing?.paymentDay ?? 15),
     creditLimit: existing?.creditLimit !== undefined ? amountInput(existing.creditLimit, settings.decimals) : "",
+    trackDue: !existing?.noDueTracking,
     linkedAccountId: (existing?.linkedAccountId ?? "") as string,
     bankName: existing?.bankName ?? "",
     last4: existing?.last4 ?? "",
@@ -75,6 +76,7 @@ export default function AccountEditor() {
         billingAccountId: kind === "card" && f.billingAccountId ? (f.billingAccountId as Id<"accounts">) : undefined,
         settlementDay: kind === "card" ? Number(f.settlementDay) : undefined, paymentDay: kind === "card" ? Number(f.paymentDay) : undefined,
         creditLimit: kind === "card" ? (f.creditLimit.trim() ? toMinor(f.creditLimit, settings.decimals, LOCALE_DECIMAL) : null) : undefined,
+        noDueTracking: kind === "card" ? !f.trackDue : undefined,
         linkedAccountId: (kind === "debitCard" || kind === "upi") && f.linkedAccountId && f.linkedAccountId !== NONE ? (f.linkedAccountId as Id<"accounts">) : undefined,
         bankName: isCard ? f.bankName.trim() || undefined : undefined,
         last4: isCard ? f.last4 || undefined : undefined,
@@ -126,6 +128,13 @@ export default function AccountEditor() {
             </div>
             <p className="text-xs text-muted-foreground">Spending from the settlement day onward is "outstanding"; everything before it is "payable" on the payment day.</p>
             <div className="space-y-1.5"><Label htmlFor="pm-limit">Credit limit (optional)</Label><Input id="pm-limit" inputMode="decimal" placeholder="Shows available credit" value={f.creditLimit} onChange={(e) => setF({ ...f, creditLimit: e.target.value })} /></div>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <Label htmlFor="pm-track-due">Track due date</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">Shows "Due" or "Overdue" and lists the bill under Card bills. Turn off if you pay this card outside UnMoney.</p>
+              </div>
+              <Switch id="pm-track-due" checked={f.trackDue} onCheckedChange={(v) => setF({ ...f, trackDue: v })} />
+            </div>
           </div>
         ) : null}
         {kind === "debitCard" || kind === "upi" ? (

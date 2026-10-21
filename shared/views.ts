@@ -183,7 +183,7 @@ export function cardsDue(rows: AccountRow[], today: string, within = CARD_DUE_SO
 export function cardStatements(snap: Snapshot, id: string, today: string, count = 6) {
   const a = snap.accounts.find((x) => x._id === id);
   if (!a || a.kind !== "card") return [];
-  return statementCycles(a, today, count).map((c) => ({ ...c, ...cycleTotals(id, snap.transactions, c) }));
+  return statementCycles(a, today, count).map((c) => ({ ...c, due: a.noDueTracking ? undefined : c.due, ...cycleTotals(id, snap.transactions, c) }));
 }
 
 /** What a card can still be charged: its limit less what it owes, future charges (later installments) included. */
