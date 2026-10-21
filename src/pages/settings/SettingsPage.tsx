@@ -75,7 +75,7 @@ export default function SettingsPage() {
         </Section>
         <Section title="Data">
           {link(<HardDriveDownload />, "Backup & export", "/settings/backup")}
-          {link(<FileInput />, "Import from Money Manager", "/import")}
+          {link(<FileInput />, "Import", "/import", { hint: "Money Manager or a bank statement" })}
           {link(<Mail />, "Gmail", "/settings/gmail", { value: gmail?.connected ? gmail.status === "reauth" ? "Reconnect" : gmail.open ? `${gmail.open} to review` : "On" : "Off", hint: "Turn money mail into entries", under: ["/gmail"] })}
         </Section>
         <Section>

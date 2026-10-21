@@ -3,7 +3,9 @@
  * hand-made sheet) into rows for the transactions.importRows op.
  */
 import type { ImportRow } from "../../shared/ops";
-import { mapImportRow, parseTable } from "./csv";
+import Papa from "papaparse";
+import { mapImportRow } from "./csv";
+import { findHeaderRow, headerNames, isMoneyManagerHeader, type Grid } from "./bankImport";
 
 export type ParsedImport = {
   rows: ImportRow[];
@@ -12,6 +14,13 @@ export type ParsedImport = {
   skippedTransferIn: number;
   /** The main currency the file's amounts are in, when the sheet names it (Money Manager does). */
   currency?: string;
+  /**
+   * Not Money Manager's layout (a bank statement): the cells as they are, and where the header row
+   * was found, for the "Match the columns" step. `rows` is empty until that step has run.
+   */
+  bank?: { grid: Grid; headerRow: number };
+  /** Rows the column mapping left out because they had no amount (src/lib/bankImport.ts). */
+  noAmount?: number;
 };
 
 const SHEET = /\.(xlsx|xlsm|xls)$/i;
@@ -31,12 +40,12 @@ async function looksLikeSheet(file: Blob): Promise<boolean> {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** First worksheet as header-keyed string rows. Date cells become "YYYY-MM-DD HH:MM", or "YYYY-MM-DD" when formatted without a time. */
-async function readSheet(file: Blob): Promise<{ headers: string[]; rows: Record<string, string>[] }> {
+/** First worksheet's cells as text. Date cells become "YYYY-MM-DD HH:MM", or "YYYY-MM-DD" when formatted without a time. */
+async function readSheet(file: Blob): Promise<Grid> {
   const XLSX = await import("xlsx");
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellNF: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  if (!ws || !ws["!ref"]) return { headers: [], rows: [] };
+  if (!ws || !ws["!ref"]) return [];
   const range = XLSX.utils.decode_range(ws["!ref"]);
   const text = (r: number, c: number): string => {
     const cell = ws[XLSX.utils.encode_cell({ r, c })] as { t: string; v: unknown; z?: string; w?: string } | undefined;
@@ -58,26 +67,18 @@ async function readSheet(file: Blob): Promise<{ headers: string[]; rows: Record<
     }
     return String(cell.w ?? cell.v).trim();
   };
-  const headers: string[] = [];
-  const seen = new Map<string, number>();
-  for (let c = range.s.c; c <= range.e.c; c++) {
-    const h = text(range.s.r, c) || `Column ${c + 1}`;
-    const n = seen.get(h) ?? 0;
-    seen.set(h, n + 1);
-    headers.push(n ? `${h}_${n}` : h);
+  const grid: Grid = [];
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const row: string[] = [];
+    for (let c = range.s.c; c <= range.e.c; c++) row.push(text(r, c));
+    grid.push(row);
   }
-  const rows: Record<string, string>[] = [];
-  for (let r = range.s.r + 1; r <= range.e.r; r++) {
-    const row: Record<string, string> = {};
-    let any = false;
-    headers.forEach((h, i) => {
-      const v = text(r, range.s.c + i);
-      row[h] = v;
-      if (v) any = true;
-    });
-    if (any) rows.push(row);
-  }
-  return { headers, rows };
+  return grid;
+}
+
+/** A CSV/TSV's cells, the delimiter guessed. */
+function readText(text: string): Grid {
+  return (Papa.parse<string[]>(text.trim(), { header: false, skipEmptyLines: true, delimiter: "" }).data ?? []).map((r) => r.map((c) => String(c ?? "")));
 }
 
 /**
@@ -86,8 +87,14 @@ async function readSheet(file: Blob): Promise<{ headers: string[]; rows: Record<
  */
 export async function readImportFile(file: Blob, name = (file as File).name ?? ""): Promise<ParsedImport> {
   const isSheet = SHEET.test(name) || SHEET_TYPES.has(file.type) || (await looksLikeSheet(file));
-  const { headers, rows } = isSheet ? await readSheet(file) : parseTable(await file.text());
-  if (!headers.length) throw new Error("That file has no columns. Export from Money Manager with Settings › Backup › Export to Excel.");
+  const grid = isSheet ? await readSheet(file) : readText(await file.text());
+  if (!grid.some((r) => r.some((c) => c.trim()))) throw new Error("That file has no columns. Export from Money Manager with Settings › Backup › Export to Excel.");
+  // statements put account details above the header row
+  const headerRow = findHeaderRow(grid);
+  const headers = headerNames(grid[headerRow]);
+  if (!isMoneyManagerHeader(headers)) return { rows: [], headers, skippedTransferIn: 0, bank: { grid, headerRow } };
+  const rows = grid.slice(headerRow + 1).filter((r) => r.some((c) => c.trim()))
+    .map((r) => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? "").trim()])));
   const currency = headers.find((h) => /^[A-Z]{3}$/.test(h.trim()))?.trim();
   const mapped = rows.map((r) => mapImportRow(r, headers));
   const kept = mapped.filter((r) => !/^transfer[- ]?in/i.test(r.type.trim()));
