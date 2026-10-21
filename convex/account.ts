@@ -32,7 +32,7 @@ const STEPS: { name: string; take: (ctx: MutationCtx, userId: Id<"users">) => Pr
     also: async (ctx, d) => { if (d.storageId) await deleteFile(ctx, d.storageId); } },
   { name: "fileOwners", take: (ctx, u) => ctx.db.query("fileOwners").withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH),
     also: async (ctx, d) => { if (d.storageId) await deleteFile(ctx, d.storageId); } },
-  ...(["settings", "accountGroups", "accounts", "repeats", "bookmarks", "budgets", "currencies", "importLinks", "categoryCleanups", "history", "gmailConnections", "drafts"] as const).map((t) => ({
+  ...(["settings", "accountGroups", "accounts", "repeats", "bookmarks", "budgets", "currencies", "importLinks", "categoryCleanups", "history", "gmailConnections", "drafts", "aiUsage"] as const).map((t) => ({
     name: t, take: (ctx: MutationCtx, u: Id<"users">) => ctx.db.query(t).withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH),
   })),
   { name: "authAccounts", take: (ctx, u) => ctx.db.query("authAccounts").withIndex("userIdAndProvider", (q) => q.eq("userId", u)).take(BATCH),
