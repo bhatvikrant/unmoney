@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { Bookmark, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Tags, WalletCards } from "lucide-react";
+import { Bookmark, CalendarClock, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Tags, WalletCards } from "lucide-react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { ReactNode } from "react";
@@ -64,6 +64,9 @@ export default function SettingsPage() {
           {link(<Repeat />, "Repeats", "/settings/repeats", { hint: "Rent, salary, subscriptions" })}
           {link(<PiggyBank />, "Budgets", "/budget/settings")}
           {link(<Bookmark />, "Bookmarks", "/bookmarks", { hint: "Entries you save to add again" })}
+        </Section>
+        <Section title="Look ahead">
+          {link(<CalendarClock />, "Bills & subscriptions", "/upcoming", { hint: "What's due in the next 30 days" })}
         </Section>
         <Section title="Look back">
           {link(<Sparkles />, "Recaps", "/recaps", { hint: "Every month and year as a short story", under: ["/recap"] })}

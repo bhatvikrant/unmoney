@@ -12,7 +12,7 @@ import { addMonths, todayISO } from "./dates";
 import { currencyInfo } from "./currencies";
 import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_INCOME_CATEGORIES, type AccountKind } from "./defaults";
 import { drawsFromLinked, resolveKind } from "./ledger";
-import { nextOccurrence, type Frequency } from "./repeat";
+import { firstDateAfter, nextOccurrence, type Frequency } from "./repeat";
 import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
 import { normName, normNote } from "./categoryLint";
@@ -110,7 +110,7 @@ export type AccountFields = {
 };
 export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
-  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "recentImports">>;
+  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "dismissedRecurring" | "recentImports">>;
 export type ImportRow = {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
   description?: string; subAmount?: string; subCurrency?: string;
@@ -238,6 +238,15 @@ export interface Ops {
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
   "repeats.remove": { args: { id: Id<"repeats"> }; result: void };
   "repeats.catchUp": { args: { today: string }; result: number };
+  /** Add the schedule's next entry now, dated `entryDate` (paying a bill early), and move the schedule on. `date` must still be its next date. */
+  "repeats.addNext": { args: { id: Id<"repeats">; date: string; entryDate: string }; result: Id<"transactions"> };
+  /** Skip the schedule's next date without adding anything. A date it is already past is a no-op. */
+  "repeats.skip": { args: { id: Id<"repeats">; date: string }; result: void };
+  /**
+   * A schedule anchored on `after` (a payment that already happened) whose first date is the first one later than `today`,
+   * so nothing is back-filled. `fromTransactionId` joins that payment to it.
+   */
+  "repeats.create": { args: { template: Template; frequency: Frequency; after: string; today: string; fromTransactionId?: Id<"transactions"> }; result: Id<"repeats"> };
 
   "bookmarks.create": { args: { template: Template; transactionId?: Id<"transactions"> }; result: Id<"bookmarks"> };
   "bookmarks.update": { args: { id: Id<"bookmarks">; template: Template }; result: void };
@@ -351,6 +360,9 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions", "accounts", "categories"],
+  "repeats.addNext": ["repeats", "transactions", "accounts", "categories"],
+  "repeats.skip": ["repeats"],
+  "repeats.create": ["repeats", "transactions", "accounts", "categories"],
   "bookmarks.create": ["accounts", "transactions", "bookmarks"],
   "bookmarks.update": ["bookmarks"],
   "bookmarks.remove": ["bookmarks"],
@@ -410,6 +422,7 @@ export function txScope(op: Op): TxScope {
     case "drafts.link": return { ids: [a.transactionId as string] };
     case "drafts.reopen": return { ids: (a.transactionIds as string[] | undefined) ?? [] };
     case "repeats.remove": return { repeatIds: [id] };
+    case "repeats.create": return { ids: a.fromTransactionId ? [a.fromTransactionId as string] : [] };
     case "accounts.permanentlyDelete": return { accountIds: [id] };
     // a merge moves every entry from or to the methods being merged
     case "accounts.merge": return { accountIds: [a.targetId as string, ...(a.sourceIds as string[])] };
@@ -694,12 +707,21 @@ function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Ac
   return kind;
 }
 
+const FREQUENCIES: Record<Frequency, true> = { daily: true, weekly: true, biweekly: true, monthly: true, yearly: true };
+
+/** A schedule moves past `date`; past its end date it stops, as repeats.catchUp does. */
+function moveRepeatOn(w: Work, rep: Doc<"repeats">, date: string) {
+  const next = nextOccurrence(date, rep.startDate, rep.frequency);
+  w.patch("repeats", rep._id, rep.endDate && next > rep.endDate ? { nextDate: next, active: false } : { nextDate: next });
+}
+
 const templateOf = (t: TxFields): Template => ({
   type: t.type, accountId: t.accountId, toAccountId: t.toAccountId, categoryId: t.categoryId, subcategoryId: t.subcategoryId,
   amount: t.amount, note: t.note, description: t.description, tags: t.tags, feeAmount: t.feeAmount,
 });
 
-function horizonFor(s: Doc<"settings"> | null, today: string): string {
+/** The last date the app adds scheduled entries for, given today: today, or the month's end with "show repeats on the 1st". */
+export function horizonFor(s: Doc<"settings"> | null, today: string): string {
   if (s?.repeatDisplay === "firstOfMonth") return monthRange(monthKeyForDate(today, s.monthStartDay), s.monthStartDay).to;
   return today;
 }
@@ -1753,6 +1775,33 @@ const handlers: Handlers = {
       if (!stopped) w.patch("repeats", rep._id, { nextDate: next });
     }
     return created;
+  },
+
+  "repeats.addNext": (w, { id, date, entryDate }) => {
+    const rep = w.must("repeats", id, "That schedule is gone");
+    if (!isDate(date) || !isDate(entryDate)) throw new Error("Bad date");
+    if (rep.kind !== "repeat" || !rep.active || rep.nextDate !== date) throw new Error("That one was already added or skipped");
+    const t = validateTx(w, { ...rep.template, date: entryDate, photoIds: [] });
+    const txId = w.insert("transactions", { ...t, repeatId: rep._id });
+    moveRepeatOn(w, rep, date);
+    return txId;
+  },
+  "repeats.skip": (w, { id, date }) => {
+    const rep = w.must("repeats", id, "That schedule is gone");
+    if (!isDate(date)) throw new Error("Bad date");
+    if (rep.nextDate > date) return;
+    if (rep.kind !== "repeat" || !rep.active) throw new Error("That schedule is stopped");
+    if (rep.nextDate < date) throw new Error(`Add or skip the ${rep.nextDate} one first`);
+    moveRepeatOn(w, rep, date);
+  },
+  "repeats.create": (w, { template, frequency, after, today, fromTransactionId }) => {
+    if (!isDate(after) || !isDate(today)) throw new Error("Bad date");
+    if (!(frequency in FREQUENCIES)) throw new Error("Bad frequency");
+    const t = validateTx(w, { ...template, date: after, photoIds: [] });
+    const repeatId = w.insert("repeats", { kind: "repeat", frequency, startDate: after, nextDate: firstDateAfter(after, frequency, today), template: templateOf(t), active: true });
+    const from = fromTransactionId ? w.get("transactions", fromTransactionId) : undefined;
+    if (from && !from.repeatId && !from.installmentIndex) w.patch("transactions", from._id, { repeatId });
+    return repeatId;
   },
 
   "bookmarks.create": (w, { template, transactionId }) => {

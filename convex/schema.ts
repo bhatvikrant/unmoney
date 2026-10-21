@@ -73,6 +73,8 @@ export default defineSchema({
     lockAfter: v.union(v.literal("always"), v.literal("5m"), v.literal("1h")),
     /** Account a new entry starts on; falls back to the first visible account when unset or gone. */
     defaultAccountId: v.optional(v.id("accounts")),
+    /** Notes (normalised) the user said are not bills, so the Bills & subscriptions page stops suggesting them. */
+    dismissedRecurring: v.optional(v.array(v.string())),
     /** The last imports (newest first, at most 10), so one can be undone: its entries carry its id as importId. */
     recentImports: v.optional(v.array(v.object({ id: v.string(), name: v.string(), at: v.number(), count: v.number(), undoneAt: v.optional(v.number()) }))),
   }).index("by_user", ["userId"]),
