@@ -355,7 +355,8 @@ export function txExportRows(snap: Snapshot, from?: string, to?: string) {
     subcategory: t.subcategoryId ? catName.get(t.subcategoryId) ?? "" : "",
     note: t.note,
     amount: t.amount,
-    type: t.type === "income" ? "Income" : t.type === "expense" ? "Expenses" : "Transfer-Out",
+    // a refund (an expense below zero) says so, so importing the file back keeps it a refund
+    type: t.type === "income" ? "Income" : t.type === "expense" ? (t.amount < 0 ? "Refund" : "Expenses") : "Transfer-Out",
     description: t.description ?? "",
     subAmount: t.subAmount ?? "",
     subCurrency: t.subCurrency ?? "",

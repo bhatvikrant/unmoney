@@ -23,7 +23,7 @@ import { importable, type Importable } from "../../../shared/gmail/importable";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { useBottomBar } from "@/components/shell/SplitLayout";
 import { EmptyState, Section } from "@/components/shell/misc";
-import { Money } from "@/components/shell/Money";
+import { EntryMoney } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -218,7 +218,7 @@ function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, on
           {matched ? <div className="mt-0.5 truncate text-xs text-muted-foreground">Looks like: {matched.note || categoryLabel(matched) || "an entry"} · {fmt(matched.amount)} · {dateLabel(matched.date)}</div> : null}
         </div>
         <div className="shrink-0 text-right">
-          <Money amount={p.amount} kind={p.type === "income" ? "income" : p.type === "expense" ? "expense" : "transfer"} />
+          <EntryMoney type={p.type} amount={p.amount} />
           {d.confidence !== "high" ? <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{d.confidence}</div> : null}
         </div>
       </div>

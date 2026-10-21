@@ -8,7 +8,7 @@ import { useApp } from "@/lib/app";
 import { useView } from "@/lib/store";
 import { kindsOf, sumKinds } from "../../../shared/ledger";
 import { WEEKDAY_SHORT, parts, weekday } from "../../../shared/dates";
-import { Money } from "@/components/shell/Money";
+import { EntryMoney, Money } from "@/components/shell/Money";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -69,6 +69,7 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
           {tx.repeatId && !tx.installmentIndex ? <Repeat className="size-3 text-muted-foreground shrink-0" /> : null}
           {tx.photoIds.length ? <Camera className="size-3 text-muted-foreground shrink-0" /> : null}
           {tx.split ? <Users className="size-3 text-muted-foreground shrink-0" aria-label="Split on UnSplit" /> : null}
+          {tx.type === "expense" && tx.amount < 0 ? <Badge variant="secondary" className="text-[10px] px-1 py-0">Refund</Badge> : null}
         </div>
         <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
           {isTransfer && !tx.note ? null : sub}
@@ -76,8 +77,8 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
         </div>
       </div>
       <div className="text-right shrink-0">
-        <Money amount={amount} kind={kind} />
-        {tx.subAmount && tx.subCurrency ? <div className="text-[11px] text-muted-foreground">{fmtSub(tx.subAmount, tx.subCurrency)}</div> : null}
+        {isTransfer ? <Money amount={amount} kind={kind} /> : <EntryMoney type={tx.type} amount={amount} />}
+        {tx.subAmount && tx.subCurrency ? <div className="text-[11px] text-muted-foreground">{fmtSub(Math.abs(tx.subAmount), tx.subCurrency)}</div> : null}
         {isTransfer && tx.feeAmount ? <div className="text-[11px] text-expense">fee <Money amount={tx.feeAmount} kind="expense" /></div> : null}
       </div>
     </div>
@@ -125,14 +126,15 @@ export function DraftRow({ draft, onClick, className }: { draft: Draft; onClick?
         <div className="truncate flex items-center gap-1.5">
           <Mail className="size-3 shrink-0 text-muted-foreground" aria-hidden />
           <span className="truncate">{p.note || label}</span>
+          {p.type === "expense" && p.amount < 0 ? <Badge variant="secondary" className="text-[10px] px-1 py-0">Refund</Badge> : null}
         </div>
         <div className="text-xs text-muted-foreground truncate">
           Unsaved{method ? ` · ${method}` : ""}{!p.accountId ? <span className="text-amber-600 dark:text-amber-400"> · Pick payment method</span> : null}
         </div>
       </div>
       <div className="text-right shrink-0">
-        <Money amount={p.amount} kind={p.type === "income" ? "income" : p.type === "expense" ? "expense" : "transfer"} />
-        {p.subAmount && p.subCurrency ? <div className="text-[11px] text-muted-foreground">{fmtSub(p.subAmount, p.subCurrency)}</div> : null}
+        <EntryMoney type={p.type} amount={p.amount} />
+        {p.subAmount && p.subCurrency ? <div className="text-[11px] text-muted-foreground">{fmtSub(Math.abs(p.subAmount), p.subCurrency)}</div> : null}
       </div>
     </div>
   );
