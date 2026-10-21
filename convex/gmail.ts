@@ -8,7 +8,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ConvexError, v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { action, httpAction, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx } from "./_generated/server";
+import { action, httpAction, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type MutationCtx } from "./_generated/server";
 import type { FunctionReturnType } from "convex/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -117,7 +117,12 @@ async function readState(state: string): Promise<{ userId: Id<"users">; lookback
   return { userId: userId as Id<"users">, lookbackDays };
 }
 
-/** GET /gmail/callback?code&state, from Google. Ends on the settings page with ?gmail=connected | denied | error. */
+/**
+ * GET /gmail/callback?code&state, from Google. Ends on the settings page with ?gmail=denied | error
+ * | …, or ?gmail=claim&claim=… for the app to attach the mailbox (claimConnection). The state says
+ * which account started connecting, but anyone can be sent that account's Google link: only the
+ * signed-in app that started it can claim the grant.
+ */
 export const callback = httpAction(async (ctx, req) => {
   const url = new URL(req.url);
   const back = (outcome: string) => new Response(null, { status: 302, headers: { Location: `${process.env.SITE_URL ?? ""}/settings/gmail?gmail=${outcome}` } });
@@ -133,37 +138,71 @@ export const callback = httpAction(async (ctx, req) => {
     if (!tokens.refreshToken) throw new Error("Google returned no refresh token");
     const { email } = await gmailApi.profile(tokens.accessToken);
     const { enc, iv } = await encryptText(tokens.refreshToken);
-    await ctx.runMutation(internal.gmail.saveConnection, { userId: state.userId, email, refreshTokenEnc: enc, iv, lookbackDays: state.lookbackDays });
-    await ctx.scheduler.runAfter(0, internal.gmail.syncUser, { userId: state.userId });
-    return back("connected");
+    const claim = crypto.randomUUID();
+    await ctx.runMutation(internal.gmail.holdConnection, { userId: state.userId, claim, email, refreshTokenEnc: enc, iv, lookbackDays: state.lookbackDays });
+    return back(`claim&claim=${claim}`);
   } catch (e) {
     console.error("gmail connect failed", e instanceof Error ? e.message : e);
     return back(e instanceof GmailSetupError ? e.kind : "error");
   }
 });
 
+/** A grant back from Google, until the app that started connecting claims it (or 10 minutes pass). */
+export const holdConnection = internalMutation({
+  args: { userId: v.id("users"), claim: v.string(), email: v.string(), refreshTokenEnc: v.string(), iv: v.string(), lookbackDays: lookbackArg },
+  handler: async (ctx, args) => {
+    const id = await ctx.db.insert("gmailPending", args);
+    await ctx.scheduler.runAfter(STATE_TTL_MS, internal.gmail.dropPending, { id });
+  },
+});
+
+export const dropPending = internalMutation({
+  args: { id: v.id("gmailPending") },
+  handler: async (ctx, { id }) => {
+    if (await ctx.db.get(id)) await ctx.db.delete(id);
+  },
+});
+
+/** The app, back from Google: attach the mailbox if this is the account that started connecting. */
+export const claimConnection = mutation({
+  args: { claim: v.string() },
+  handler: async (ctx, { claim }): Promise<"connected" | "expired" | "other-account"> => {
+    const userId = await requireUser(ctx);
+    const p = await ctx.db.query("gmailPending").withIndex("by_claim", (q) => q.eq("claim", claim)).unique();
+    if (!p) return "expired";
+    await ctx.db.delete(p._id);
+    // someone sent this user a link that another account started: never attach their mail there
+    if (p.userId !== userId) return "other-account";
+    await saveConnectionFor(ctx, { userId, email: p.email, refreshTokenEnc: p.refreshTokenEnc, iv: p.iv, lookbackDays: p.lookbackDays });
+    await ctx.scheduler.runAfter(0, internal.gmail.syncUser, { userId });
+    return "connected";
+  },
+});
+
 /** A new connection, or the existing one's token replaced (a reconnect keeps its senders and what it learned). */
 export const saveConnection = internalMutation({
   args: { userId: v.id("users"), email: v.string(), refreshTokenEnc: v.string(), iv: v.string(), lookbackDays: lookbackArg },
-  handler: async (ctx, { userId, email, refreshTokenEnc, iv, lookbackDays }) => {
-    if (!(await ctx.db.get(userId))) return;
-    const readsFrom = Date.now() - lookbackDays * DAY;
-    const old = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
-    if (old) {
-      // a different mailbox is a fresh start; the same one picks up where it left off
-      const same = old.email.toLowerCase() === email.toLowerCase();
-      await ctx.db.patch(old._id, {
-        email, refreshTokenEnc, iv, lookbackDays, readsFrom, status: "ok", lastError: undefined,
-        syncedUpTo: same ? old.syncedUpTo : undefined, accountMap: same ? old.accountMap : {},
-      });
-      return;
-    }
-    await ctx.db.insert("gmailConnections", {
-      userId, email, refreshTokenEnc, iv, status: "ok", lookbackDays, readsFrom, senders: DEFAULT_SENDERS, scanPurchases: true, accountMap: {},
-      aiMonth: monthOf(Date.now()), aiCalls: 0, log: [],
-    });
-  },
+  handler: (ctx, args) => saveConnectionFor(ctx, args),
 });
+
+async function saveConnectionFor(ctx: MutationCtx, { userId, email, refreshTokenEnc, iv, lookbackDays }: { userId: Id<"users">; email: string; refreshTokenEnc: string; iv: string; lookbackDays: number }) {
+  if (!(await ctx.db.get(userId))) return;
+  const readsFrom = Date.now() - lookbackDays * DAY;
+  const old = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+  if (old) {
+    // a different mailbox is a fresh start; the same one picks up where it left off
+    const same = old.email.toLowerCase() === email.toLowerCase();
+    await ctx.db.patch(old._id, {
+      email, refreshTokenEnc, iv, lookbackDays, readsFrom, status: "ok", lastError: undefined,
+      syncedUpTo: same ? old.syncedUpTo : undefined, accountMap: same ? old.accountMap : {},
+    });
+    return;
+  }
+  await ctx.db.insert("gmailConnections", {
+    userId, email, refreshTokenEnc, iv, status: "ok", lookbackDays, readsFrom, senders: DEFAULT_SENDERS, scanPurchases: true, accountMap: {},
+    aiMonth: monthOf(Date.now()), aiCalls: 0, log: [],
+  });
+}
 
 export const connectionOf = internalQuery({
   args: { userId: v.id("users") },
