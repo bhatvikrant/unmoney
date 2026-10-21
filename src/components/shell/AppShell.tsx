@@ -8,6 +8,12 @@ import { Avatar } from "./Avatar";
 import { SyncDot, SyncLine } from "./SyncStatus";
 import { useIosInstallHint } from "@/lib/pwa";
 import { MoneyManagerPrompt, usePendingImportToasts } from "@/components/MoneyManagerPrompt";
+import { useBudgetAlerts } from "@/lib/budgetAlerts";
+
+/** A small dot on the Stats tab while a budget of the current period is over. */
+function OverDot({ className }: { className?: string }) {
+  return <span className={cn("absolute -top-0.5 -right-1 size-2 rounded-full bg-expense ring-2 ring-background", className)} role="status" aria-label="A budget is over" />;
+}
 
 const tabs = [
   { to: "/", icon: ReceiptText, label: "Trans." },
@@ -29,6 +35,7 @@ export default function AppShell() {
   const nav = useNavigate();
   useIosInstallHint(useCallback(() => nav("/settings"), [nav]));
   usePendingImportToasts();
+  const budgetOver = useBudgetAlerts();
   const { pathname } = useLocation();
   const { user } = useApp();
   const { d, m } = parts(todayISO());
@@ -46,7 +53,7 @@ export default function AppShell() {
               isActive(pathname, t.to) ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/60",
             )}
           >
-            <t.icon className="size-4" />
+            <span className="relative"><t.icon className="size-4" />{t.to === "/stats" && budgetOver ? <OverDot /> : null}</span>
             {t.to === "/" ? "Transactions" : t.label}
           </NavLink>
         ))}
@@ -66,7 +73,7 @@ export default function AppShell() {
             const active = isActive(pathname, t.to);
             return (
               <NavLink key={t.to} to={t.to} className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", active ? "text-primary" : "text-muted-foreground")}>
-                <span className="relative"><t.icon className="size-5" strokeWidth={active ? 2.4 : 1.8} />{t.to === "/settings" ? <SyncDot /> : null}</span>
+                <span className="relative"><t.icon className="size-5" strokeWidth={active ? 2.4 : 1.8} />{t.to === "/settings" ? <SyncDot /> : null}{t.to === "/stats" && budgetOver ? <OverDot /> : null}</span>
                 <span>{t.to === "/" ? today : t.label}</span>
               </NavLink>
             );

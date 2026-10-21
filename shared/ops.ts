@@ -237,6 +237,8 @@ export interface Ops {
   "budgets.upsert": { args: { id?: Id<"budgets">; categoryId?: Id<"categories">; period: Doc<"budgets">["period"]; amount: number }; result: Id<"budgets"> };
   "budgets.setOverride": { args: { id: Id<"budgets">; key: string; amount: number | null }; result: void };
   "budgets.remove": { args: { id: Id<"budgets"> }; result: void };
+  /** Carry each period's leftover (or overspend) into the next one, from the period `from` on; null turns it off. */
+  "budgets.setRollover": { args: { id: Id<"budgets">; from: string | null }; result: void };
 
   "notes.upsert": { args: { id?: Id<"notes">; date: string; text: string; color: string }; result: Id<"notes"> };
   "notes.remove": { args: { id: Id<"notes"> }; result: void };
@@ -335,6 +337,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "budgets.upsert": ["categories", "budgets"],
   "budgets.setOverride": ["budgets"],
   "budgets.remove": ["budgets"],
+  "budgets.setRollover": ["budgets"],
   "notes.upsert": ["notes"],
   "notes.remove": ["notes"],
   "currencies.add": ["currencies"],
@@ -1742,6 +1745,12 @@ const handlers: Handlers = {
   "budgets.remove": (w, { id }) => {
     w.must("budgets", id);
     w.delete("budgets", id);
+  },
+
+  "budgets.setRollover": (w, { id, from }) => {
+    w.must("budgets", id, "That budget is gone");
+    if (from !== null && !/^\d{4}(-\d{2}(-\d{2})?)?$/.test(from)) throw new Error("Bad period");
+    w.patch("budgets", id, { rolloverFrom: from ?? undefined });
   },
 
   "notes.upsert": (w, { id, date, text, color }) => {

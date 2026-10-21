@@ -199,6 +199,8 @@ export default defineSchema({
     period: budgetPeriod,
     amount: v.number(),
     overrides: v.record(v.string(), v.number()),
+    /** Carrying over is on from this period key: each period's leftover (or overspend) adds to the next one. */
+    rolloverFrom: v.optional(v.string()),
   }).index("by_user", ["userId"]),
 
   notes: defineTable({
