@@ -109,6 +109,8 @@ export type AccountFields = {
   color?: string;
   /** Credit cards only. Left out keeps the card's limit (callers that don't know about it); null removes it. */
   creditLimit?: number | null;
+  /** Credit cards only: true turns off the due date, "Overdue" and the bill reminder. Left out keeps the card's setting. */
+  noDueTracking?: boolean;
 };
 export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
@@ -1200,7 +1202,7 @@ const handlers: Handlers = {
 
   "accounts.create": (w, a) => {
     const kind = validateAccount(w, a);
-    return w.insert("accounts", { ...a, kind, ...cardFields(kind, a), creditLimit: kind === "card" ? a.creditLimit ?? undefined : undefined, name: a.name.trim(), order: nextOrder(w.snap.accounts) });
+    return w.insert("accounts", { ...a, kind, ...cardFields(kind, a), creditLimit: kind === "card" ? a.creditLimit ?? undefined : undefined, noDueTracking: kind === "card" && a.noDueTracking ? true : undefined, name: a.name.trim(), order: nextOrder(w.snap.accounts) });
   },
   "accounts.update": (w, { id, ...a }) => {
     const was = w.must("accounts", id);
@@ -1216,6 +1218,7 @@ const handlers: Handlers = {
       linkedAccountId: kind === "debitCard" || kind === "upi" ? a.linkedAccountId : undefined,
       ...cardFields(kind, a),
       creditLimit: kind !== "card" || a.creditLimit === null ? undefined : a.creditLimit ?? was.creditLimit,
+      noDueTracking: kind !== "card" ? undefined : (a.noDueTracking ?? was.noDueTracking) || undefined,
     });
   },
   "accounts.setHidden": (w, { id, hidden }) => {
