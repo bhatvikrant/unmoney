@@ -154,6 +154,15 @@
     text-align: left;
     }
 }
+/* a wrong passcode shakes the dots (PinPad) */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes shake { 0%, 100% { transform: none; } }
+}
 /* ---- UnMoney tokens ---- */
 @theme inline {
   --color-income: var(--income);

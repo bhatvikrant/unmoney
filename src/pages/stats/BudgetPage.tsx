@@ -29,6 +29,13 @@ export default function BudgetPage() {
   const rangeKey = ranges.map((r) => r.key).join(",");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const trend = useMemo(() => (detail ? statsTrend(view, "expense", detail.item.budget.categoryId, ranges) : undefined), [view, detail, rangeKey]);
+  // each bar against its own period's limit (its override and carry), not this period's
+  const limits = useMemo(() => {
+    if (!detail) return undefined;
+    const id = detail.item.budget._id;
+    return ranges.map((r) => { const st = budgetStatus(view, period, r.key); return (st?.total?.budget._id === id ? st.total : st?.perCategory.find((it) => it.budget._id === id))?.limit ?? detail.item.limit; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, detail, period, rangeKey]);
   const label = period === "weekly" ? "Weekly" : period === "yearly" ? "Annual" : "Monthly";
   // In the current period: what can still go out each day, and where spending at this rate ends up.
   const today = useToday();
@@ -65,8 +72,8 @@ export default function BudgetPage() {
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>{detail?.label}</DialogTitle></DialogHeader>
-          {trend && detail ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} limit={detail.item.limit} /> : <div className="h-48" />}
-          {detail ? <div className="text-xs text-muted-foreground">Budget <Money amount={detail.item.limit} /> · bars turn red above it.</div> : null}
+          {trend && detail ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} limit={detail.item.limit} limits={limits} /> : <div className="h-48" />}
+          {detail ? <div className="text-xs text-muted-foreground">Budget <Money amount={detail.item.limit} /> · bars turn red above their period's budget.</div> : null}
         </DialogContent>
       </Dialog>
     </>
