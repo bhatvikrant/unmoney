@@ -137,13 +137,14 @@ export default function GmailReviewPage() {
           <>
             <div className="px-4 pt-4 text-sm">
               <div className="font-medium">{plural(items.length, "entry", "entries")} found in your Gmail</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">Untick any you don't want, then import the rest. Tap a row to check or change it first.</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{fresh.length ? "Untick any you don't want, then import the rest." : "Tick any you still want to import, or link them to the entries you have."} Tap a row to check or change it first.</div>
             </div>
-            <label className="mt-3 flex cursor-pointer items-center gap-3 border-y bg-muted/40 px-4 py-2 text-sm md:mx-4 md:rounded-lg md:border">
+            {/* "Select all" only covers new entries, so with none left it would just sit there disabled */}
+            {selectable.length ? <label className="mt-3 flex cursor-pointer items-center gap-3 border-y bg-muted/40 px-4 py-2 text-sm md:mx-4 md:rounded-lg md:border">
               <Checkbox checked={allOn} disabled={!selectable.length} onCheckedChange={(v) => setAll(!!v)} aria-label="Select all" />
               <span className="flex-1">{allOn ? "All selected" : "Select all"}</span>
               <span className="tabular text-xs text-muted-foreground">{selected.length} of {items.length} to import</span>
-            </label>
+            </label> : <div className="mt-3" />}
 
             {fresh.length ? <Section title={`New · ${fresh.length}`}>{fresh.map(row)}</Section> : null}
             {maybeAdded.length ? (
