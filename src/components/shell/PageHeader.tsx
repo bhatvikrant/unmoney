@@ -14,8 +14,10 @@ export function PageHeader({ title, back, left, right, className, sub }: {
   // the tab and the screen reader say which screen this is
   useEffect(() => {
     if (typeof title !== "string" || !title) return;
+    // beside a list (an entry, a category) the list's own title comes back when this closes
+    const before = document.title;
     document.title = `${title} · UnMoney`;
-    return () => { document.title = "UnMoney"; };
+    return () => { document.title = before; };
   }, [title]);
   return (
     <header className={cn("sticky top-0 z-30 bg-background border-b", className)}>
