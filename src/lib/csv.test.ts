@@ -32,3 +32,16 @@ test.each([",", "\t"] as const)("an export separated by %j imports back to the s
   expect((r.result as { errors: unknown[] }).errors).toEqual([]);
   expect(entries(r.snap)).toEqual(entries(s));
 });
+
+test("a note that looks like a formula is exported inert and imports back unchanged", () => {
+  let s = fresh();
+  const food = s.categories.find((c) => c.name === "Food")!._id;
+  const tx = { type: "expense", accountId: s.accounts[0]._id, categoryId: food, amount: 100, tags: [], photoIds: [], date: "2026-01-02" };
+  for (const note of ['=HYPERLINK("http://x","pay")', "+91 refund", "-5 off", "@home", "'quoted"]) s = run(s, "transactions.create", { ...tx, note }).snap;
+  const file = toCSV(txCsvRows(s));
+  expect(file).toContain(`"'=HYPERLINK(""http://x"",""pay"")"`);
+  expect(file).not.toMatch(/,=HYPERLINK/);
+  const { headers, rows } = parseTable(file);
+  const r = run(fresh(), "transactions.importRows", { rows: rows.map((row) => mapImportRow(row, headers)), skipInvalid: true });
+  expect(entries(r.snap).map((e) => e.note)).toEqual(entries(s).map((e) => e.note));
+});

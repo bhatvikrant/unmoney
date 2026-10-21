@@ -3,7 +3,7 @@
  * functions so every screen can render from the local replica without a network.
  */
 import type { Doc, Id } from "../convex/_generated/dataModel";
-import type { Snapshot } from "./ops";
+import { PASSCODE_FIELDS, type Snapshot } from "./ops";
 import {
   buildCtx, cardStatus, computeBalances, cycleTotals, debitMonthlyUsage, drawsFromLinked, holderOf, kindsOf, resolveKind, statementCycles, statementDue, type Ctx as LedgerCtx,
 } from "./ledger";
@@ -413,11 +413,18 @@ export function txCsvRows(snap: Snapshot, from?: string, to?: string): Record<st
   }));
 }
 
+const omit = <T extends object, K extends string>(o: T, keys: readonly K[]): Omit<T, K> => {
+  const out = { ...o };
+  for (const k of keys) delete (out as Record<string, unknown>)[k];
+  return out;
+};
+
 export function backupExport(snap: Snapshot) {
+  const settings = settingsOf(snap);
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
-    settings: settingsOf(snap),
+    settings: settings && omit(settings, PASSCODE_FIELDS),
     accountGroups: snap.accountGroups,
     accounts: snap.accounts,
     categories: snap.categories,

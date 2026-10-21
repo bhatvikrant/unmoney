@@ -165,3 +165,16 @@ test("a tidy-up undone after a change of decimals puts budgets back at the new s
   s = run(s, "categories.undoCleanup", { id: record._id }).snap;
   expect(s.budgets.find((b) => b.categoryId === social)!.amount).toBe(200);
 });
+
+test("a backup leaves the passcode out, and a restore keeps the passcode the account has now", () => {
+  let old = run(ledger(), "settings.setPasscode", { hash: "old-hash", salt: "old-salt" }).snap;
+  const exported = backupExport(old);
+  expect(exported.settings).not.toHaveProperty("passcodeHash");
+  expect(exported.settings).not.toHaveProperty("passcodeSalt");
+  // a backup made before this, which still carries a PIN hash
+  const data = JSON.parse(JSON.stringify({ ...exported, settings: { ...exported.settings, passcodeHash: "old-hash", passcodeSalt: "old-salt" } })) as BackupData;
+  old = run(old, "settings.setPasscode", { hash: "new-hash", salt: "new-salt" }).snap;
+  expect(run(old, "backup.restore", { data }).snap.settings[0]).toMatchObject({ passcodeHash: "new-hash", passcodeSalt: "new-salt" });
+  const unlocked = run(old, "settings.setPasscode", {}).snap;
+  expect(run(unlocked, "backup.restore", { data }).snap.settings[0].passcodeHash).toBeUndefined();
+});

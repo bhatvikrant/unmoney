@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Delete } from "lucide-react";
 
-export function PinPad({ title, onComplete, error, subtitle, disabled }: { title: string; subtitle?: string; onComplete: (pin: string) => void; error?: boolean; disabled?: boolean }) {
+/** `message` says what went wrong (a wrong code, a mismatch); screen readers hear it too. */
+export function PinPad({ title, onComplete, error, subtitle, message, disabled }: { title: string; subtitle?: string; message?: string; onComplete: (pin: string) => void; error?: boolean; disabled?: boolean }) {
   const [pin, setPin] = useState("");
   useEffect(() => {
     if (pin.length === 4) {
@@ -31,11 +32,12 @@ export function PinPad({ title, onComplete, error, subtitle, disabled }: { title
     <div className="flex flex-col items-center">
       <div className="text-lg font-semibold">{title}</div>
       {subtitle ? <div className="text-sm text-muted-foreground mt-1">{subtitle}</div> : null}
-      <div className={cn("flex gap-3 my-6", error && "animate-[shake_0.3s]")}>
+      <div className={cn("flex gap-3 mt-6", error && "animate-[shake_0.3s]")}>
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className={cn("size-3.5 rounded-full border-2 border-foreground", i < pin.length && "bg-foreground")} />
         ))}
       </div>
+      <div role="status" aria-live="polite" className="h-6 text-sm leading-6 text-destructive">{message}</div>
       <div className="grid grid-cols-3 gap-3">
         {keys.map((k, i) => (
           <button
@@ -72,12 +74,14 @@ export default function Lock({ hash, salt, resetRequested, onUnlock }: { hash: s
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const [forgot, setForgot] = useState(false);
+  const [message, setMessage] = useState<string>();
   const [wait, refreshWait] = useLockout();
   return (
     <div className="min-h-dvh flex flex-col items-center justify-center p-6">
       <PinPad
         title="Enter passcode"
-        subtitle={wait ? `Too many wrong tries. Try again in ${wait} s.` : undefined}
+        subtitle={wait ? `Too many wrong tries. Try again in ${wait < 60 ? `${wait} s` : `${Math.ceil(wait / 60)} min`}.` : undefined}
+        message={wait ? undefined : message}
         disabled={wait > 0}
         error={error}
         onComplete={async (pin) => {
@@ -89,6 +93,7 @@ export default function Lock({ hash, salt, resetRequested, onUnlock }: { hash: s
           } else {
             recordFailure();
             refreshWait();
+            setMessage("Wrong passcode. Try again.");
             setError(true);
             setTimeout(() => setError(false), 400);
           }

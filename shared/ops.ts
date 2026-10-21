@@ -1084,6 +1084,9 @@ function rescaleOtherAmounts(w: Work, factor: number) {
   }
 }
 
+/** The passcode is this account's screen lock, not data: backups leave it out, and restores keep the current one. */
+export const PASSCODE_FIELDS = ["passcodeHash", "passcodeSalt", "passcodeResetRequestedAt"] as const;
+
 /** A backup's entries with their account, category and schedule ids moved to the restored copies, for restoreRows. */
 export function restoreRowsFrom(data: BackupData, ids: RestoreIds): Record<string, unknown>[] {
   const map = (table: Record<string, string>, v: unknown) => (typeof v === "string" ? table[v] : undefined);
@@ -2033,6 +2036,8 @@ const handlers: Handlers = {
     if (data.settings) {
       const existing = w.settings();
       const s = strip(data.settings);
+      // an old backup's passcode is not brought back: the lock stays as it is now
+      for (const k of PASSCODE_FIELDS) delete s[k];
       // Account ids were reissued above; point the default at the restored copy, or drop it.
       s.defaultAccountId = s.defaultAccountId ? accountIds.get(s.defaultAccountId as string) : undefined;
       if (existing) w.patch("settings", existing._id, s as never);
