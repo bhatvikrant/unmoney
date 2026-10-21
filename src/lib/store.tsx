@@ -6,6 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useConvex, useConvexConnectionState, usePaginatedQuery, useQuery } from "convex/react";
 import { toast } from "sonner";
+import { opLabel } from "./opLabel";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
@@ -281,7 +282,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
           settle(op.id, error ?? null);
           if (error) {
             setLastError(error);
-            toast.error(`A change could not be synced and was undone: ${error}`);
+            toast.error(`${opLabel(op.kind, op.args)} couldn't be synced and was undone: ${error}`);
           }
         };
 
@@ -353,12 +354,13 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         const idMap: Record<string, string> = {};
         const done: number[] = [];
         const errors: string[] = [];
+        let firstFailed: QueuedOp | undefined;
         for (const r of results) {
           const op = batch.find((b) => b.id === r.id);
           if (!op) continue;
           done.push(op.seq);
           if (r.status === "applied") Object.assign(idMap, r.idMap);
-          else errors.push(r.error);
+          else { errors.push(r.error); firstFailed ??= op; }
           settle(op.id, r.status === "applied" ? null : r.error);
         }
         await mergeIdMap(idMap);
@@ -366,7 +368,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         setQueue(opsRef.current.filter((o) => !done.includes(o.seq)));
         if (errors.length) {
           setLastError(errors[0]);
-          toast.error(errors.length === 1 ? `A change could not be synced and was undone: ${errors[0]}` : `${errors.length} changes could not be synced and were undone. First: ${errors[0]}`);
+          const what = firstFailed ? opLabel(firstFailed.kind, firstFailed.args) : "A change";
+          toast.error(errors.length === 1 ? `${what} couldn't be synced and was undone: ${errors[0]}` : `${errors.length} changes couldn't be synced and were undone. First: ${what}: ${errors[0]}`);
         } else {
           setLastError(null);
         }

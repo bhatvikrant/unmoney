@@ -90,7 +90,7 @@ export function TagInput({ tags, onChange, suggestions }: { tags: string[]; onCh
         {tags.map((t) => (
           <span key={t} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">#{t}<button type="button" aria-label={`Remove ${t}`} onClick={() => onChange(tags.filter((x) => x !== t))}><X className="size-3" /></button></span>
         ))}
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} onBlur={() => draft && add(draft)} placeholder={tags.length ? "" : "Add tags"} className="flex-1 min-w-24 bg-transparent outline-none text-sm py-1" />
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} onBlur={() => draft && add(draft)} placeholder={tags.length ? "" : "Add tags"} aria-label="Tags" className="flex-1 min-w-24 bg-transparent outline-none text-base md:text-sm py-1" />
       </div>
       {draft && sug.length ? (
         <div className="flex gap-1 flex-wrap mt-1">{sug.map((s) => <button key={s} type="button" className="text-xs rounded-full border px-2 py-0.5 hover:bg-accent" onMouseDown={(e) => e.preventDefault() /* keep focus, so blur does not add the half-typed draft first */} onClick={() => add(s)}>#{s}</button>)}</div>
