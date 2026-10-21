@@ -197,7 +197,8 @@ export interface Ops {
   "transactions.update": { args: TxFields & { id: Id<"transactions">; scope?: "one" | "future" }; result: void };
   "transactions.remove": { args: { id: Id<"transactions">; scope?: "one" | "future" | "all" }; result: void };
   "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
-  "transactions.bulkRemove": { args: { ids: Id<"transactions">[] }; result: void };
+  /** ifPresent: entries already gone are skipped rather than refusing the lot (a chunked restore, after the server's sweep). */
+  "transactions.bulkRemove": { args: { ids: Id<"transactions">[]; ifPresent?: boolean }; result: void };
   /** Link entries to the shared expense they became on UnSplit (or, with null, unlink them). Entries gone meanwhile are left out. */
   "transactions.setSplit": { args: { ids: Id<"transactions">[]; split: TxSplit | null }; result: void };
   "transactions.importRows": {
@@ -264,8 +265,20 @@ export type RestoreIds = {
   bookmarks?: Record<string, string>;
 };
 
+/**
+ * Why this is not a backup worth replacing everything with, or null. Restore clears every table
+ * first, so another app's JSON or a truncated file must be refused before that.
+ */
+export function backupProblem(data: unknown): string | null {
+  const d = data as BackupData | null;
+  if (!d || typeof d !== "object" || d.version !== 1) return "Not an UnMoney backup file";
+  if (!d.settings || typeof d.settings !== "object" || !Array.isArray(d.accounts) || !d.accounts.length) return "This backup is incomplete: it has no settings or payment methods";
+  return null;
+}
+
 export type BackupData = {
   version: number;
+  exportedAt?: string;
   settings?: Record<string, unknown> | null;
   accountGroups?: Record<string, unknown>[];
   accounts?: Record<string, unknown>[];
@@ -1421,8 +1434,9 @@ const handlers: Handlers = {
     }
   },
 
-  "transactions.bulkRemove": (w, { ids }) => {
+  "transactions.bulkRemove": (w, { ids, ifPresent }) => {
     for (const id of ids) {
+      if (ifPresent && !w.get("transactions", id)) continue;
       w.must("transactions", id);
       w.delete("transactions", id);
     }
@@ -1784,7 +1798,8 @@ const handlers: Handlers = {
   },
 
   "backup.restore": (w, { data, entries = true }) => {
-    if (!data || data.version !== 1) throw new Error("Not an UnMoney backup file");
+    const problem = backupProblem(data);
+    if (problem) throw new Error(problem);
     for (const t of ["notes", "categories", "repeats", "bookmarks", "budgets", "accounts", "accountGroups", "currencies"] as const) w.clear(t);
     if (entries) w.clear("transactions");
     // Backups from before payment methods had their own kind keep it on the group: carry it over.
