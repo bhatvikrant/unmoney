@@ -4,7 +4,9 @@ import { ArrowLeftRight, Calculator, ChevronRight, ExternalLink, Globe, Mail, Re
 import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
-import { bookmarksList, draftGet, noteSuggestions, recentCategories, txGet, txTags, type TxDetail } from "../../../shared/views";
+import { bookmarksList, draftGet, draftsOpen, noteSuggestions, recentCategories, txGet, txTags, type TxDetail } from "../../../shared/views";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import { senderAddress } from "../../../shared/gmail/mail";
 import { gmailUrl } from "@/lib/gmail";
 import { useApp, useRefreshRates } from "@/lib/app";
@@ -15,7 +17,7 @@ import { evaluateExpression, formatRate, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useOpenEntry } from "@/lib/nav";
 import { useColumn } from "@/components/shell/SplitLayout";
-import { useUndoableDelete } from "@/lib/undo";
+import { offerUndo, useUndoableDelete } from "@/lib/undo";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
 import { RepeatSheet, repeatLabel, type RepeatChoice } from "@/components/tx/RepeatSheet";
@@ -194,6 +196,14 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   const setSplit = useOp("transactions.setSplit");
   const acceptDraft = useOp("drafts.accept");
   const dismissDrafts = useOp("drafts.dismiss");
+  const reopenDrafts = useOp("drafts.reopen");
+  // reviewing drafts one by one: the next one still waiting, to go straight on to after saving this one
+  const nextDraft = useMemo(() => {
+    if (!draft) return undefined;
+    const open = draftsOpen(view).filter((d) => d._id !== draft._id);
+    const at = draftsOpen(view).findIndex((d) => d._id === draft._id);
+    return open[Math.max(0, at)] ?? open[0];
+  }, [view, draft]);
   // the saved entry, for the split: only an expense that is saved can be shared, and the link lives on it
   const saved = useMemo(() => (id ? view.transactions.find((t) => t._id === id) : undefined), [view, id]);
   const bookmarked = useMemo(() => (id ? view.bookmarks.find((b) => b.transactionId === id) : undefined), [view, id]);
@@ -321,7 +331,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     };
   }
 
-  async function save(mode: "save" | "continue", scope?: "one" | "future") {
+  async function save(mode: "save" | "continue" | "next", scope?: "one" | "future") {
     // Focus now, while still inside the tap: iOS will not open the keyboard after the await below.
     if (mode === "continue") amountRef.current?.focus();
     setBusy(true);
@@ -333,7 +343,8 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
         done(closeEntry);
       } else if (draft) {
         await acceptDraft({ id: draft._id, ...args });
-        done(closeEntry);
+        if (mode === "next" && nextDraft) done(() => openEntry("new", { draft: nextDraft._id }));
+        else done(closeEntry);
       } else {
         await create({
           ...args,
@@ -363,7 +374,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     setBusy(true);
     try {
       await dismissDrafts({ ids: [draft._id] });
-      toast("Dismissed. This mail won't be offered again.");
+      offerUndo("Dismissed. This mail won't be offered again.", () => reopenDrafts({ ids: [draft._id] }));
       done(closeEntry);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not dismiss");
@@ -571,8 +582,13 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             </div>
           ) : null}
           <div className="flex gap-2">
-            <Button className="h-11 flex-1 text-base" disabled={busy} onClick={() => save("save")}>{draft ? "Save entry" : "Save"}</Button>
-            {draft ? <Button variant="outline" className="h-11 flex-1 text-base" disabled={busy} onClick={() => void notAnEntry()}>Not an entry</Button>
+            {draft && nextDraft ? (
+              <>
+                <Button className="h-11 flex-1 px-2" disabled={busy} onClick={() => save("next")}>Save &amp; next</Button>
+                <Button variant="outline" className="h-11 flex-1 px-2" disabled={busy} onClick={() => save("save")}>Save</Button>
+              </>
+            ) : <Button className="h-11 flex-1 text-base" disabled={busy} onClick={() => save("save")}>{draft ? "Save entry" : "Save"}</Button>}
+            {draft ? <Button variant="outline" className={cn("h-11 flex-1", nextDraft ? "px-2" : "text-base")} disabled={busy} onClick={() => void notAnEntry()}>Not an entry</Button>
               : !isEdit ? <Button variant="outline" className="h-11 flex-1 text-base" disabled={busy} onClick={() => save("continue")}>Continue</Button> : null}
           </div>
         </div>
@@ -629,6 +645,8 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
 /** Where an entry came from: the mail, with a way to open it in Gmail. On a draft it also says who sent it and when. */
 function GmailBanner({ from, receivedAt, subject, messageId }: { from?: string; receivedAt?: number; subject?: string; messageId: string }) {
   const who = from ? from.replace(/<[^>]*>/, "").replace(/"/g, "").trim() || senderAddress(from) : "";
+  // the connected mailbox, so the link opens there rather than in the browser's first Google account
+  const email = useQuery(api.gmail.status)?.email;
   const when = receivedAt ? new Date(receivedAt).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
   return (
     <div className="mx-4 mt-3 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
@@ -641,7 +659,7 @@ function GmailBanner({ from, receivedAt, subject, messageId }: { from?: string; 
           </>
         ) : <div>Read from Gmail</div>}
       </div>
-      <a href={gmailUrl(messageId)} target="_blank" rel="noopener" className="flex shrink-0 items-center gap-1 hover:underline underline-offset-4">Open in Gmail <ExternalLink className="size-3" /></a>
+      <a href={gmailUrl(messageId, email)} target="_blank" rel="noopener" className="flex shrink-0 items-center gap-1 hover:underline underline-offset-4">Open in Gmail <ExternalLink className="size-3" /></a>
     </div>
   );
 }

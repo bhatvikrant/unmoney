@@ -7,15 +7,16 @@ import { toast } from "sonner";
 import { useStore } from "@/lib/store";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 
+/** A toast with Undo, which runs `undo` (and says so if it fails). */
+export function offerUndo(message: string, undo: () => Promise<unknown>) {
+  toast(message, {
+    duration: 8000,
+    action: { label: "Undo", onClick: () => void undo().catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not restore")) },
+  });
+}
+
 export function useUndoableDelete() {
   const { view, dispatch } = useStore();
-
-  function offerUndo(message: string, undo: () => Promise<unknown>) {
-    toast(message, {
-      duration: 8000,
-      action: { label: "Undo", onClick: () => void undo().catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not restore")) },
-    });
-  }
 
   return {
     /** One entry, or with `scope` the rest of its repeat / installment series too. */
