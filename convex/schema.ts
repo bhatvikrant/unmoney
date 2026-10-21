@@ -118,6 +118,8 @@ export default defineSchema({
     color: v.optional(v.string()),
     /** Credit cards only: the most the card can owe, for "available credit" and how much of it is used. */
     creditLimit: v.optional(v.number()),
+    /** Credit cards only: true when the user pays this card outside UnMoney, so no due date, "Overdue" or bill reminder is shown. */
+    noDueTracking: v.optional(v.boolean()),
     /**
      * Set when the user archives a method they no longer use. It drops out of pickers and the
      * grouped list, but its balance and every entry on it stay exactly as they were.
