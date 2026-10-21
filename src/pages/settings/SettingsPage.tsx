@@ -76,7 +76,8 @@ export default function SettingsPage() {
         <Section title="Data">
           {link(<HardDriveDownload />, "Backup & export", "/settings/backup")}
           {link(<FileInput />, "Import from Money Manager", "/import")}
-          {link(<Mail />, "Gmail", "/settings/gmail", { value: gmail?.connected ? gmail.status === "reauth" ? "Reconnect" : gmail.open ? `${gmail.open} to review` : "On" : "Off", hint: "Turn money mail into entries", under: ["/gmail"] })}
+          {/* with drafts waiting, the row goes straight to them; their page links to the settings */}
+          {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && gmail.open ? "/gmail" : "/settings/gmail", { value: gmail?.connected ? gmail.status === "reauth" ? "Reconnect" : gmail.open ? `${gmail.open} to review` : "On" : "Off", hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
         </Section>
         <Section>
           <DeleteAccountRow />

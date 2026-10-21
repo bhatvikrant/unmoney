@@ -123,3 +123,23 @@ test("the server loads the tables the drafts ops need, and just the linked entry
   expect(txScope({ id: "x", kind: "drafts.link", args: { id: "d1", transactionId: "t9" }, at: 1 })).toEqual({ ids: ["t9"] });
   expect(txScope({ id: "x", kind: "drafts.accept", args: { id: "d1" }, at: 1 })).toEqual({});
 });
+
+test("reopening undoes an import or a dismiss, and never deletes an entry a draft was only linked to", () => {
+  const { s, d, cash } = ledger();
+  const imported = run(s, "drafts.accept", fields(d));
+  const txId = imported.result as Id<"transactions">;
+  const undone = run(imported.snap, "drafts.reopen", { ids: [d._id], transactionIds: [txId] }).snap;
+  expect(undone.transactions.length).toBe(0);
+  const back = undone.drafts.find((x) => x._id === d._id)!;
+  expect([back.status, back.transactionId, back.resolvedAt]).toEqual(["open", undefined, undefined]);
+  expect(txScope({ id: "x", kind: "drafts.reopen", args: { ids: [d._id], transactionIds: [txId] }, at: 1 })).toEqual({ ids: [txId] });
+  expect(OP_TABLES["drafts.reopen"]).toEqual(expect.arrayContaining(["drafts", "transactions"]));
+
+  // a linked entry was the user's own: reopening keeps it
+  const typed = run(s, "transactions.create", { type: "expense", date: "2026-10-18", amount: 48500, note: "Swiggy", accountId: cash._id, categoryId: d.proposal.categoryId, tags: [], photoIds: [] });
+  const linked = run(typed.snap, "drafts.link", { id: d._id, transactionId: typed.result }).snap;
+  expect(run(linked, "drafts.reopen", { ids: [d._id] }).snap.transactions.length).toBe(1);
+
+  const dismissed = run(s, "drafts.dismiss", { ids: ["d1"] }).snap;
+  expect(run(dismissed, "drafts.reopen", { ids: ["d1"] }).snap.drafts.find((x) => x._id === "d1")!.status).toBe("open");
+});
