@@ -5,7 +5,7 @@
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { Snapshot } from "./ops";
 import {
-  buildCtx, cardStatus, computeBalances, debitMonthlyUsage, drawsFromLinked, holderOf, kindsOf, nextPaymentDate, resolveKind, type Ctx as LedgerCtx,
+  buildCtx, cardStatus, computeBalances, debitMonthlyUsage, drawsFromLinked, holderOf, kindsOf, resolveKind, statementDue, type Ctx as LedgerCtx,
 } from "./ledger";
 import type { AccountKind } from "./defaults";
 import { addDays, addMonths, daysInMonth, make, parts, todayISO } from "./dates";
@@ -98,6 +98,7 @@ export type AccountRow = Omit<Doc<"accounts">, "kind"> & {
   balance: number;
   payable?: number;
   outstanding?: number;
+  /** When the payable is due (cards with a payment day): past it with something payable, the card is overdue. */
   nextPayment?: string;
   monthlyUsage?: number;
   /** Net of the entries dated after today: what the balance will move by, not counted in it yet. */
@@ -127,7 +128,7 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
     const groupId = a.groupId && liveGroups.some((g) => g._id === a.groupId) ? a.groupId : undefined;
     return {
       ...a, groupId, kind, linked, balance, upcoming: upcoming.get(a._id) ?? 0, payable: card?.payable, outstanding: card?.outstanding,
-      nextPayment: kind === "card" && a.paymentDay ? nextPaymentDate(a.paymentDay, today) : undefined, monthlyUsage,
+      nextPayment: kind === "card" ? statementDue(a, today) : undefined, monthlyUsage,
     };
   });
   let assets = 0;
@@ -228,7 +229,7 @@ export function accountGet(snap: Snapshot, id: string, granularity: "daily" | "m
     }
   }
   const toList = (m: Map<string, number>) => [...m.entries()].map(([key, amount]) => ({ key, amount })).sort((a, b) => b.amount - a.amount);
-  const card = kind === "card" ? cardStatus(account, balance, all, today) : undefined;
+  const card = kind === "card" ? { ...cardStatus(account, balance, all, today), due: statementDue(account, today) } : undefined;
   return {
     account, kind, balance, upcoming, card, series,
     expenses: toList(expenses), income: toList(income), transfersIn: toList(transfersIn), transfersOut: toList(transfersOut),
