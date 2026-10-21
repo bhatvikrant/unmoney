@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { ArrowLeftRight, Calculator, ChevronRight, ExternalLink, Globe, Mail, Repeat, Star, Copy, Trash2, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
@@ -33,6 +33,13 @@ import { DeleteSeriesEntryDialog } from "@/components/tx/DeleteSeriesEntryDialog
 import { SplitDialog } from "@/components/tx/SplitDialog";
 import { expenseUrl } from "@/lib/unsplit";
 import { cn } from "@/lib/utils";
+import { fromTemplate, isEntryLink, linkEntry, parseEntryLink, templateUsable } from "../../../shared/quickAdd";
+import type { TxFields } from "../../../shared/ops";
+import { useQuickSave } from "@/components/tx/QuickAdd";
+import { useToday } from "@/lib/today";
+
+/** Links already acted on (by history entry), so a re-render or React's double effect never saves twice. */
+const savedLinks = new Set<string>();
 
 type TxType = "income" | "expense" | "transfer";
 
@@ -72,7 +79,7 @@ export default function TransactionEditor(props: { panel?: boolean }) {
   const column = useColumn();
   const panel = props.panel ?? column === "detail";
   const { id } = useParams();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const view = useView();
   const { resolveId } = useStore();
   const realId = id ? resolveId(id) : undefined;
@@ -82,6 +89,9 @@ export default function TransactionEditor(props: { panel?: boolean }) {
   const draft = useMemo(() => (draftId ? draftGet(view, draftId) : null), [view, draftId]);
   const bookmarks = useMemo(() => (sp.get("bookmark") ? bookmarksList(view) : undefined), [view, sp]);
   const { settings, accounts, currencies } = useApp();
+  // a link from a Shortcut, Back Tap or a bookmark's copied link: /t/new?amount=…&category=…[&save=1]
+  const link = useMemo(() => (!id && !draftId && isEntryLink(sp) ? parseEntryLink(sp, view) : null), [id, draftId, sp, view]);
+  useSaveFromLink(link, bookmarks, !id && !draftId && sp.get("save") === "1", () => setSp((p) => { const n = new URLSearchParams(p); n.delete("save"); return n; }, { replace: true }));
 
   const initial = useMemo<Form | null>(() => {
     const base: Form = {
@@ -158,12 +168,72 @@ export default function TransactionEditor(props: { panel?: boolean }) {
         };
       }
     }
+    if (link) {
+      return {
+        ...base,
+        type: link.type ?? "expense",
+        date: link.date ?? base.date,
+        accountId: link.accountId ?? base.accountId,
+        toAccountId: link.toAccountId,
+        categoryId: link.categoryId,
+        subcategoryId: link.subcategoryId,
+        amount: link.amount ? amountInput(link.amount, settings.decimals) : "",
+        note: link.note ?? "",
+        tags: link.tags ?? [],
+      };
+    }
     return base;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, existing, bookmarks, sp, draftId, draft]);
+  }, [id, existing, bookmarks, sp, draftId, draft, link]);
 
   if (!initial) return <div className="p-8 text-center text-sm text-muted-foreground">{id ? "Entry not found" : draftId ? "This draft was already saved or dismissed." : "Loading…"}</div>;
   return <Editor key={realId ?? (draftId ? `draft:${draftId}` : "new")} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} draft={draftId && draft ? draft : undefined} panel={panel} />;
+}
+
+/**
+ * `save=1` on a new-entry link: save it straight away and go to the ledger (Undo in the toast).
+ * A link that can't be saved as it is (a name not found, no amount) opens the form instead, filled
+ * in as far as it goes, and says what is missing.
+ */
+function useSaveFromLink(link: ReturnType<typeof parseEntryLink> | null, bookmarks: Doc<"bookmarks">[] | undefined, wanted: boolean, dropSave: () => void) {
+  const { key } = useLocation();
+  const [sp] = useSearchParams();
+  const view = useView();
+  const nav = useNavigate();
+  const today = useToday();
+  const save = useQuickSave();
+  const { settings, accounts } = useApp();
+  const bm = sp.get("bookmark");
+  const ready = !bm || !!bookmarks;
+  useEffect(() => {
+    if (!ready || savedLinks.has(key)) return;
+    if (!wanted) {
+      if (link?.unknown.length) { savedLinks.add(key); toast.error(`Couldn't find ${link.unknown.join(", ")}`); }
+      return;
+    }
+    savedLinks.add(key);
+    let fields: TxFields | null = null;
+    let missing = "";
+    if (bm) {
+      const b = bookmarks?.find((x) => x._id === bm);
+      if (!b) missing = "That bookmark is gone";
+      else if (!b.template.amount) missing = "That bookmark has no amount";
+      else if (!templateUsable(view, b.template)) missing = "A payment method or category of that bookmark was deleted";
+      else fields = fromTemplate(b.template, sp.get("date") || today);
+    } else if (link) {
+      const r = linkEntry(link, defaultAccount(accounts, settings.defaultAccountId), today);
+      if ("fields" in r) fields = r.fields;
+      else missing = r.missing;
+    }
+    if (fields) {
+      void save(fields);
+      nav("/", { replace: true });
+    } else {
+      toast.error(`${missing || "Nothing to save"}. Check the entry and save it.`);
+      dropSave();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, wanted, key]);
 }
 
 type Existing = TxDetail;
