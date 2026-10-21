@@ -114,17 +114,31 @@ test("a credit card payment is a transfer from the billing account when the card
   expect(r2.proposal.description).toContain("looks like a credit card payment");
 });
 
-test("credits are income, refunds are income that say so, and a receipt's product goes in the description", () => {
+test("credits are income, refunds are money back on an expense, and a receipt's product goes in the description", () => {
   const u = user();
   const credit = fixture("gpay-received");
   const r = resolveParsed(credit.parsed, credit.mail, u.rctx());
   expect([r.proposal.type, r.proposal.note, r.proposal.accountId, r.proposal.categoryId]).toEqual(["income", "Rahul V", u.gpay, undefined]);
+  // no purchase to match: a negative expense, uncategorised, that says it is a refund
   const refund = fixture("hdfc-card-refund");
   const r2 = resolveParsed(refund.parsed, refund.mail, u.rctx());
-  expect([r2.proposal.type, r2.proposal.note, r2.proposal.accountId]).toEqual(["income", "Myntra", u.regalia]);
+  expect([r2.proposal.type, r2.proposal.note, r2.proposal.accountId, r2.proposal.amount, r2.proposal.categoryId]).toEqual(["expense", "Myntra", u.regalia, -89900, undefined]);
   expect(r2.proposal.description).toBe("HDFC alert · card ending 4521 · refund");
   const apple = fixture("apple-receipt");
   expect(resolveParsed(apple.parsed, apple.mail, u.rctx()).proposal.description).toBe("Apple receipt · card ending 4521 · iCloud+ 50GB");
+});
+
+test("a refund takes the category of the purchase it returns: same merchant, at least as big, in the 60 days before", () => {
+  const u = user();
+  const apparel = u.cat("Apparel");
+  const buy = (date: string, amount: number, categoryId: Id<"categories">) => u.set(run(u.s(), "transactions.create", { type: "expense", date, accountId: u.regalia, categoryId, amount, note: "Myntra", tags: [], photoIds: [] }).snap);
+  buy("2026-07-01", 200000, u.cat("Gift")); // too long ago
+  buy("2026-10-12", 249900, apparel);
+  buy("2026-10-15", 50000, u.cat("Beauty")); // smaller than the refund
+  const refund = fixture("hdfc-card-refund");
+  const r = resolveParsed(refund.parsed, refund.mail, u.rctx());
+  expect([r.proposal.type, r.proposal.amount, r.proposal.categoryId]).toEqual(["expense", -89900, apparel]);
+  expect(r.proposal.description).toBe("HDFC alert · card ending 4521 · refund of 12 Oct Myntra");
 });
 
 test("mail in another currency keeps its amount as the sub-amount and converts at the saved rate", () => {
@@ -149,7 +163,8 @@ test("every kept fixture resolves to a proposal the drafts table accepts", () =>
     const parsed = parseMail(f.mail)!;
     const r = resolveParsed(parsed, f.mail, u.rctx());
     const p = r.proposal as Doc<"drafts">["proposal"];
-    expect(Number.isInteger(p.amount) && p.amount > 0, f.name).toBe(true);
+    // only a refund (money back on an expense) is below zero
+    expect(Number.isInteger(p.amount) && (p.amount > 0 || (p.amount < 0 && p.type === "expense")), f.name).toBe(true);
     expect(["income", "expense", "transfer"], f.name).toContain(p.type);
     expect(p.note.length > 0, f.name).toBe(true);
     expect(p.description, f.name).toBeTruthy();

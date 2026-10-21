@@ -6,6 +6,7 @@
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { normNote } from "../categoryLint";
 import { toMinor } from "../money";
+import { MONTH_SHORT, diffDays, parts } from "../dates";
 import type { Confidence } from "../tidyAi";
 import type { TxType } from "../ops";
 import { senderDomain, type Channel, type Parsed } from "./mail";
@@ -72,6 +73,24 @@ function resolveCard(hint: AccountHint, from: string, ctx: Pick<ResolveCtx, "acc
   return ofBank.length === 1 ? ofBank[0] : undefined;
 }
 
+/** How far back a refund looks for the purchase it returns. */
+const REFUND_WINDOW_DAYS = 60;
+
+/**
+ * The purchase a refund is most likely for: the latest expense with the same merchant, at least as
+ * big as the refund, in the 60 days up to it. `amount` is the refund, in minor units, positive.
+ */
+export function refundOf(note: string, amount: number, date: string, ctx: Pick<ResolveCtx, "transactions">): Doc<"transactions"> | undefined {
+  const key = normNote(note);
+  if (!key) return undefined;
+  let best: Doc<"transactions"> | undefined;
+  for (const t of ctx.transactions) {
+    if (t.type !== "expense" || t.amount < amount || t.date > date || diffDays(t.date, date) > REFUND_WINDOW_DAYS || normNote(t.note) !== key) continue;
+    if (!best || t.date > best.date || (t.date === best.date && t._creationTime > best._creationTime)) best = t;
+  }
+  return best;
+}
+
 /** The category of the user's most recent entry with the same note, as the entry form's autocomplete would fill in. */
 export function resolveCategory(note: string, type: "income" | "expense", ctx: Pick<ResolveCtx, "transactions" | "categories">): Pick<Proposal, "categoryId" | "subcategoryId"> {
   const key = normNote(note);
@@ -135,7 +154,8 @@ function describe(parsed: Parsed): string {
 export type Resolved = { proposal: Proposal; confidence: Confidence };
 
 /**
- * A draft's proposal from a parsed mail. Debits are expenses, credits and refunds income, and a
+ * A draft's proposal from a parsed mail. Debits are expenses, credits income, refunds money back
+ * on an expense (a negative expense in the purchase's category, see refundOf), and a
  * credit card payment a transfer when both the card and the bank it was paid from resolve
  * (otherwise an expense that says what it looks like). Mail in another currency keeps its
  * amount as the sub-amount and converts with the user's saved rate, at medium confidence.
@@ -183,7 +203,17 @@ export function resolveParsed(parsed: Parsed, mail: { from: string }, ctx: Resol
     };
   }
 
+  if (parsed.type === "refund") {
+    // money back nets against what it was spent on, instead of counting as income
+    const orig = amount > 0 ? refundOf(note, amount, parsed.date, ctx) : undefined;
+    descriptionBits.push(orig ? `refund of ${parts(orig.date).d} ${MONTH_SHORT[parts(orig.date).m - 1]} ${orig.note}` : "refund");
+    const live = (id?: Id<"categories">) => !!id && ctx.categories.some((c) => c._id === id && !c.deletedAt);
+    const cat = orig && live(orig.categoryId) ? { categoryId: orig.categoryId, subcategoryId: live(orig.subcategoryId) ? orig.subcategoryId : undefined } : resolveCategory(note, "expense", ctx);
+    return {
+      confidence,
+      proposal: { ...base, amount: -amount, subAmount: sub.subAmount !== undefined ? -sub.subAmount : undefined, type: "expense", accountId, description: descriptionBits.join(" · "), ...cat },
+    };
+  }
   const type: TxType = parsed.type === "debit" ? "expense" : "income";
-  if (parsed.type === "refund") descriptionBits.push("refund");
   return { confidence, proposal: { ...base, type, accountId, description: descriptionBits.join(" · "), ...resolveCategory(note, type, ctx) } };
 }

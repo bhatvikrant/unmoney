@@ -61,6 +61,8 @@ type Form = {
   fee: string;
   photoIds: Id<"_storage">[];
   repeat: RepeatChoice;
+  /** An expense that is money back (a negative amount): it comes off its category instead of counting as income. */
+  refund: boolean;
 };
 
 /** `panel`: shown beside a list on a wide screen (LedgerRoute, SplitLayout) rather than as its own screen. */
@@ -85,7 +87,7 @@ export default function TransactionEditor(props: { panel?: boolean }) {
       date: sp.get("date") || todayISO(),
       time: settings.timeInputEnabled ? new Date().toTimeString().slice(0, 5) : "",
       accountId: defaultAccount(accounts, settings.defaultAccountId),
-      amount: "", subCurrency: "", subAmount: "", note: "", description: "", tags: [], feeOn: false, fee: "", photoIds: [], repeat: { kind: "none" },
+      amount: "", subCurrency: "", subAmount: "", note: "", description: "", tags: [], feeOn: false, fee: "", photoIds: [], repeat: { kind: "none" }, refund: false,
     };
     if (id) {
       if (!existing) return null;
@@ -99,9 +101,10 @@ export default function TransactionEditor(props: { panel?: boolean }) {
         toAccountId: existing.toAccountId,
         categoryId: existing.categoryId,
         subcategoryId: existing.subcategoryId,
-        amount: amountInput(existing.amount, settings.decimals),
+        amount: amountInput(Math.abs(existing.amount), settings.decimals),
+        refund: existing.type === "expense" && existing.amount < 0,
         subCurrency: existing.subCurrency ?? "",
-        subAmount: existing.subAmount !== undefined && cur ? amountInput(existing.subAmount, cur.decimals) : "",
+        subAmount: existing.subAmount !== undefined && cur ? amountInput(Math.abs(existing.subAmount), cur.decimals) : "",
         rate: existing.exchangeRate,
         note: existing.note,
         description: existing.description ?? "",
@@ -125,9 +128,10 @@ export default function TransactionEditor(props: { panel?: boolean }) {
         toAccountId: p.toAccountId,
         categoryId: p.categoryId,
         subcategoryId: p.subcategoryId,
-        amount: p.amount ? amountInput(p.amount, settings.decimals) : "",
+        amount: p.amount ? amountInput(Math.abs(p.amount), settings.decimals) : "",
+        refund: p.type === "expense" && p.amount < 0,
         subCurrency: cur ? cur.code : "",
-        subAmount: p.subAmount !== undefined && cur ? amountInput(p.subAmount, cur.decimals) : "",
+        subAmount: p.subAmount !== undefined && cur ? amountInput(Math.abs(p.subAmount), cur.decimals) : "",
         rate,
         note: p.note,
         description: p.description ?? "",
@@ -266,8 +270,12 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   function buildArgs() {
     const amountMajor = evaluateExpression(f.amount, LOCALE_DECIMAL);
     if (amountMajor === null) throw new Error("Enter an amount");
-    const amount = toMinor(amountMajor, settings.decimals);
-    if (amount === 0) throw new Error("Enter an amount");
+    const typed = toMinor(amountMajor, settings.decimals);
+    if (typed === 0) throw new Error("Enter an amount");
+    // a refund is stored below zero, so every total nets it against the category
+    const refund = f.type === "expense" && f.refund;
+    const amount = refund ? -Math.abs(typed) : typed;
+    const subTyped = sub ? toMinor(evaluateExpression(f.subAmount, LOCALE_DECIMAL) ?? 0, sub.decimals) : undefined;
     if (!f.accountId) throw new Error("Pick an account");
     if (f.type !== "transfer" && !f.categoryId) throw new Error("Pick a category");
     if (f.type === "transfer" && !f.toAccountId) throw new Error("Pick a payment method to transfer to");
@@ -281,7 +289,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       categoryId: f.type !== "transfer" ? f.categoryId : undefined,
       subcategoryId: f.type !== "transfer" ? f.subcategoryId : undefined,
       amount,
-      subAmount: sub ? toMinor(evaluateExpression(f.subAmount, LOCALE_DECIMAL) ?? 0, sub.decimals) : undefined,
+      subAmount: subTyped !== undefined && refund ? -Math.abs(subTyped) : subTyped,
       subCurrency: sub ? sub.code : undefined,
       exchangeRate: sub ? rate : undefined,
       note: f.note,
@@ -312,7 +320,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
           installment: f.repeat.kind === "installment" ? { count: f.repeat.count } : undefined,
         });
         if (mode === "continue") {
-          setF((p) => ({ ...p, amount: "", subAmount: "", note: "", description: "", tags: [], photoIds: [], fee: "", feeOn: false, repeat: { kind: "none" } }));
+          setF((p) => ({ ...p, amount: "", subAmount: "", note: "", description: "", tags: [], photoIds: [], fee: "", feeOn: false, repeat: { kind: "none" }, refund: false }));
         } else {
           closeEntry();
         }
@@ -430,6 +438,14 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             </Field>
           ) : null}
 
+          {f.type === "expense" ? (
+            <Field label="Refund">
+              <div className="flex-1 flex items-center gap-3">
+                <Switch checked={f.refund} onCheckedChange={(v) => set("refund", v)} aria-label="Refund" />
+                <span className="text-xs text-muted-foreground">{f.refund ? "Money back: comes off this category's spending, not counted as income" : "Money back from a shop or service"}</span>
+              </div>
+            </Field>
+          ) : null}
           {f.type === "transfer" ? (
             <Field label="Fees">
               <div className="flex-1 flex items-center gap-3">
