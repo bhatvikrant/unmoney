@@ -5,7 +5,7 @@
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { Snapshot } from "./ops";
 import {
-  buildCtx, cardStatus, computeBalances, debitMonthlyUsage, drawsFromLinked, holderOf, kindsOf, nextPaymentDate, resolveKind, type Ctx as LedgerCtx,
+  buildCtx, cardStatus, computeBalances, debitMonthlyUsage, drawsFromLinked, holderOf, kindsOf, resolveKind, statementDue, type Ctx as LedgerCtx,
 } from "./ledger";
 import type { AccountKind } from "./defaults";
 import { addDays, addMonths, daysInMonth, make, parts, todayISO } from "./dates";
@@ -98,6 +98,7 @@ export type AccountRow = Omit<Doc<"accounts">, "kind"> & {
   balance: number;
   payable?: number;
   outstanding?: number;
+  /** When the payable is due (cards with a payment day): past it with something payable, the card is overdue. */
   nextPayment?: string;
   monthlyUsage?: number;
   /** Net of the entries dated after today: what the balance will move by, not counted in it yet. */
@@ -108,16 +109,20 @@ export type AccountGroupRow = { id: string; name: string; group: Doc<"accountGro
 export const NO_GROUP = "none";
 export const NO_GROUP_NAME = "No group";
 /** `groups` holds the methods in use; archived ones are only in `archived` (and `accounts`), and still count in the totals. */
-export type AccountsList = { groups: AccountGroupRow[]; archived: AccountRow[]; accounts: AccountRow[]; assets: number; liabilities: number; total: number };
+export type AccountsList = {
+  groups: AccountGroupRow[]; archived: AccountRow[]; accounts: AccountRow[]; assets: number; liabilities: number; total: number;
+  /** Accounts the app keeps for itself (Balance adjustments): in no list, but their names still show on entries. */
+  system: AccountRow[];
+};
 
 export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
   const ledger = ledgerOf(snap);
   const txs = snap.transactions;
   const balances = computeBalances(txs, ledger, today);
   const upcoming = computeBalances(txs, ledger, undefined, today);
-  const live = snap.accounts.filter((a) => !a.deletedAt).sort((a, b) => a.order - b.order);
+  const live = snap.accounts.filter((a) => !a.deletedAt && !a.system).sort((a, b) => a.order - b.order);
   const liveGroups = groupsList(snap);
-  const rows: AccountRow[] = live.map((a) => {
+  const row = (a: Doc<"accounts">): AccountRow => {
     const kind = ledger.accounts.get(a._id)!.kind as AccountKind;
     const linked = drawsFromLinked({ kind, linkedAccountId: a.linkedAccountId });
     const balance = balances.get(a._id) ?? 0;
@@ -127,9 +132,10 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
     const groupId = a.groupId && liveGroups.some((g) => g._id === a.groupId) ? a.groupId : undefined;
     return {
       ...a, groupId, kind, linked, balance, upcoming: upcoming.get(a._id) ?? 0, payable: card?.payable, outstanding: card?.outstanding,
-      nextPayment: kind === "card" && a.paymentDay ? nextPaymentDate(a.paymentDay, today) : undefined, monthlyUsage,
+      nextPayment: kind === "card" ? statementDue(a, today) : undefined, monthlyUsage,
     };
-  });
+  };
+  const rows = live.map(row);
   let assets = 0;
   let liabilities = 0;
   for (const r of rows) {
@@ -149,7 +155,8 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
     ...liveGroups.map((g) => section(g._id, g.name, g, inUse.filter((r) => r.groupId === g._id))),
     section(NO_GROUP, NO_GROUP_NAME, null, inUse.filter((r) => !r.groupId)),
   ].filter((g) => g.accounts.length > 0);
-  return { groups, archived: rows.filter((r) => r.archivedAt), accounts: rows, assets, liabilities, total: assets - liabilities };
+  const system = snap.accounts.filter((a) => !a.deletedAt && a.system).map(row);
+  return { groups, archived: rows.filter((r) => r.archivedAt), accounts: rows, assets, liabilities, total: assets - liabilities, system };
 }
 
 export function accountsListDeleted(snap: Snapshot) {
@@ -228,7 +235,7 @@ export function accountGet(snap: Snapshot, id: string, granularity: "daily" | "m
     }
   }
   const toList = (m: Map<string, number>) => [...m.entries()].map(([key, amount]) => ({ key, amount })).sort((a, b) => b.amount - a.amount);
-  const card = kind === "card" ? cardStatus(account, balance, all, today) : undefined;
+  const card = kind === "card" ? { ...cardStatus(account, balance, all, today), due: statementDue(account, today) } : undefined;
   return {
     account, kind, balance, upcoming, card, series,
     expenses: toList(expenses), income: toList(income), transfersIn: toList(transfersIn), transfersOut: toList(transfersOut),
@@ -277,6 +284,9 @@ export function txSearch(snap: Snapshot, args: SearchArgs): Tx[] {
   const named = (docs: { _id: string; name: string }[]) => (q ? new Set(docs.filter((d) => d.name.toLowerCase().includes(q)).map((d) => d._id)) : new Set<string>());
   const qCats = named(snap.categories);
   const qAccs = named(snap.accounts);
+  // "499" or "1,299.50" also finds the entry of that amount (to within one minor unit)
+  const decimals = settingsOf(snap)?.decimals ?? 2;
+  const qAmount = q && /^[\d,]*\.?\d+$/.test(q) ? Math.round(Number(q.replace(/,/g, "")) * 10 ** decimals) : null;
   const out = snap.transactions.filter((t) => {
     if (args.from && t.date < args.from) return false;
     if (args.to && t.date > args.to) return false;
@@ -285,7 +295,8 @@ export function txSearch(snap: Snapshot, args: SearchArgs): Tx[] {
     if (cats && !(t.categoryId && cats.has(t.categoryId)) && !(t.subcategoryId && cats.has(t.subcategoryId))) return false;
     if (args.tag && !t.tags.includes(args.tag)) return false;
     if (q && !(t.note.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q) || t.tags.some((x) => x.toLowerCase().includes(q))
-      || qCats.has(t.categoryId ?? "") || qCats.has(t.subcategoryId ?? "") || qAccs.has(t.accountId) || qAccs.has(t.toAccountId ?? ""))) return false;
+      || qCats.has(t.categoryId ?? "") || qCats.has(t.subcategoryId ?? "") || qAccs.has(t.accountId) || qAccs.has(t.toAccountId ?? "")
+      || (qAmount !== null && Math.abs(t.amount - qAmount) <= 1))) return false;
     return true;
   });
   return out.sort(byDateDesc);
@@ -309,6 +320,20 @@ export function noteSuggestions(snap: Snapshot, q: string, type?: "income" | "ex
   return [...seen.values()].map((t) => ({
     note: t.note, type: t.type, accountId: t.accountId, toAccountId: t.toAccountId, categoryId: t.categoryId, subcategoryId: t.subcategoryId, amount: t.amount,
   }));
+}
+
+/** The categories of the latest entries of a type, newest first and each once, for the editor's quick picks. Archived and deleted ones are left out. */
+export function recentCategories(snap: Snapshot, type: "income" | "expense", n = 5): Pick<Tx, "categoryId" | "subcategoryId">[] {
+  const live = new Set(snap.categories.filter((c) => !c.deletedAt && !c.archivedAt).map((c) => c._id as string));
+  const seen = new Map<string, Pick<Tx, "categoryId" | "subcategoryId">>();
+  for (const t of [...snap.transactions].sort(byDateDesc)) {
+    if (t.type !== type || !t.categoryId || !live.has(t.categoryId)) continue;
+    const sub = t.subcategoryId && live.has(t.subcategoryId) ? t.subcategoryId : undefined;
+    const key = `${t.categoryId}|${sub ?? ""}`;
+    if (!seen.has(key)) seen.set(key, { categoryId: t.categoryId, subcategoryId: sub });
+    if (seen.size >= n) break;
+  }
+  return [...seen.values()];
 }
 
 export function txTags(snap: Snapshot): { tag: string; count: number }[] {

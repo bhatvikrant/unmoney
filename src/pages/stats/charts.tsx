@@ -74,7 +74,8 @@ export function CategoryPie({ items: all }: { items: { id: string; name: string;
 
 const barConfig = { major: { label: "Amount" } } satisfies ChartConfig;
 
-export function TrendBars({ data, color = "var(--expense)", limit }: { data: { label: string; amount: number }[]; color?: string; limit?: number }) {
+/** `onPick`: tapping a bar opens that period. */
+export function TrendBars({ data, color = "var(--expense)", limit, onPick }: { data: { label: string; amount: number }[]; color?: string; limit?: number; onPick?: (index: number) => void }) {
   const { fmt, settings } = useApp();
   const rows = data.map((d) => ({ ...d, major: toMajor(d.amount, settings.decimals) }));
   const fillFor = (amount: number) => (limit === undefined ? color : amount > limit ? "var(--expense)" : "var(--income)");
@@ -88,7 +89,8 @@ export function TrendBars({ data, color = "var(--expense)", limit }: { data: { l
         {limit !== undefined ? (
           <ReferenceLine y={toMajor(limit, settings.decimals)} stroke="var(--muted-foreground)" strokeDasharray="4 4" ifOverflow="extendDomain" />
         ) : null}
-        <Bar dataKey="major" fill={color} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false}>
+        <Bar dataKey="major" fill={color} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false}
+          onClick={onPick ? (_d, i) => onPick(i) : undefined} className={onPick ? "cursor-pointer" : undefined}>
           {limit !== undefined ? rows.map((d, i) => <Cell key={i} fill={fillFor(d.amount)} />) : null}
         </Bar>
       </BarChart>

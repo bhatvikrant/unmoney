@@ -14,6 +14,8 @@ import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useOp, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { useOpenEntry } from "@/lib/nav";
+import { offerUndo } from "@/lib/undo";
+import { senderAddress } from "../../../shared/gmail/mail";
 import { useShortcuts } from "@/lib/shortcuts";
 import { dateLabel } from "@/lib/format";
 import { draftMatches, draftsOpen } from "../../../shared/views";
@@ -42,6 +44,7 @@ export default function GmailReviewPage() {
   const accept = useOp("drafts.accept");
   const dismiss = useOp("drafts.dismiss");
   const link = useOp("drafts.link");
+  const reopen = useOp("drafts.reopen");
   const entryOpen = /\/t\//.test(useLocation().pathname);
   const [busy, setBusy] = useState(false);
 
@@ -80,24 +83,27 @@ export default function GmailReviewPage() {
 
   async function importSelected() {
     setBusy(true);
-    let done = 0, failed = 0;
+    let failed = 0;
+    const ids: Id<"drafts">[] = [];
+    const made: Id<"transactions">[] = [];
     for (const i of selected) {
-      try { await accept({ id: i.draft._id, ...i.ready!.fields }); done++; } catch { failed++; }
+      try { made.push(await accept({ id: i.draft._id, ...i.ready!.fields })); ids.push(i.draft._id); } catch { failed++; }
     }
     setBusy(false);
     // imported rows leave the list; the ones the user unticked stay unticked
-    if (done) toast.success(`Imported ${plural(done, "entry", "entries")}`, { action: { label: "Open ledger", onClick: () => nav("/") } });
+    if (ids.length) offerUndo(`Imported ${plural(ids.length, "entry", "entries")}`, () => reopen({ ids, transactionIds: made }));
     if (failed) toast.error(`${plural(failed, "entry", "entries")} could not be imported. Open ${failed === 1 ? "it" : "them"} to check.`);
   }
   async function dismissSelected() {
     const n = selected.length;
     if (!(await confirm({ title: `Dismiss ${plural(n, "entry", "entries")}?`, description: "They won't be imported, and these mails won't be offered again.", action: "Dismiss" }))) return;
-    await dismiss({ ids: selected.map((i) => i.draft._id) });
-    toast(`Dismissed ${plural(n, "entry", "entries")}`);
+    const ids = selected.map((i) => i.draft._id);
+    await dismiss({ ids });
+    offerUndo(`Dismissed ${plural(n, "entry", "entries")}`, () => reopen({ ids }));
   }
   async function dismissOne(d: Draft) {
     await dismiss({ ids: [d._id] });
-    toast("Dismissed. This mail won't be offered again.");
+    offerUndo("Dismissed. This mail won't be offered again.", () => reopen({ ids: [d._id] }));
   }
   async function sameEntry(d: Draft, txId: Id<"transactions">) {
     await link({ id: d._id, transactionId: txId });
@@ -190,6 +196,8 @@ function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, on
   const label = isTransfer ? "Transfer" : f?.categoryId ? categoryLabel(f) : "No category";
   const method = isTransfer ? (p.accountId && p.toAccountId ? `${accountName(p.accountId)} → ${accountName(p.toAccountId)}` : "") : f ? accountName(f.accountId) : "";
   const filled = ready?.filled ?? [];
+  // who sent it: the main reason to trust a row, above all one read by AI
+  const domain = senderAddress(d.from).split("@")[1] ?? "";
   const guess = (what: "method" | "category") => filled.includes(what) && "text-amber-600 dark:text-amber-400";
   return (
     <div className={cn("flex items-start gap-3 border-b px-4 py-2.5 text-sm last:border-b-0", focused && "bg-accent/40")} onMouseEnter={onFocus}>
@@ -202,6 +210,7 @@ function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, on
         <div className="min-w-0 flex-1">
           <div className="truncate">{p.note || label}</div>
           <div className="truncate text-xs text-muted-foreground">
+            {domain ? <span title={d.from}>{domain} · </span> : null}
             {method ? <span className={cn(guess("method"))}>{method}</span> : <span className="text-amber-600 dark:text-amber-400">Open it to pick both methods</span>}
             {p.description ? ` · ${p.description}` : ""}
           </div>

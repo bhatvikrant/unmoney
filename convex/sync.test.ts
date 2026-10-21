@@ -193,3 +193,26 @@ describe("tidying up categories on a ledger past the read limit", () => {
     expect(back.length).toBe(30);
   }, 120_000);
 });
+
+describe("bills and subscriptions", () => {
+  test("Make it a repeat links the payment it came from, and Add now / Skip move the schedule on", async () => {
+    const { t, apply, accounts, food, all } = await setup();
+    const made = await apply("transactions.create", { type: "expense", date: "2026-09-05", accountId: accounts[0]._id, categoryId: food._id, amount: 19900, note: "Spotify", tags: [], photoIds: [] });
+    const txId = Object.values(made.status === "applied" ? made.idMap : {})[0] as Id<"transactions">;
+    const r = await apply("repeats.create", {
+      template: { type: "expense", accountId: accounts[0]._id, categoryId: food._id, amount: 19900, note: "Spotify", tags: [] }, frequency: "monthly", after: "2026-09-05", today: "2026-10-21", fromTransactionId: txId,
+    });
+    expect(r.status).toBe("applied");
+    const repeatId = Object.values(r.status === "applied" ? r.idMap : {})[0] as Id<"repeats">;
+    expect((await t.run((ctx) => ctx.db.get(txId)))!.repeatId).toBe(repeatId);
+    expect((await t.run((ctx) => ctx.db.get(repeatId)))!.nextDate).toBe("2026-11-05");
+
+    expect((await apply("repeats.addNext", { id: repeatId, date: "2026-11-05", entryDate: "2026-10-21" })).status).toBe("applied");
+    expect((await apply("repeats.skip", { id: repeatId, date: "2026-12-05" })).status).toBe("applied");
+    expect((await t.run((ctx) => ctx.db.get(repeatId)))!.nextDate).toBe("2027-01-05");
+    // a second device adding the same date is refused, not doubled
+    const again = await apply("repeats.addNext", { id: repeatId, date: "2026-11-05", entryDate: "2026-10-21" });
+    expect(again.status).toBe("rejected");
+    expect((await all()).filter((x) => x.note === "Spotify").map((x) => x.date).sort()).toEqual(["2026-09-05", "2026-10-21"]);
+  });
+});
