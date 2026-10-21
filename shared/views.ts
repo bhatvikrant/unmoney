@@ -9,7 +9,7 @@ import {
 } from "./ledger";
 import type { AccountKind } from "./defaults";
 import { addDays, addMonths, daysInMonth, diffDays, make, parts, todayISO } from "./dates";
-import { elapsedFraction, periodRange, type Range } from "./period";
+import { elapsedFraction, periodKey, periodRange, type Range } from "./period";
 import { laterMatches } from "./gmail/dedup";
 
 export type Tx = Doc<"transactions">;
@@ -109,16 +109,20 @@ export type AccountGroupRow = { id: string; name: string; group: Doc<"accountGro
 export const NO_GROUP = "none";
 export const NO_GROUP_NAME = "No group";
 /** `groups` holds the methods in use; archived ones are only in `archived` (and `accounts`), and still count in the totals. */
-export type AccountsList = { groups: AccountGroupRow[]; archived: AccountRow[]; accounts: AccountRow[]; assets: number; liabilities: number; total: number };
+export type AccountsList = {
+  groups: AccountGroupRow[]; archived: AccountRow[]; accounts: AccountRow[]; assets: number; liabilities: number; total: number;
+  /** Accounts the app keeps for itself (Balance adjustments): in no list, but their names still show on entries. */
+  system: AccountRow[];
+};
 
 export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
   const ledger = ledgerOf(snap);
   const txs = snap.transactions;
   const balances = computeBalances(txs, ledger, today);
   const upcoming = computeBalances(txs, ledger, undefined, today);
-  const live = snap.accounts.filter((a) => !a.deletedAt).sort((a, b) => a.order - b.order);
+  const live = snap.accounts.filter((a) => !a.deletedAt && !a.system).sort((a, b) => a.order - b.order);
   const liveGroups = groupsList(snap);
-  const rows: AccountRow[] = live.map((a) => {
+  const row = (a: Doc<"accounts">): AccountRow => {
     const kind = ledger.accounts.get(a._id)!.kind as AccountKind;
     const linked = drawsFromLinked({ kind, linkedAccountId: a.linkedAccountId });
     const balance = balances.get(a._id) ?? 0;
@@ -130,7 +134,8 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
       ...a, groupId, kind, linked, balance, upcoming: upcoming.get(a._id) ?? 0, payable: card?.payable, outstanding: card?.outstanding,
       nextPayment: kind === "card" ? statementDue(a, today) : undefined, monthlyUsage,
     };
-  });
+  };
+  const rows = live.map(row);
   let assets = 0;
   let liabilities = 0;
   for (const r of rows) {
@@ -150,7 +155,8 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
     ...liveGroups.map((g) => section(g._id, g.name, g, inUse.filter((r) => r.groupId === g._id))),
     section(NO_GROUP, NO_GROUP_NAME, null, inUse.filter((r) => !r.groupId)),
   ].filter((g) => g.accounts.length > 0);
-  return { groups, archived: rows.filter((r) => r.archivedAt), accounts: rows, assets, liabilities, total: assets - liabilities };
+  const system = snap.accounts.filter((a) => !a.deletedAt && a.system).map(row);
+  return { groups, archived: rows.filter((r) => r.archivedAt), accounts: rows, assets, liabilities, total: assets - liabilities, system };
 }
 
 /** Days before a card's due date that the ledger starts reminding. */
@@ -311,6 +317,9 @@ export function txSearch(snap: Snapshot, args: SearchArgs): Tx[] {
   const named = (docs: { _id: string; name: string }[]) => (q ? new Set(docs.filter((d) => d.name.toLowerCase().includes(q)).map((d) => d._id)) : new Set<string>());
   const qCats = named(snap.categories);
   const qAccs = named(snap.accounts);
+  // "499" or "1,299.50" also finds the entry of that amount (to within one minor unit)
+  const decimals = settingsOf(snap)?.decimals ?? 2;
+  const qAmount = q && /^[\d,]*\.?\d+$/.test(q) ? Math.round(Number(q.replace(/,/g, "")) * 10 ** decimals) : null;
   const out = snap.transactions.filter((t) => {
     if (args.from && t.date < args.from) return false;
     if (args.to && t.date > args.to) return false;
@@ -319,7 +328,8 @@ export function txSearch(snap: Snapshot, args: SearchArgs): Tx[] {
     if (cats && !(t.categoryId && cats.has(t.categoryId)) && !(t.subcategoryId && cats.has(t.subcategoryId))) return false;
     if (args.tag && !t.tags.includes(args.tag)) return false;
     if (q && !(t.note.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q) || t.tags.some((x) => x.toLowerCase().includes(q))
-      || qCats.has(t.categoryId ?? "") || qCats.has(t.subcategoryId ?? "") || qAccs.has(t.accountId) || qAccs.has(t.toAccountId ?? ""))) return false;
+      || qCats.has(t.categoryId ?? "") || qCats.has(t.subcategoryId ?? "") || qAccs.has(t.accountId) || qAccs.has(t.toAccountId ?? "")
+      || (qAmount !== null && Math.abs(t.amount - qAmount) <= 1))) return false;
     return true;
   });
   return out.sort(byDateDesc);
@@ -345,6 +355,20 @@ export function noteSuggestions(snap: Snapshot, q: string, type?: "income" | "ex
   }));
 }
 
+/** The categories of the latest entries of a type, newest first and each once, for the editor's quick picks. Archived and deleted ones are left out. */
+export function recentCategories(snap: Snapshot, type: "income" | "expense", n = 5): Pick<Tx, "categoryId" | "subcategoryId">[] {
+  const live = new Set(snap.categories.filter((c) => !c.deletedAt && !c.archivedAt).map((c) => c._id as string));
+  const seen = new Map<string, Pick<Tx, "categoryId" | "subcategoryId">>();
+  for (const t of [...snap.transactions].sort(byDateDesc)) {
+    if (t.type !== type || !t.categoryId || !live.has(t.categoryId)) continue;
+    const sub = t.subcategoryId && live.has(t.subcategoryId) ? t.subcategoryId : undefined;
+    const key = `${t.categoryId}|${sub ?? ""}`;
+    if (!seen.has(key)) seen.set(key, { categoryId: t.categoryId, subcategoryId: sub });
+    if (seen.size >= n) break;
+  }
+  return [...seen.values()];
+}
+
 export function txTags(snap: Snapshot): { tag: string; count: number }[] {
   const counts = new Map<string, number>();
   for (const t of snap.transactions) for (const tag of t.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
@@ -364,7 +388,8 @@ export function txExportRows(snap: Snapshot, from?: string, to?: string) {
     subcategory: t.subcategoryId ? catName.get(t.subcategoryId) ?? "" : "",
     note: t.note,
     amount: t.amount,
-    type: t.type === "income" ? "Income" : t.type === "expense" ? "Expenses" : "Transfer-Out",
+    // a refund (an expense below zero) says so, so importing the file back keeps it a refund
+    type: t.type === "income" ? "Income" : t.type === "expense" ? (t.amount < 0 ? "Refund" : "Expenses") : "Transfer-Out",
     description: t.description ?? "",
     subAmount: t.subAmount ?? "",
     subCurrency: t.subCurrency ?? "",
@@ -494,7 +519,16 @@ export function statsTrend(snap: Snapshot, type: "income" | "expense", categoryI
 
 // ---------- budgets ----------
 
-export type BudgetStatusItem = { budget: Doc<"budgets">; limit: number; spent: number; remaining: number; isOverride: boolean };
+export type BudgetStatusItem = {
+  budget: Doc<"budgets">;
+  /** What can be spent this period: the period's amount plus `carry`. */
+  limit: number;
+  spent: number;
+  remaining: number;
+  isOverride: boolean;
+  /** Left over (or, below zero, overspent) in the earlier periods since carrying over was turned on. */
+  carry: number;
+};
 export type BudgetStatus = { range: Range; total: BudgetStatusItem | undefined; perCategory: BudgetStatusItem[]; spentAll: number; elapsed: number };
 
 /** Spent vs limit for every budget of a period. `key` is the period key (month "2026-07", week start date, or year). */
@@ -516,16 +550,103 @@ export function budgetStatus(snap: Snapshot, period: Doc<"budgets">["period"], k
       spentByCat.set(main, (spentByCat.get(main) ?? 0) + k.expense);
     }
   }
-  const items = snap.budgets
-    .filter((b) => b.period === period)
+  const budgets = snap.budgets.filter((b) => b.period === period);
+  const carried = carryOver(snap, budgets, period, key);
+  const items = budgets
     .map((b) => {
-      const limit = b.overrides[key] ?? b.amount;
+      const carry = carried.get(b._id) ?? 0;
+      const limit = (b.overrides[key] ?? b.amount) + carry;
       const spent = b.categoryId ? spentByCat.get(b.categoryId) ?? 0 : spentAll;
-      return { budget: b, limit, spent, remaining: limit - spent, isOverride: b.overrides[key] !== undefined };
+      return { budget: b, limit, spent, remaining: limit - spent, isOverride: b.overrides[key] !== undefined, carry };
     });
   const total = items.find((i) => !i.budget.categoryId);
   const perCategory = items.filter((i) => i.budget.categoryId).sort((a, b) => b.spent / Math.max(1, b.limit) - a.spent / Math.max(1, a.limit));
   return { range, total, perCategory, spentAll, elapsed: elapsedFraction(range, today) };
+}
+
+/** The period after `key`. */
+function nextPeriodKey(period: Doc<"budgets">["period"], key: string, monthStartDay: number, weekStartDay: number): string {
+  return periodKey(period, addDays(periodRange(period, key, monthStartDay, weekStartDay).to, 1), monthStartDay, weekStartDay);
+}
+
+/**
+ * What each rollover budget brings into `key`: the sum of (amount − spent) over every period from
+ * the one carrying over was turned on in (`rolloverFrom`) up to, not including, `key`. Unspent
+ * money adds to the next period, overspending takes from it. One pass over the entries.
+ */
+function carryOver(snap: Snapshot, budgets: Doc<"budgets">[], period: Doc<"budgets">["period"], key: string): Map<string, number> {
+  const out = new Map<string, number>();
+  const rolling = budgets.filter((b) => b.rolloverFrom && b.rolloverFrom < key);
+  const settings = settingsOf(snap);
+  if (!rolling.length || !settings) return out;
+  const { monthStartDay: msd, weekStartDay: wsd } = settings;
+  const earliest = rolling.reduce((m, b) => (b.rolloverFrom! < m ? b.rolloverFrom! : m), key);
+  const from = periodRange(period, earliest, msd, wsd).from;
+  const to = periodRange(period, key, msd, wsd).from;
+  const ledger = ledgerOf(snap);
+  const parentOf = new Map(snap.categories.filter((c) => c.type === "expense").map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
+  // spent per period key, per main category and in all ("")
+  const spent = new Map<string, Map<string, number>>();
+  const add = (k: string, cat: string, n: number) => {
+    let m = spent.get(k);
+    if (!m) spent.set(k, (m = new Map()));
+    m.set(cat, (m.get(cat) ?? 0) + n);
+  };
+  for (const t of snap.transactions) {
+    if (t.date < from || t.date >= to) continue;
+    const e = kindsOf(t, ledger).expense;
+    if (!e) continue;
+    const k = periodKey(period, t.date, msd, wsd);
+    add(k, "", e);
+    if (t.categoryId) add(k, parentOf.get(t.categoryId) ?? t.categoryId, e);
+  }
+  for (const b of rolling) {
+    let carry = 0;
+    let k = b.rolloverFrom!;
+    for (let guard = 0; k < key && guard < 2000; guard++) {
+      carry += (b.overrides[k] ?? b.amount) - (spent.get(k)?.get(b.categoryId ?? "") ?? 0);
+      k = nextPeriodKey(period, k, msd, wsd);
+    }
+    out.set(b._id, carry);
+  }
+  return out;
+}
+
+/** How far a budget is through its limit: 0 under 80%, 1 from 80%, 2 at or past it. */
+export type BudgetLevel = 0 | 1 | 2;
+export const BUDGET_WARN = 0.8;
+export type BudgetAlertItem = BudgetStatusItem & { level: BudgetLevel; range: Range; period: Doc<"budgets">["period"] };
+
+export function budgetLevel(item: Pick<BudgetStatusItem, "limit" | "spent">): BudgetLevel {
+  if (item.spent <= 0) return 0;
+  if (item.spent >= item.limit) return 2;
+  return item.spent >= item.limit * BUDGET_WARN ? 1 : 0;
+}
+
+/** Every budget in the period that holds `today`, with how far through it is: what the alerts and the Stats tab's dot read. */
+export function currentBudgetLevels(snap: Snapshot, today: string): BudgetAlertItem[] {
+  const settings = settingsOf(snap);
+  if (!settings) return [];
+  const out: BudgetAlertItem[] = [];
+  for (const period of ["weekly", "monthly", "yearly"] as const) {
+    if (!snap.budgets.some((b) => b.period === period)) continue;
+    const status = budgetStatus(snap, period, periodKey(period, today, settings.monthStartDay, settings.weekStartDay), today);
+    if (!status) continue;
+    for (const it of [...(status.total ? [status.total] : []), ...status.perCategory]) out.push({ ...it, level: budgetLevel(it), range: status.range, period });
+  }
+  return out;
+}
+
+/**
+ * Budgets that went up a level between two readings (an entry pushed Food past 80%, or over):
+ * what deserves a toast. A budget that wasn't in the earlier reading (just made) never alerts.
+ */
+export function budgetCrossings(before: BudgetAlertItem[], after: BudgetAlertItem[]): BudgetAlertItem[] {
+  const was = new Map(before.map((i) => [`${i.budget._id}|${i.range.from}`, i.level]));
+  return after.filter((i) => {
+    const w = was.get(`${i.budget._id}|${i.range.from}`);
+    return w !== undefined && i.level > w;
+  });
 }
 
 export type { Id };

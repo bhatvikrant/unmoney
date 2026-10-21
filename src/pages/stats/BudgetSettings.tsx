@@ -15,6 +15,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toMinor } from "../../../shared/money";
 import { amountInput, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
@@ -30,10 +31,11 @@ export default function BudgetSettings() {
   const budgets = budgetsList(useView());
   const upsert = useOp("budgets.upsert");
   const setOverride = useOp("budgets.setOverride");
+  const setRollover = useOp("budgets.setRollover");
   const remove = useOp("budgets.remove");
   const confirm = useConfirm();
   const list = budgets.filter((b) => b.period === period).sort((a, b) => (a.categoryId ? 1 : 0) - (b.categoryId ? 1 : 0));
-  const [dialog, setDialog] = useState<null | { id?: Id<"budgets">; categoryId: string; amount: string; override: string }>(null);
+  const [dialog, setDialog] = useState<null | { id?: Id<"budgets">; categoryId: string; amount: string; override: string; rollover: boolean }>(null);
   const swipe = useSwipedRow();
   // From a swiped row or the editor's button: asks first. Resolves true once the budget is gone.
   const del = (id: Id<"budgets">) =>
@@ -44,6 +46,8 @@ export default function BudgetSettings() {
   const fromPage = sp.get("period") === period ? sp.get("key") ?? sp.get("month") : null;
   const key = fromPage ?? (period === "monthly" ? monthKeyForDate(today, settings.monthStartDay) : period === "weekly" ? weekRange(today, settings.weekStartDay).from : String(parts(today).y));
   const keyLabel = period === "monthly" ? monthLabel(key) : period === "weekly" ? `week of ${key}` : key;
+  const currentKey = period === "monthly" ? monthKeyForDate(today, settings.monthStartDay) : period === "weekly" ? weekRange(today, settings.weekStartDay).from : String(parts(today).y);
+  const nextWord = period === "weekly" ? "week" : period === "yearly" ? "year" : "month";
   const mains = categories.filter((c) => c.type === "expense" && !c.parentId && !c.deletedAt && !c.archivedAt);
   const available = mains.filter((c) => !list.some((b) => b.categoryId === c._id));
   const hasTotal = list.some((b) => !b.categoryId);
@@ -56,13 +60,16 @@ export default function BudgetSettings() {
       if (dialog.id || dialog.override) {
         await setOverride({ id, key, amount: dialog.override.trim() ? toMinor(dialog.override, settings.decimals, LOCALE_DECIMAL) : null });
       }
+      // carrying over starts with the current period, so nothing already past changes
+      const was = !!budgets.find((b) => b._id === id)?.rolloverFrom;
+      if (dialog.rollover !== was) await setRollover({ id, from: dialog.rollover ? currentKey : null });
       setDialog(null);
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   }
 
   return (
     <>
-      <PageHeader back title="Budget settings" right={<Button variant="ghost" size="icon" aria-label="Add budget" onClick={() => setDialog({ categoryId: hasTotal ? (available[0]?._id ?? "") : "total", amount: "", override: "" })}><Plus className="size-5" /></Button>} />
+      <PageHeader back title="Budget settings" right={<Button variant="ghost" size="icon" aria-label="Add budget" onClick={() => setDialog({ categoryId: hasTotal ? (available[0]?._id ?? "") : "total", amount: "", override: "", rollover: false })}><Plus className="size-5" /></Button>} />
       <Page>
         <SegmentedTabs value={period} onChange={setPeriod} items={[{ value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }, { value: "yearly", label: "Annual" }]} />
         {!list.length ? <EmptyState title="No budgets for this period" hint="Tap + to add a total budget or a category budget." /> : null}
@@ -71,8 +78,8 @@ export default function BudgetSettings() {
             const ov = b.overrides[key];
             return (
               <SwipeToDelete key={b._id} className="border-b last:border-b-0" {...swipe.row(b._id)} onDelete={() => void del(b._id)}>
-                <Row label={b.categoryId ? categoryById.get(b.categoryId)?.name ?? "(deleted)" : "Total budget"} hint={ov !== undefined ? <>{keyLabel}: <Money amount={ov} /></> : `default`} value={<Money amount={b.amount} />}
-                  onClick={() => setDialog({ id: b._id, categoryId: b.categoryId ?? "total", amount: amountInput(b.amount, settings.decimals), override: ov !== undefined ? amountInput(ov, settings.decimals) : "" })} />
+                <Row label={b.categoryId ? categoryById.get(b.categoryId)?.name ?? "(deleted)" : "Total budget"} hint={<>{ov !== undefined ? <>{keyLabel}: <Money amount={ov} /></> : "default"}{b.rolloverFrom ? " · carries over" : ""}</>} value={<Money amount={b.amount} />}
+                  onClick={() => setDialog({ id: b._id, categoryId: b.categoryId ?? "total", amount: amountInput(b.amount, settings.decimals), override: ov !== undefined ? amountInput(ov, settings.decimals) : "", rollover: !!b.rolloverFrom })} />
               </SwipeToDelete>
             );
           })}
@@ -94,6 +101,13 @@ export default function BudgetSettings() {
               ) : null}
               <div className="space-y-1.5"><Label>Default amount</Label><Input inputMode="decimal" value={dialog.amount} onChange={(e) => setDialog({ ...dialog, amount: e.target.value })} /></div>
               <div className="space-y-1.5"><Label>Only for {keyLabel} (optional)</Label><Input inputMode="decimal" value={dialog.override} placeholder="Leave blank to use the default" onChange={(e) => setDialog({ ...dialog, override: e.target.value })} /></div>
+              <label className="flex items-start justify-between gap-3 pt-1">
+                <span className="space-y-0.5">
+                  <span className="block text-sm">Carry over</span>
+                  <span className="block text-xs text-muted-foreground">What's left at the end of each {nextWord} adds to the next one; overspending takes from it. Starts with this {nextWord}.</span>
+                </span>
+                <Switch checked={dialog.rollover} onCheckedChange={(v) => setDialog({ ...dialog, rollover: v })} aria-label="Carry over" />
+              </label>
             </div>
           ) : null}
           <DialogFooter>

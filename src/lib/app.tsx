@@ -56,7 +56,7 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
   }, [settings.theme, settings.accent, settings.colorSet]);
 
   const value = useMemo<AppData>(() => {
-    const accountById = new Map(acc.accounts.map((a) => [a._id as string, a]));
+    const accountById = new Map([...acc.accounts, ...acc.system].map((a) => [a._id as string, a]));
     const categoryById = new Map(categories.map((c) => [c._id as string, c]));
     const groupById = new Map(groups.map((g) => [g._id as string, g]));
     const ledger = ledgerOf(view);

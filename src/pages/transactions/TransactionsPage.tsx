@@ -4,6 +4,8 @@ import { Search, Star, SlidersHorizontal, StickyNote, Download, X, CheckSquare }
 import { toast } from "sonner";
 import { useView } from "@/lib/store";
 import { budgetStatus, draftsRange, notesRange, txCarryBefore, txCsvRows, txListRange } from "../../../shared/views";
+import { upcomingOccurrences } from "../../../shared/upcoming";
+import { useToday } from "@/lib/today";
 import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
 import { useShortcuts, useSwipe } from "@/lib/shortcuts";
@@ -28,6 +30,7 @@ import { BudgetBar } from "@/components/BudgetBars";
 import { RecapNudge } from "@/pages/recap/RecapNudge";
 import { GmailNudge } from "@/pages/transactions/GmailNudge";
 import { CardDueNudge } from "@/pages/transactions/CardDueNudge";
+import { QuickAddSheet } from "@/components/tx/QuickAdd";
 import { downloadText, toCSV } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 import { kindLabel } from "../../../shared/defaults";
@@ -64,11 +67,12 @@ export default function TransactionsPage() {
   const prev = () => { if (nb.prev) setMonth(nb.prev); };
   const next = () => { if (nb.next) setMonth(nb.next); };
   // not while an entry is open beside the list: they would replace it and lose unsaved edits
-  useShortcuts({ n: () => openEntry("new", { date: addDate() }), "/": () => nav("/search"), ArrowLeft: prev, ArrowRight: next, t: goToday }, !entryOpen);
+  useShortcuts({ n: () => openEntry("new", { date: addDate() }), q: () => setQuickOpen(true), "/": () => nav("/search"), ArrowLeft: prev, ArrowRight: next, t: goToday }, !entryOpen);
   const [sp, setSp] = useSearchParams();
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
   const [filterOpen, setFilterOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
   // a fresh sheet on every open, so it starts from the filter in the URL (not ticks a Clear removed)
   const [filterKey, setFilterKey] = useState(0);
   const bulk = useBulkSelect();
@@ -95,8 +99,16 @@ export default function TransactionsPage() {
     });
   }, [raw, filtered, filterType, filterAcc, filterCat, ledger]);
 
+  // Transfers never show in a filtered list; when only payment methods are filtered, say how many touch them.
+  const hiddenTransfers = useMemo(() => (filterAcc.size && !filterType && !filterCat.size
+    ? (raw ?? []).filter((t) => t.type === "transfer" && !kindsOf(t, ledger).expense && (filterAcc.has(t.accountId) || (!!t.toAccountId && filterAcc.has(t.toAccountId)))).length
+    : 0), [raw, filterAcc, filterType, filterCat, ledger]);
+
   // drafts from Gmail sit on their days as faded rows, never in the sums; a filtered list hides them
   const drafts = useMemo(() => (filtered ? [] : draftsRange(snap, range.from, range.to)), [snap, filtered, range.from, range.to]);
+  // and so do the coming dates of repeats (bills, salary), until they are added
+  const today = useToday();
+  const upcoming = useMemo(() => (filtered ? [] : upcomingOccurrences(snap, range.from, range.to, today)), [snap, filtered, range.from, range.to, today]);
   const totals = useMemo(() => sumKinds(txs, ledger), [txs, ledger]);
   const total = totals.income - totals.expense + (settings.carryOver ? carry : 0);
 
@@ -124,7 +136,7 @@ export default function TransactionsPage() {
             {view !== "monthly" ? <SummaryBar income={totals.income} expense={totals.expense} total={total} totalLabel={settings.carryOver ? "Total (carried)" : "Total"} /> : null}
             {filtered ? (
               <div className="flex items-center gap-2 px-4 py-1.5 text-xs bg-muted/50 border-b">
-                <span className="text-muted-foreground">Filtered{filterType ? ` · ${filterType}` : ""}{filterAcc.size ? ` · ${filterAcc.size} accounts` : ""}{filterCat.size ? ` · ${filterCat.size} categories` : ""}</span>
+                <span className="text-muted-foreground">Filtered{filterType ? ` · ${filterType}` : ""}{filterAcc.size ? ` · ${filterAcc.size} payment method${filterAcc.size === 1 ? "" : "s"}` : ""}{filterCat.size ? ` · ${filterCat.size} categories` : ""}{hiddenTransfers ? ` · ${hiddenTransfers} transfer${hiddenTransfers === 1 ? "" : "s"} hidden` : ""}</span>
                 <button type="button" className="ml-auto flex items-center gap-1 underline-offset-4 hover:underline" onClick={clearFilter}><X className="size-3" />Clear</button>
               </div>
             ) : null}
@@ -139,7 +151,7 @@ export default function TransactionsPage() {
         <CardDueNudge month={month} />
         <GmailNudge from={range.from} to={range.to} />
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
-        {raw && view === "daily" ? <TransactionList txs={txs} drafts={drafts} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
+        {raw && view === "daily" ? <TransactionList txs={txs} drafts={drafts} upcoming={upcoming} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}
         {raw && view === "weekly" ? <WeeklyView txs={txs} range={range} /> : null}
         {view === "monthly" ? <MonthlyView month={month} reachable={reachable} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}
@@ -148,7 +160,8 @@ export default function TransactionsPage() {
       </div>
       {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[calc(var(--tabbar-h)+6rem)] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
       {/* beside an open entry (wide screens) the + would sit on the panel */}
-      {(bulk.active && view === "daily") || entryOpen ? null : <Fab title="New entry (N)" onClick={(e) => { primeKeyboard(e.currentTarget); openEntry("new", { date: addDate() }); }} />}
+      {(bulk.active && view === "daily") || entryOpen ? null : <Fab title="New entry (N) · hold for quick add (Q)" onHold={() => setQuickOpen(true)} onClick={(e) => { primeKeyboard(e.currentTarget); openEntry("new", { date: addDate() }); }} />}
+      <QuickAddSheet open={quickOpen} onOpenChange={setQuickOpen} onNew={() => openEntry("new", { date: addDate() })} />
       {view === "daily" ? <BulkBar bulk={bulk} txs={txs} /> : null}
       <FilterSheet key={filterKey} open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>

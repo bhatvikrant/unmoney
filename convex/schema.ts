@@ -73,6 +73,10 @@ export default defineSchema({
     lockAfter: v.union(v.literal("always"), v.literal("5m"), v.literal("1h")),
     /** Account a new entry starts on; falls back to the first visible account when unset or gone. */
     defaultAccountId: v.optional(v.id("accounts")),
+    /** Notes (normalised) the user said are not bills, so the Bills & subscriptions page stops suggesting them. */
+    dismissedRecurring: v.optional(v.array(v.string())),
+    /** The last imports (newest first, at most 10), so one can be undone: its entries carry its id as importId. */
+    recentImports: v.optional(v.array(v.object({ id: v.string(), name: v.string(), at: v.number(), count: v.number(), undoneAt: v.optional(v.number()) }))),
   }).index("by_user", ["userId"]),
 
   /** Folders that organise payment methods. They have no behaviour of their own. */
@@ -120,6 +124,13 @@ export default defineSchema({
      */
     archivedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
+    /** The day the user last checked this balance against the bank's (accounts.adjustBalance). */
+    reconciledAt: v.optional(v.string()),
+    /**
+     * Made by the app, not the user: "adjustments" is the hidden, left-out-of-totals account that
+     * balance adjustments are transfers from, so they never count as income or spending.
+     */
+    system: v.optional(v.literal("adjustments")),
   })
     .index("by_user", ["userId"])
     .index("by_group", ["groupId"]),
@@ -161,6 +172,8 @@ export default defineSchema({
     installmentTotal: v.optional(v.number()),
     /** The shared expense this entry was handed to UnSplit as (src/lib/unsplit.ts). */
     split: v.optional(v.object({ app: v.literal("unsplit"), expenseId: v.string() })),
+    /** The import this entry came in with (settings.recentImports), so the whole import can be undone. */
+    importId: v.optional(v.string()),
     /** The mail this entry was read from (Gmail sync), so its detail screen can link back to it. */
     source: v.optional(v.object({ app: v.literal("gmail"), messageId: v.string() })),
   })
@@ -201,6 +214,8 @@ export default defineSchema({
     period: budgetPeriod,
     amount: v.number(),
     overrides: v.record(v.string(), v.number()),
+    /** Carrying over is on from this period key: each period's leftover (or overspend) adds to the next one. */
+    rolloverFrom: v.optional(v.string()),
   }).index("by_user", ["userId"]),
 
   notes: defineTable({
@@ -337,7 +352,26 @@ export default defineSchema({
     aiCalls: v.number(),
     /** The last 10 checks. */
     log: v.array(v.object({ at: v.number(), scanned: v.number(), found: v.number(), error: v.optional(v.string()), note: v.optional(v.string()) })),
+    /**
+     * Mails read that made no draft (triage dropped them, or the AI said they are not a payment), so
+     * a later check's overlap does not fetch them and ask the AI again. Kept while a window can still reach them.
+     */
+    processed: v.optional(v.array(v.object({ id: v.string(), receivedAt: v.number() }))),
   }).index("by_user", ["userId"]),
+
+  /**
+   * A Gmail grant back from Google, waiting for the app to claim it with the one-time `claim` it was
+   * sent back with. Only the account that started connecting can, so a connect link someone sends
+   * to another person attaches nothing. Dropped after 10 minutes.
+   */
+  gmailPending: defineTable({
+    userId: v.id("users"),
+    claim: v.string(),
+    email: v.string(),
+    refreshTokenEnc: v.string(),
+    iv: v.string(),
+    lookbackDays: v.number(),
+  }).index("by_claim", ["claim"]).index("by_user", ["userId"]),
 
   /**
    * Entries read from mail, waiting for the user to check and save them. Never counted anywhere:
