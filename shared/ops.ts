@@ -1515,9 +1515,11 @@ const handlers: Handlers = {
       if (r.subAmount && r.subCurrency && r.subCurrency.trim().toLowerCase() !== settings.mainCurrency.toLowerCase()) {
         const cur = w.snap.currencies.find((c) => c.code.toLowerCase() === r.subCurrency!.trim().toLowerCase());
         if (cur && cur.code !== settings.mainCurrency) {
+          const subMajor = Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0);
           base.subCurrency = cur.code;
-          base.subAmount = toMinor(Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0), cur.decimals);
-          base.exchangeRate = cur.rate;
+          base.subAmount = toMinor(subMajor, cur.decimals);
+          // the rate the file's two amounts imply, not today's: the editor works the amount out from it
+          base.exchangeRate = subMajor && amountMajor ? subMajor / amountMajor : cur.rate;
         }
       }
       if (type === "transfer") {
