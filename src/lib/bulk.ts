@@ -3,12 +3,15 @@
  * single server transaction outgrows Convex's limits: one small op for everything but the
  * entries, and the entries themselves in chunks, by id. All of it is queued at once, so it
  * applies locally straight away and survives going offline or reloading; `synced` settles once
- * the server has confirmed every chunk.
+ * the server has confirmed every chunk. A large restore is the exception: see restore.
  */
+import { useLayoutEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useStore } from "@/lib/store";
 import { currencyInfo } from "../../shared/currencies";
 import { restoreRowsFrom, scaleAmount, type BackupData } from "../../shared/ops";
+import { backupExport } from "../../shared/views";
+import { saveSafetyCopy, type SafetyReason } from "./safetyCopy";
 import type { Id } from "../../convex/_generated/dataModel";
 
 const CHUNK = 500;
@@ -28,11 +31,28 @@ function chunks<T>(items: T[]): T[][] {
 }
 
 export function useBulkOps() {
-  const { view, dispatchTracked, whenSynced } = useStore();
+  const { view, userId, dispatchTracked, whenSynced } = useStore();
+  // the data as of the last render, for an action started later from a toast (Undo after an import)
+  const latest = useRef(view);
+  useLayoutEffect(() => { latest.current = view; });
 
-  async function removeEntries(): Promise<string[]> {
+  /**
+   * Keep everything as it is now on this device before replacing or removing it in bulk, so Backup ›
+   * Safety copies can put it back. A device that can't store it (private mode, storage full) says so and goes on.
+   */
+  async function safetyCopy(reason: SafetyReason) {
+    const now = latest.current;
+    if (!userId || !now.transactions.length) return;
+    try {
+      await saveSafetyCopy(userId, reason, backupExport(now));
+    } catch {
+      toast.warning("Couldn't keep a safety copy on this device. Download a backup first if you may want this data back.");
+    }
+  }
+
+  async function removeEntries(ifPresent?: boolean): Promise<string[]> {
     const ids: string[] = [];
-    for (const part of chunks(view.transactions.map((t) => t._id))) ids.push((await dispatchTracked("transactions.bulkRemove", { ids: part })).id);
+    for (const part of chunks(view.transactions.map((t) => t._id))) ids.push((await dispatchTracked("transactions.bulkRemove", { ids: part, ifPresent })).id);
     return ids;
   }
 
@@ -48,17 +68,39 @@ export function useBulkOps() {
     }
   }
 
-  /** Waits for the server, with a toast that stays up until it has confirmed (or refused) every op. */
-  function track(opIds: string[], messages: { loading: string; success: string }): Promise<void> {
-    const synced = whenSynced(opIds).then(({ rejected }) => {
-      if (rejected.length) throw new Error(`${rejected.length} of ${opIds.length} parts could not be saved: ${rejected[0].error}`);
+  /** Resolves once the server has confirmed every op; throws if it refused any. */
+  async function confirmed(opIds: string[]): Promise<void> {
+    const { rejected } = await whenSynced(opIds);
+    if (rejected.length) throw new Error(`${rejected.length} of ${opIds.length} parts could not be saved: ${rejected[0].error}`);
+  }
+
+  /**
+   * Waits for the server, with a toast that stays up until it has confirmed (or refused) every op.
+   * Its error is marked `reported`: the toast has already shown it.
+   */
+  function track(work: string[] | Promise<void>, messages: { loading: string; success: string }): Promise<void> {
+    const synced = (Array.isArray(work) ? confirmed(work) : work).catch((e: unknown) => {
+      throw Object.assign(e instanceof Error ? e : new Error(String(e)), { reported: true });
     });
     toast.promise(synced, { loading: messages.loading, success: messages.success, error: (e: Error) => e.message });
     return synced;
   }
 
   return {
+    /** Remove every entry an import added (by its importId) and mark it undone in the list. Payment methods and categories it made stay. */
+    async undoImport(importId: string) {
+      await safetyCopy("undoImport");
+      const now = latest.current;
+      const gone = now.transactions.filter((t) => t.importId === importId).map((t) => t._id);
+      const ids: string[] = [];
+      for (const part of chunks(gone)) ids.push((await dispatchTracked("transactions.bulkRemove", { ids: part, ifPresent: true })).id);
+      const recentImports = (now.settings[0]?.recentImports ?? []).map((x) => (x.id === importId ? { ...x, undoneAt: Date.now() } : x));
+      ids.push((await dispatchTracked("settings.update", { patch: { recentImports } })).id);
+      return track(ids, { loading: "Undoing the import…", success: `Removed ${gone.length.toLocaleString()} imported ${gone.length === 1 ? "entry" : "entries"}` });
+    },
+
     async wipeAll() {
+      await safetyCopy("wipe");
       if (view.transactions.length <= ONE_OP) {
         const { id } = await dispatchTracked("backup.wipeAll", { confirm: "DELETE" });
         return track([id], { loading: "Deleting entries…", success: "Entries deleted" });
@@ -69,15 +111,22 @@ export function useBulkOps() {
     },
 
     async restore(data: BackupData) {
+      await safetyCopy("restore");
       if (view.transactions.length + (data.transactions?.length ?? 0) <= ONE_OP) {
         const { id } = await dispatchTracked("backup.restore", { data });
         return track([id], { loading: "Restoring…", success: "Restored" });
       }
-      const ids = await removeEntries();
+      // Everything but the entries goes first, and alone: only once the server has taken it are the
+      // old entries removed, so a refused restore leaves the ledger as it was. (The server also
+      // sweeps the old entries itself after this op, hence ifPresent.)
       const restored = await dispatchTracked("backup.restore", { data: { ...data, transactions: [] }, entries: false });
-      ids.push(restored.id);
-      for (const rows of chunks(restoreRowsFrom(data, restored.result))) ids.push((await dispatchTracked("transactions.restoreRows", { rows, bookmarks: restored.result.bookmarks })).id);
-      return track(ids, { loading: "Restoring… keep UnMoney open until it is saved", success: "Restored" });
+      return track((async () => {
+        const { rejected } = await whenSynced([restored.id]);
+        if (rejected.length) throw new Error(`Nothing was restored: ${rejected[0].error}`);
+        const ids = await removeEntries(true);
+        for (const rows of chunks(restoreRowsFrom(data, restored.result))) ids.push((await dispatchTracked("transactions.restoreRows", { rows, bookmarks: restored.result.bookmarks })).id);
+        await confirmed(ids);
+      })(), { loading: "Restoring… keep UnMoney open until it is saved", success: "Restored" });
     },
 
     async changeDecimals(decimals: number) {
@@ -96,6 +145,7 @@ export function useBulkOps() {
     },
 
     async changeMainCurrency(code: string, keepData: boolean) {
+      await safetyCopy("currency");
       if (keepData) assertFits(10 ** ((currencyInfo(code)?.decimals ?? 2) - (view.settings[0]?.decimals ?? 2)));
       if (view.transactions.length <= ONE_OP) {
         const { id } = await dispatchTracked("settings.changeMainCurrency", { code, keepData });

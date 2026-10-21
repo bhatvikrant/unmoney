@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { BalanceLine } from "@/pages/stats/charts";
 import { TransactionList } from "@/components/tx/TransactionList";
 import { useMonthParam, useMonthsWithData, usePeriodNeighbours } from "@/lib/period-hooks";
-import { amountInput, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
+import { amountInput, dateLabel, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
 import { monthKey, parseMonthKey, yearRange } from "../../../shared/period";
 import { todayISO } from "../../../shared/dates";
 import { useToday } from "@/lib/today";
@@ -28,7 +28,7 @@ import { CardFace } from "@/components/CardFace";
 export default function AccountDetail() {
   const { id } = useParams();
   const nav = useNavigate();
-  const { settings, categoryById, accountName, accounts, fmt } = useApp();
+  const { settings, categoryById, accountName, accounts, accountById, fmt } = useApp();
   const { month, range, setMonth } = useMonthParam();
   const [gran, setGran] = useState<"daily" | "monthly" | "yearly">("daily");
   const r = gran === "yearly" ? yearRange(parseMonthKey(month).y, settings.monthStartDay) : range;
@@ -47,6 +47,9 @@ export default function AccountDetail() {
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
   if (!data) return <><PageHeader back="/payment-methods" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Payment method not found</div></>;
   const a = data.account;
+  // a debit card or linked UPI spends from its bank: its own balance means nothing, its usage does
+  const row = accountById.get(a._id);
+  const linked = row?.linked;
   const nameOf = (key: string) => categoryById.get(key)?.name ?? (key === "none" ? "Uncategorised" : accountName(key));
   return (
     <>
@@ -66,6 +69,12 @@ export default function AccountDetail() {
             <CardFace kind={data.kind} name={a.name} bankName={a.bankName} last4={a.last4} color={cardColorOf({ kind: data.kind, color: a.color })} className="mx-auto sm:mx-0" />
           </div>
         ) : null}
+        {linked ? (
+          <div className="px-4 py-2">
+            <div className="text-xs text-muted-foreground">Spends from {accountName(a.linkedAccountId)}</div>
+            <Money amount={row?.monthlyUsage ?? 0} kind="expense" className="text-xl font-semibold" /> <span className="text-xs text-muted-foreground">this month</span>
+          </div>
+        ) : (
         <div className="flex items-center justify-between px-4 py-2">
           <div>
             <div className="text-xs text-muted-foreground">{data.kind === "card" ? "Card balance today" : "Balance today"}</div>
@@ -75,12 +84,16 @@ export default function AccountDetail() {
           {data.card ? (
             <div className="text-right text-xs">
               <div>Payable <Money amount={data.card.payable} kind="expense" /></div>
+              {data.card.payable > 0 && data.card.due ? (
+                today > data.card.due ? <div className="text-destructive font-medium">Overdue since {dateLabel(data.card.due)}</div> : <div className="text-muted-foreground">Due {dateLabel(data.card.due)}</div>
+              ) : null}
               <div>Outstanding <Money amount={data.card.outstanding} kind="expense" /></div>
-              <Button size="sm" className="mt-1" onClick={() => setPay({ amount: amountInput(data.card!.payable || data.card!.owed, settings.decimals), date: todayISO(), from: a.billingAccountId ?? "" })}>Pay</Button>
+              <Button size="sm" className="mt-1" onClick={() => setPay({ amount: amountInput(data.card!.payable || data.card!.owed, settings.decimals), date: todayISO(), from: accounts.some((x) => x._id === a.billingAccountId && x.kind !== "card") ? a.billingAccountId! : "" })}>Pay</Button>
             </div>
           ) : null}
         </div>
-        <div className="px-1"><BalanceLine data={data.series} /></div>
+        )}
+        {linked ? null : <div className="px-1"><BalanceLine data={data.series} /></div>}
         {([["Expenses", data.expenses, "expense"], ["Income", data.income, "income"], ["Transfer in", data.transfersIn, "income"], ["Transfer out", data.transfersOut, "expense"]] as const).map(([title, list, kind]) => list.length ? (
           <div key={title} className="mt-3">
             <div className="flex justify-between px-4 py-1 text-xs text-muted-foreground"><span>{title}</span><Money amount={list.reduce((s, x) => s + x.amount, 0)} kind={kind} /></div>

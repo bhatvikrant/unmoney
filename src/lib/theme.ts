@@ -11,6 +11,8 @@ export function applyTheme(theme: "system" | "light" | "dark", accent: string, c
   const root = document.documentElement;
   const dark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   root.classList.toggle("dark", dark);
+  // for index.html's first paint, before the app has its settings
+  try { localStorage.setItem("unmoney:theme", theme); } catch { /* storage unavailable: the first paint follows the system */ }
   root.dataset.colorset = colorSet;
   const a = ACCENTS[accent] ?? ACCENTS.neutral;
   if (accent === "neutral") {

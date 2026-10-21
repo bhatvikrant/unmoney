@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { formatMoney } from "../../../shared/money";
 
 export default function CurrencySettings() {
   const { settings: s, fmt, currencies } = useApp();
@@ -20,11 +22,19 @@ export default function CurrencySettings() {
   const { pathname } = useLocation();
   const update = useOp("settings.update");
   const bulk = useBulkOps();
+  const confirm = useConfirm();
   const [q, setQ] = useState("");
   const [picking, setPicking] = useState<string | null>(null);
   const [fewer, setFewer] = useState<number | null>(null); // fewer decimals rounds every amount: confirm first
   const setDecimals = (d: number) => { if (d < s.decimals) setFewer(d); else if (d > s.decimals) void bulk.changeDecimals(d).catch(() => {}); };
   const example = (d: number) => fmt(123456).replace(/[\d.,]+/, (123456 / 10 ** s.decimals).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }));
+  const next = CURRENCIES.find((c) => c.code === picking);
+  /** Starting over wipes every entry: a second, plainly worded question first. */
+  async function startOver(code: string) {
+    setPicking(null);
+    if (!(await confirm({ title: "Delete all entries?", description: `Every entry in UnMoney is deleted and the ledger starts again in ${code}. This cannot be undone.`, action: "Delete all entries" }))) return;
+    void bulk.changeMainCurrency(code, false).catch(() => {});
+  }
   const list = useMemo(() => { const l = q.toLowerCase(); return CURRENCIES.filter((c) => c.code !== s.mainCurrency && (!l || c.code.toLowerCase().includes(l) || c.name.toLowerCase().includes(l))); }, [q, s.mainCurrency]);
   return (
     <>
@@ -60,11 +70,18 @@ export default function CurrencySettings() {
       </Page>
       <AlertDialog open={!!picking} onOpenChange={(o) => !o && setPicking(null)}>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>Switch to {picking}?</AlertDialogTitle><AlertDialogDescription>Keep your data (amounts stay as entered and are simply shown in the new currency), or start over with an empty ledger.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch to {picking}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Amounts are not converted: they keep their numbers and are shown in {picking}
+              {next ? <>, so {fmt(5000000)} becomes {formatMoney(5000000, { symbol: next.symbol, symbolPosition: next.position ?? "before", decimals: s.decimals })}</> : null}.
+              Or delete every entry and start over.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="destructive" onClick={() => { void bulk.changeMainCurrency(picking!, false).catch(() => {}); setPicking(null); }}>Data initialisation</Button>
-            <AlertDialogAction onClick={() => { void bulk.changeMainCurrency(picking!, true).catch(() => {}); setPicking(null); }}>Data retention</AlertDialogAction>
+            <Button variant="outline" className="text-destructive hover:text-destructive" onClick={() => void startOver(picking!)}>Delete all entries…</Button>
+            <AlertDialogAction onClick={() => { void bulk.changeMainCurrency(picking!, true).catch(() => {}); setPicking(null); }}>Keep entries</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
