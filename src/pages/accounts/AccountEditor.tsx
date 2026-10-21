@@ -42,6 +42,7 @@ export default function AccountEditor() {
     billingAccountId: (existing?.billingAccountId ?? "") as string,
     settlementDay: String(existing?.settlementDay ?? 1),
     paymentDay: String(existing?.paymentDay ?? 15),
+    creditLimit: existing?.creditLimit !== undefined ? amountInput(existing.creditLimit, settings.decimals) : "",
     linkedAccountId: (existing?.linkedAccountId ?? "") as string,
     bankName: existing?.bankName ?? "",
     last4: existing?.last4 ?? "",
@@ -73,6 +74,7 @@ export default function AccountEditor() {
         transferAsExpense: !!transferable && f.transferAsExpense, description: f.description || undefined,
         billingAccountId: kind === "card" && f.billingAccountId ? (f.billingAccountId as Id<"accounts">) : undefined,
         settlementDay: kind === "card" ? Number(f.settlementDay) : undefined, paymentDay: kind === "card" ? Number(f.paymentDay) : undefined,
+        creditLimit: kind === "card" ? (f.creditLimit.trim() ? toMinor(f.creditLimit, settings.decimals, LOCALE_DECIMAL) : null) : undefined,
         linkedAccountId: (kind === "debitCard" || kind === "upi") && f.linkedAccountId && f.linkedAccountId !== NONE ? (f.linkedAccountId as Id<"accounts">) : undefined,
         bankName: isCard ? f.bankName.trim() || undefined : undefined,
         last4: isCard ? f.last4 || undefined : undefined,
@@ -123,6 +125,7 @@ export default function AccountEditor() {
               <div className="space-y-1.5"><Label>Payment day</Label><Input type="number" min={1} max={31} value={f.paymentDay} onChange={(e) => setF({ ...f, paymentDay: e.target.value })} /></div>
             </div>
             <p className="text-xs text-muted-foreground">Spending from the settlement day onward is "outstanding"; everything before it is "payable" on the payment day.</p>
+            <div className="space-y-1.5"><Label htmlFor="pm-limit">Credit limit (optional)</Label><Input id="pm-limit" inputMode="decimal" placeholder="Shows available credit" value={f.creditLimit} onChange={(e) => setF({ ...f, creditLimit: e.target.value })} /></div>
           </div>
         ) : null}
         {kind === "debitCard" || kind === "upi" ? (

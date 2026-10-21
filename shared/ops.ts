@@ -107,6 +107,8 @@ export type AccountFields = {
   bankName?: string;
   last4?: string;
   color?: string;
+  /** Credit cards only. Left out keeps the card's limit (callers that don't know about it); null removes it. */
+  creditLimit?: number | null;
 };
 export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
@@ -704,6 +706,7 @@ function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Ac
     }
   }
   if (kind === "debitCard" && !a.linkedAccountId) throw new Error("A debit card needs a linked bank account");
+  if (a.creditLimit !== undefined && a.creditLimit !== null && (!Number.isInteger(a.creditLimit) || a.creditLimit < 0 || a.creditLimit > MAX_AMOUNT)) throw new Error("Credit limit must be a positive amount");
   if (isCardKind(kind)) {
     if (a.last4 && !/^\d{4}$/.test(a.last4)) throw new Error("The last 4 digits must be 4 numbers");
     if (a.bankName && a.bankName.trim().length > MAX_NAME) throw new Error("Bank name must be at most 40 characters");
@@ -1052,7 +1055,7 @@ function resumePaused(w: Work) {
 /** Opening balances, budgets and what repeats and bookmarks will enter, when amounts change scale. */
 function rescaleOtherAmounts(w: Work, factor: number) {
   const scale = (n: number) => scaleAmount(n, factor);
-  for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: scale(a.initialBalance) });
+  for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: scale(a.initialBalance), creditLimit: a.creditLimit === undefined ? undefined : scale(a.creditLimit) });
   for (const b of [...w.snap.budgets]) {
     const overrides: Record<string, number> = {};
     for (const [k, val] of Object.entries(b.overrides)) overrides[k] = scale(val);
@@ -1182,10 +1185,10 @@ const handlers: Handlers = {
 
   "accounts.create": (w, a) => {
     const kind = validateAccount(w, a);
-    return w.insert("accounts", { ...a, kind, ...cardFields(kind, a), name: a.name.trim(), order: nextOrder(w.snap.accounts) });
+    return w.insert("accounts", { ...a, kind, ...cardFields(kind, a), creditLimit: kind === "card" ? a.creditLimit ?? undefined : undefined, name: a.name.trim(), order: nextOrder(w.snap.accounts) });
   },
   "accounts.update": (w, { id, ...a }) => {
-    w.must("accounts", id);
+    const was = w.must("accounts", id);
     const kind = validateAccount(w, a, id);
     w.patch("accounts", id, {
       ...a,
@@ -1197,6 +1200,7 @@ const handlers: Handlers = {
       paymentDay: kind === "card" ? a.paymentDay : undefined,
       linkedAccountId: kind === "debitCard" || kind === "upi" ? a.linkedAccountId : undefined,
       ...cardFields(kind, a),
+      creditLimit: kind !== "card" || a.creditLimit === null ? undefined : a.creditLimit ?? was.creditLimit,
     });
   },
   "accounts.setHidden": (w, { id, hidden }) => {
