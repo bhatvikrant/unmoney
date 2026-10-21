@@ -73,8 +73,9 @@ export default function AccountsPage() {
           <span className="block truncate">{a.name}</span>
           {a.bankName || a.last4 || due ? (
             <span className="block truncate text-xs text-muted-foreground">
+              {/* the due state first, so a narrow row never cuts it off */}
+              {due ? <><span className={cn(due.overdue && "text-destructive font-medium")}>{due.text}</span>{a.bankName || a.last4 ? " · " : ""}</> : null}
               {[a.bankName, a.last4 && `•• ${a.last4}`].filter(Boolean).join(" · ")}
-              {due ? <>{a.bankName || a.last4 ? " · " : ""}<span className={cn(due.overdue && "text-destructive font-medium")}>{due.text}</span></> : null}
             </span>
           ) : null}
         </span>
@@ -161,7 +162,7 @@ export default function AccountsPage() {
                       <button type="button" aria-expanded={hiddenOpen} onClick={() => setShowHidden((s) => flip(s, g.id))}
                         className={cn("w-full flex items-center gap-1 py-2 pr-4 text-xs text-muted-foreground hover:bg-accent/40 text-left border-t", g.group ? "pl-9" : "pl-4")}>
                         <ChevronDown className={cn("size-3.5 transition-transform", !hiddenOpen && "-rotate-90")} />
-                        {hiddenOpen ? "Hide" : `${hidden.length} hidden`}
+                        {hidden.length} hidden
                       </button>
                     </>
                   ) : null}
