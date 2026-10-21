@@ -13,6 +13,7 @@ import {
 } from "../../shared/ops";
 import * as local from "./db";
 import { SHARE_CACHE } from "./share";
+import { clearSafetyCopies } from "./safetyCopy";
 import type { Meta, Profile, QueuedOp } from "./db";
 
 export type SyncStatus = {
@@ -402,6 +403,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     // anyone waiting on these changes (an import, a restore) hears that they will not arrive
     for (const op of opsRef.current) settle(op.id, "Discarded: signed out");
     await local.wipe();
+    await clearSafetyCopies().catch(() => {});
     // what else this device keeps of the user: cached receipt photos, a file shared in, and preferences
     if ("caches" in window) await Promise.all([caches.delete("photos"), caches.delete(SHARE_CACHE)]).catch(() => {});
     try {

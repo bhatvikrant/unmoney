@@ -5,10 +5,13 @@
  * applies locally straight away and survives going offline or reloading; `synced` settles once
  * the server has confirmed every chunk. A large restore is the exception: see restore.
  */
+import { useLayoutEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useStore } from "@/lib/store";
 import { currencyInfo } from "../../shared/currencies";
 import { restoreRowsFrom, scaleAmount, type BackupData } from "../../shared/ops";
+import { backupExport } from "../../shared/views";
+import { saveSafetyCopy, type SafetyReason } from "./safetyCopy";
 import type { Id } from "../../convex/_generated/dataModel";
 
 const CHUNK = 500;
@@ -28,7 +31,24 @@ function chunks<T>(items: T[]): T[][] {
 }
 
 export function useBulkOps() {
-  const { view, dispatchTracked, whenSynced } = useStore();
+  const { view, userId, dispatchTracked, whenSynced } = useStore();
+  // the data as of the last render, for an action started later from a toast (Undo after an import)
+  const latest = useRef(view);
+  useLayoutEffect(() => { latest.current = view; });
+
+  /**
+   * Keep everything as it is now on this device before replacing or removing it in bulk, so Backup ›
+   * Safety copies can put it back. A device that can't store it (private mode, storage full) says so and goes on.
+   */
+  async function safetyCopy(reason: SafetyReason) {
+    const now = latest.current;
+    if (!userId || !now.transactions.length) return;
+    try {
+      await saveSafetyCopy(userId, reason, backupExport(now));
+    } catch {
+      toast.warning("Couldn't keep a safety copy on this device. Download a backup first if you may want this data back.");
+    }
+  }
 
   async function removeEntries(ifPresent?: boolean): Promise<string[]> {
     const ids: string[] = [];
@@ -67,7 +87,20 @@ export function useBulkOps() {
   }
 
   return {
+    /** Remove every entry an import added (by its importId) and mark it undone in the list. Payment methods and categories it made stay. */
+    async undoImport(importId: string) {
+      await safetyCopy("undoImport");
+      const now = latest.current;
+      const gone = now.transactions.filter((t) => t.importId === importId).map((t) => t._id);
+      const ids: string[] = [];
+      for (const part of chunks(gone)) ids.push((await dispatchTracked("transactions.bulkRemove", { ids: part, ifPresent: true })).id);
+      const recentImports = (now.settings[0]?.recentImports ?? []).map((x) => (x.id === importId ? { ...x, undoneAt: Date.now() } : x));
+      ids.push((await dispatchTracked("settings.update", { patch: { recentImports } })).id);
+      return track(ids, { loading: "Undoing the import…", success: `Removed ${gone.length.toLocaleString()} imported ${gone.length === 1 ? "entry" : "entries"}` });
+    },
+
     async wipeAll() {
+      await safetyCopy("wipe");
       if (view.transactions.length <= ONE_OP) {
         const { id } = await dispatchTracked("backup.wipeAll", { confirm: "DELETE" });
         return track([id], { loading: "Deleting entries…", success: "Entries deleted" });
@@ -78,6 +111,7 @@ export function useBulkOps() {
     },
 
     async restore(data: BackupData) {
+      await safetyCopy("restore");
       if (view.transactions.length + (data.transactions?.length ?? 0) <= ONE_OP) {
         const { id } = await dispatchTracked("backup.restore", { data });
         return track([id], { loading: "Restoring…", success: "Restored" });
@@ -111,6 +145,7 @@ export function useBulkOps() {
     },
 
     async changeMainCurrency(code: string, keepData: boolean) {
+      await safetyCopy("currency");
       if (keepData) assertFits(10 ** ((currencyInfo(code)?.decimals ?? 2) - (view.settings[0]?.decimals ?? 2)));
       if (view.transactions.length <= ONE_OP) {
         const { id } = await dispatchTracked("settings.changeMainCurrency", { code, keepData });
