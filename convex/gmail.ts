@@ -24,7 +24,7 @@ import { triage } from "../shared/gmail/triage";
 import { parseMail } from "../shared/gmail/rules";
 import { accountMapKey, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
 import { foldDrafts, laterMatches, matchEntry, type DraftCandidate } from "../shared/gmail/dedup";
-import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, normaliseSender, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
+import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, normaliseSender, OVERLAP_MS, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
 import { AI_BATCH, AI_MODEL, AI_MONTHLY_CAP, buildAiInput, lowerConfidence, OUTPUT_SCHEMA, SYSTEM_PROMPT, validateAiResults, type AiRead } from "../shared/gmail/ai";
 
 type Connection = Doc<"gmailConnections">;
@@ -306,18 +306,21 @@ export const prepareSync = internalQuery({
   },
 });
 
-/** Which of these Gmail message ids already have a draft (open or resolved, or folded into one). */
+/** Which of these Gmail message ids already have a draft (open or resolved, or folded into one), or were read and made none. */
 export const seenMessageIds = internalQuery({
   args: { userId: v.id("users"), ids: v.array(v.string()) },
   handler: async (ctx, { userId, ids }) => {
     const seen: string[] = [];
-    const folded = new Set<string>();
     for (const id of ids) {
       const d = await ctx.db.query("drafts").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", id)).first();
       if (d) seen.push(id);
     }
-    // a receipt folded into an alert is not its own draft: check the open ones' extras too
-    for (const d of await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect()) for (const x of d.extraMessageIds) folded.add(x);
+    const connection = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    const folded = new Set((connection?.processed ?? []).map((p) => p.id));
+    // A receipt folded into an alert is not its own draft: check the extras of every draft, the
+    // handled ones too, or it comes back as a new draft once the alert's draft is saved or dismissed.
+    // (Handled drafts are pruned after 90 days, long after the receipt left the check's window.)
+    for (const d of await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId)).collect()) for (const x of d.extraMessageIds) folded.add(x);
     for (const id of ids) if (folded.has(id) && !seen.includes(id)) seen.push(id);
     return seen;
   },
@@ -332,6 +335,10 @@ type Collected = {
   /** Open drafts that look like an entry the user typed in since the draft was written. */
   matches: { id: Id<"drafts">; transactionId: Id<"transactions"> }[];
   learned: Record<string, Id<"accounts">>;
+  /** Mails read that made no draft, so later checks skip them. */
+  processed: { id: string; receivedAt: number }[];
+  /** Where the next check may start from: before the oldest mail the AI could not read this time, so it is retried. */
+  syncedUpTo: number;
   aiCalls: number;
   aiSkipped: number;
   aiDropped: number;
@@ -409,8 +416,10 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   const candidates: DraftCandidate[] = [];
   const forAi: Mail[] = [];
   const notes: string[] = [];
+  const processed: { id: string; receivedAt: number }[] = [];
+  const retry: Mail[] = [];
   for (const mail of mails) {
-    if (!triage(mail).keep) continue;
+    if (!triage(mail).keep) { processed.push({ id: mail.id, receivedAt: mail.receivedAt }); continue; }
     const parsed = parseMail(mail);
     if (parsed) candidates.push(candidateOf(mail, resolveParsed(parsed, mail, rctx), "rule"));
     else forAi.push(mail);
@@ -425,12 +434,15 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     const used = c.aiMonth === monthOf(startedAt) ? c.aiCalls : 0;
     for (let i = 0; i < forAi.length; i += AI_BATCH) {
       const batch = forAi.slice(i, i + AI_BATCH);
-      if (used + aiCalls >= AI_MONTHLY_CAP) { aiSkipped += batch.length; continue; }
+      if (used + aiCalls >= AI_MONTHLY_CAP) { aiSkipped += batch.length; retry.push(...batch); continue; }
       aiCalls++;
       try {
         const { reads, dropped } = await askClaude(batch, prep);
         aiDropped += dropped;
         const byId = new Map(batch.map((m) => [m.id, m]));
+        // not a payment, or an answer that failed validation: asking again next hour would say the same
+        const read = new Set(reads.map((r) => r.mailId));
+        for (const m of batch) if (!read.has(m.id)) processed.push({ id: m.id, receivedAt: m.receivedAt });
         for (const r of reads) {
           const mail = byId.get(r.mailId)!;
           const resolved = resolveParsed(r.parsed, mail, rctx);
@@ -442,6 +454,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
       } catch (e) {
         console.error("gmail-ai failed", e instanceof Error ? e.message : e);
         aiSkipped += batch.length;
+        retry.push(...batch);
         notes.push("AI reading failed for some mail; it will be retried");
       }
     }
@@ -455,7 +468,9 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     updates,
     matches: [...laterMatches(prep.openDrafts, prep.transactions, prep.accounts)].map(([id, transactionId]) => ({ id, transactionId })),
     learned: learnAccounts(prep),
-    aiCalls, aiSkipped, aiDropped, notes,
+    aiCalls, aiSkipped, aiDropped, notes, processed,
+    // a check starts OVERLAP_MS before syncedUpTo: hold it back so the mail skipped this time is in the next window
+    syncedUpTo: Math.min(startedAt, ...retry.map((m) => m.receivedAt + OVERLAP_MS)),
   };
 }
 
@@ -472,6 +487,7 @@ export const syncUser = internalAction({
         userId, startedAt,
         inserts: got.inserts, updates: got.updates, matches: got.matches, learned: got.learned,
         aiCalls: got.aiCalls, scanned: got.scanned, note: got.notes.join(" · ") || undefined,
+        processed: got.processed, syncedUpTo: got.syncedUpTo,
       });
       return { ran: true, found: got.inserts.length };
     } catch (e) {
@@ -511,8 +527,11 @@ export const writeSync = internalMutation({
   args: {
     userId: v.id("users"), startedAt: v.number(), inserts: v.array(insertArg), updates: v.array(updateArg), matches: v.array(matchArg),
     learned: v.record(v.string(), v.id("accounts")), aiCalls: v.number(), scanned: v.number(), note: v.optional(v.string()),
+    processed: v.optional(v.array(v.object({ id: v.string(), receivedAt: v.number() }))),
+    /** Defaults to startedAt; earlier when some mail is to be retried. */
+    syncedUpTo: v.optional(v.number()),
   },
-  handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, aiCalls, scanned, note }) => {
+  handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, aiCalls, scanned, note, processed = [], syncedUpTo = startedAt }) => {
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!c) return;
     let found = 0;
@@ -540,8 +559,12 @@ export const writeSync = internalMutation({
     }
     const month = monthOf(startedAt);
     const entry = { at: startedAt, scanned, found, ...(note ? { note } : {}) };
+    // what the next window can no longer reach is forgotten
+    const reach = syncedUpTo - OVERLAP_MS;
+    const known = new Set(processed.map((p) => p.id));
     await ctx.db.patch(c._id, {
-      lastSyncAt: startedAt, lastError: undefined, syncedUpTo: startedAt,
+      lastSyncAt: startedAt, lastError: undefined, syncedUpTo,
+      processed: [...(c.processed ?? []).filter((p) => !known.has(p.id)), ...processed].filter((p) => p.receivedAt >= reach),
       aiMonth: month, aiCalls: (c.aiMonth === month ? c.aiCalls : 0) + aiCalls,
       accountMap: { ...c.accountMap, ...learned },
       log: [entry, ...c.log].slice(0, LOG_KEEP),
