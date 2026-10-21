@@ -1483,8 +1483,10 @@ const handlers: Handlers = {
       const date = parseImportDate(r.date ?? "", format?.dateOrder);
       if (!date) { errors.push({ row: rowNo, reason: `Bad date "${r.date}"` }); continue; }
       const tRaw = (r.type ?? "").trim().toLowerCase();
-      const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;
-      if (!type) { errors.push({ row: rowNo, reason: `Unknown type "${r.type}" (Income, Expenses or Transfer-Out)` }); continue; }
+      // "Refund" is UnMoney's own export of money back on an expense (stored below zero)
+      const refund = tRaw.startsWith("ref");
+      const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") || refund ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;
+      if (!type) { errors.push({ row: rowNo, reason: `Unknown type "${r.type}" (Income, Expenses, Refund or Transfer-Out)` }); continue; }
       const acc = accountName(r.account);
       if (!acc) { errors.push({ row: rowNo, reason: `Unknown account "${r.account}"` }); continue; }
       // The Type column says income or expense; a sign on the amount is only the file's convention.
@@ -1494,7 +1496,7 @@ const handlers: Handlers = {
       if (toMinor(amountMajor, settings.decimals) > MAX_AMOUNT) { errors.push({ row: rowNo, reason: `Amount too large "${r.amount}"` }); continue; }
       const time = r.time?.match(/^(\d{1,2}):(\d{2})/);
       const base: Prepared = {
-        _row: rowNo, type, date, _acc: acc, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
+        _row: rowNo, type, date, _acc: acc, amount: (refund ? -1 : 1) * toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
         description: r.description?.trim() || undefined, tags: splitTags(r.tags), photoIds: [],
         time: time ? `${time[1].padStart(2, "0")}:${time[2]}` : undefined,
       };
@@ -1502,7 +1504,7 @@ const handlers: Handlers = {
         const cur = w.snap.currencies.find((c) => c.code.toLowerCase() === r.subCurrency!.trim().toLowerCase());
         if (cur && cur.code !== settings.mainCurrency) {
           base.subCurrency = cur.code;
-          base.subAmount = toMinor(Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0), cur.decimals);
+          base.subAmount = (refund ? -1 : 1) * toMinor(Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0), cur.decimals);
           base.exchangeRate = cur.rate;
         }
       }
