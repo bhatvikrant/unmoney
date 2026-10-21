@@ -335,6 +335,11 @@ export default defineSchema({
     aiCalls: v.number(),
     /** The last 10 checks. */
     log: v.array(v.object({ at: v.number(), scanned: v.number(), found: v.number(), error: v.optional(v.string()), note: v.optional(v.string()) })),
+    /**
+     * Mails read that made no draft (triage dropped them, or the AI said they are not a payment), so
+     * a later check's overlap does not fetch them and ask the AI again. Kept while a window can still reach them.
+     */
+    processed: v.optional(v.array(v.object({ id: v.string(), receivedAt: v.number() }))),
   }).index("by_user", ["userId"]),
 
   /**

@@ -68,6 +68,39 @@ test("a check's drafts are written once each, folds reach open drafts, and the c
   expect((await t.run((ctx) => ctx.db.get(cid)))!.accountMap).toEqual({ "hdfcbank.net|4521": accounts[0]._id });
 });
 
+test("a receipt folded into a draft stays seen once that draft is handled", async () => {
+  const { t, userId, connect, insert } = await setup();
+  await connect();
+  const at = Date.parse("2026-10-20T10:00:00Z");
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: at, inserts: [insert("alert", { extraMessageIds: ["receipt"] })], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 2 });
+  const seen = () => t.query(internal.gmail.seenMessageIds, { userId, ids: ["alert", "receipt", "new"] });
+  expect(await seen()).toEqual(["alert", "receipt"]);
+  for (const status of ["accepted", "dismissed"] as const) {
+    await t.run(async (ctx) => { for (const d of await ctx.db.query("drafts").collect()) await ctx.db.patch(d._id, { status }); });
+    expect(await seen()).toEqual(["alert", "receipt"]);
+  }
+});
+
+test("mail that made no draft is not read again, and mail the AI skipped holds the window back", async () => {
+  const { t, userId, connect } = await setup();
+  const cid = await connect();
+  const at = Date.parse("2026-10-20T10:00:00Z");
+  const hour = 60 * 60 * 1000;
+  const write = (startedAt: number, processed: { id: string; receivedAt: number }[], syncedUpTo?: number) =>
+    t.mutation(internal.gmail.writeSync, { userId, startedAt, inserts: [], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 0, processed, syncedUpTo });
+  // "shipped" was not a payment; a mail the AI could not get to (the cap) arrived 5 days ago, so the
+  // check holds syncedUpTo where the next window (it starts two days before) still reaches it
+  const held = at - 5 * 24 * hour + 2 * 24 * hour;
+  await write(at, [{ id: "shipped", receivedAt: at - hour }], held);
+  let c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect(c.syncedUpTo).toBe(held);
+  expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["shipped", "other"] })).toEqual(["shipped"]);
+  // three days on, no window reaches it: forgotten
+  await write(at + 3 * 24 * hour, []);
+  c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect([c.syncedUpTo, c.processed]).toEqual([at + 3 * 24 * hour, []]);
+});
+
 test("a check matches open drafts to entries typed in since, but never undoes \"no, it's new\"", async () => {
   const { t, userId, accounts, connect, insert } = await setup();
   await connect();
