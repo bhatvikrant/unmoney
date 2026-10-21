@@ -9,7 +9,7 @@ import {
 } from "./ledger";
 import type { AccountKind } from "./defaults";
 import { addDays, addMonths, daysInMonth, make, parts, todayISO } from "./dates";
-import { elapsedFraction, periodRange, type Range } from "./period";
+import { elapsedFraction, periodKey, periodRange, type Range } from "./period";
 import { laterMatches } from "./gmail/dedup";
 
 export type Tx = Doc<"transactions">;
@@ -486,7 +486,16 @@ export function statsTrend(snap: Snapshot, type: "income" | "expense", categoryI
 
 // ---------- budgets ----------
 
-export type BudgetStatusItem = { budget: Doc<"budgets">; limit: number; spent: number; remaining: number; isOverride: boolean };
+export type BudgetStatusItem = {
+  budget: Doc<"budgets">;
+  /** What can be spent this period: the period's amount plus `carry`. */
+  limit: number;
+  spent: number;
+  remaining: number;
+  isOverride: boolean;
+  /** Left over (or, below zero, overspent) in the earlier periods since carrying over was turned on. */
+  carry: number;
+};
 export type BudgetStatus = { range: Range; total: BudgetStatusItem | undefined; perCategory: BudgetStatusItem[]; spentAll: number; elapsed: number };
 
 /** Spent vs limit for every budget of a period. `key` is the period key (month "2026-07", week start date, or year). */
@@ -508,16 +517,103 @@ export function budgetStatus(snap: Snapshot, period: Doc<"budgets">["period"], k
       spentByCat.set(main, (spentByCat.get(main) ?? 0) + k.expense);
     }
   }
-  const items = snap.budgets
-    .filter((b) => b.period === period)
+  const budgets = snap.budgets.filter((b) => b.period === period);
+  const carried = carryOver(snap, budgets, period, key);
+  const items = budgets
     .map((b) => {
-      const limit = b.overrides[key] ?? b.amount;
+      const carry = carried.get(b._id) ?? 0;
+      const limit = (b.overrides[key] ?? b.amount) + carry;
       const spent = b.categoryId ? spentByCat.get(b.categoryId) ?? 0 : spentAll;
-      return { budget: b, limit, spent, remaining: limit - spent, isOverride: b.overrides[key] !== undefined };
+      return { budget: b, limit, spent, remaining: limit - spent, isOverride: b.overrides[key] !== undefined, carry };
     });
   const total = items.find((i) => !i.budget.categoryId);
   const perCategory = items.filter((i) => i.budget.categoryId).sort((a, b) => b.spent / Math.max(1, b.limit) - a.spent / Math.max(1, a.limit));
   return { range, total, perCategory, spentAll, elapsed: elapsedFraction(range, today) };
+}
+
+/** The period after `key`. */
+function nextPeriodKey(period: Doc<"budgets">["period"], key: string, monthStartDay: number, weekStartDay: number): string {
+  return periodKey(period, addDays(periodRange(period, key, monthStartDay, weekStartDay).to, 1), monthStartDay, weekStartDay);
+}
+
+/**
+ * What each rollover budget brings into `key`: the sum of (amount − spent) over every period from
+ * the one carrying over was turned on in (`rolloverFrom`) up to, not including, `key`. Unspent
+ * money adds to the next period, overspending takes from it. One pass over the entries.
+ */
+function carryOver(snap: Snapshot, budgets: Doc<"budgets">[], period: Doc<"budgets">["period"], key: string): Map<string, number> {
+  const out = new Map<string, number>();
+  const rolling = budgets.filter((b) => b.rolloverFrom && b.rolloverFrom < key);
+  const settings = settingsOf(snap);
+  if (!rolling.length || !settings) return out;
+  const { monthStartDay: msd, weekStartDay: wsd } = settings;
+  const earliest = rolling.reduce((m, b) => (b.rolloverFrom! < m ? b.rolloverFrom! : m), key);
+  const from = periodRange(period, earliest, msd, wsd).from;
+  const to = periodRange(period, key, msd, wsd).from;
+  const ledger = ledgerOf(snap);
+  const parentOf = new Map(snap.categories.filter((c) => c.type === "expense").map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
+  // spent per period key, per main category and in all ("")
+  const spent = new Map<string, Map<string, number>>();
+  const add = (k: string, cat: string, n: number) => {
+    let m = spent.get(k);
+    if (!m) spent.set(k, (m = new Map()));
+    m.set(cat, (m.get(cat) ?? 0) + n);
+  };
+  for (const t of snap.transactions) {
+    if (t.date < from || t.date >= to) continue;
+    const e = kindsOf(t, ledger).expense;
+    if (!e) continue;
+    const k = periodKey(period, t.date, msd, wsd);
+    add(k, "", e);
+    if (t.categoryId) add(k, parentOf.get(t.categoryId) ?? t.categoryId, e);
+  }
+  for (const b of rolling) {
+    let carry = 0;
+    let k = b.rolloverFrom!;
+    for (let guard = 0; k < key && guard < 2000; guard++) {
+      carry += (b.overrides[k] ?? b.amount) - (spent.get(k)?.get(b.categoryId ?? "") ?? 0);
+      k = nextPeriodKey(period, k, msd, wsd);
+    }
+    out.set(b._id, carry);
+  }
+  return out;
+}
+
+/** How far a budget is through its limit: 0 under 80%, 1 from 80%, 2 at or past it. */
+export type BudgetLevel = 0 | 1 | 2;
+export const BUDGET_WARN = 0.8;
+export type BudgetAlertItem = BudgetStatusItem & { level: BudgetLevel; range: Range; period: Doc<"budgets">["period"] };
+
+export function budgetLevel(item: Pick<BudgetStatusItem, "limit" | "spent">): BudgetLevel {
+  if (item.spent <= 0) return 0;
+  if (item.spent >= item.limit) return 2;
+  return item.spent >= item.limit * BUDGET_WARN ? 1 : 0;
+}
+
+/** Every budget in the period that holds `today`, with how far through it is: what the alerts and the Stats tab's dot read. */
+export function currentBudgetLevels(snap: Snapshot, today: string): BudgetAlertItem[] {
+  const settings = settingsOf(snap);
+  if (!settings) return [];
+  const out: BudgetAlertItem[] = [];
+  for (const period of ["weekly", "monthly", "yearly"] as const) {
+    if (!snap.budgets.some((b) => b.period === period)) continue;
+    const status = budgetStatus(snap, period, periodKey(period, today, settings.monthStartDay, settings.weekStartDay), today);
+    if (!status) continue;
+    for (const it of [...(status.total ? [status.total] : []), ...status.perCategory]) out.push({ ...it, level: budgetLevel(it), range: status.range, period });
+  }
+  return out;
+}
+
+/**
+ * Budgets that went up a level between two readings (an entry pushed Food past 80%, or over):
+ * what deserves a toast. A budget that wasn't in the earlier reading (just made) never alerts.
+ */
+export function budgetCrossings(before: BudgetAlertItem[], after: BudgetAlertItem[]): BudgetAlertItem[] {
+  const was = new Map(before.map((i) => [`${i.budget._id}|${i.range.from}`, i.level]));
+  return after.filter((i) => {
+    const w = was.get(`${i.budget._id}|${i.range.from}`);
+    return w !== undefined && i.level > w;
+  });
 }
 
 export type { Id };
