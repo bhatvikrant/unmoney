@@ -55,6 +55,10 @@ PREVIEW (first 5)
 
 4. **Continue** builds the `ImportRow`s and opens the existing Review (counts, duplicates, skipped rows with reasons, date and decimal format, Import).
 
+### Refunds
+
+Money in whose description says refund or reversal ("REFUND - MYNTRA", "UPI/REV/…", "CHARGEBACK") imports as a **refund**: an expense below zero, so it nets against spending (docs/specs/refunds.md) instead of counting as income. Its category is what the user's history files that note under as spending, else the same note with the refund words taken off ("MYNTRA DESIGNS"), else Other. The preview marks these rows "Refund", and a **Money back is a refund** switch (on, shown only when some rows qualify) turns it off for the file.
+
 ### Mapping rules
 
 - **Header row:** the first of the first 30 rows with at least 3 filled cells, one looking like a date header and one like an amount header. Otherwise the first non-empty row. The user can pick another.
