@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useQuery } from "convex/react";
-import { Camera, X } from "lucide-react";
+import { Camera, ExternalLink, X } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { compressImage } from "@/lib/image";
 import { isTmpId } from "../../../shared/ops";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 /** Photos are queued locally and uploaded when online; the entry keeps a temporary id until then. */
 export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[]; onChange: (ids: Id<"_storage">[]) => void }) {
@@ -18,6 +19,9 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
   const urlOf = (id: string) => photoUrl(id) ?? fetched?.[resolveId(id)] ?? undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  /** The photo shown full size. */
+  const [viewing, setViewing] = useState<string | null>(null);
+  const viewUrl = viewing ? urlOf(viewing) : undefined;
   async function upload(files: FileList | null) {
     if (!files?.length) return;
     const room = 3 - photoIds.length;
@@ -43,7 +47,9 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
     <div className="flex gap-2 flex-wrap items-center">
       {photoIds.map((id) => (
         <div key={id} className="relative size-20 rounded-md overflow-hidden bg-muted">
-          {urlOf(id) ? <img src={urlOf(id)} alt="" className="size-full object-cover" /> : <div className="size-full flex items-center justify-center text-[10px] text-muted-foreground">{status.connected ? "…" : "offline"}</div>}
+          {urlOf(id) ? (
+            <button type="button" aria-label="View photo" className="size-full" onClick={() => setViewing(id)}><img src={urlOf(id)} alt="" className="size-full object-cover" /></button>
+          ) : <div className="size-full flex items-center justify-center text-[10px] text-muted-foreground">{status.connected ? "…" : "offline"}</div>}
           <button type="button" aria-label="Remove photo" onClick={() => onChange(photoIds.filter((x) => x !== id))} className="absolute top-1 right-1 rounded-full bg-black/60 text-white p-0.5"><X className="size-3" /></button>
         </div>
       ))}
@@ -53,6 +59,15 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
         </button>
       ) : null}
       <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
+      <Dialog open={!!viewUrl} onOpenChange={(o) => !o && setViewing(null)}>
+        <DialogContent className="sm:max-w-2xl p-2 pt-10">
+          <DialogTitle className="sr-only">Photo</DialogTitle>
+          {viewUrl ? <img src={viewUrl} alt="Attached photo" className="max-h-[75dvh] w-full rounded-md object-contain" /> : null}
+          {viewUrl ? (
+            <a href={viewUrl} target="_blank" rel="noopener" className="flex items-center justify-center gap-1 py-1 text-xs text-muted-foreground hover:underline underline-offset-4">Open original <ExternalLink className="size-3" /></a>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -75,7 +90,7 @@ export function TagInput({ tags, onChange, suggestions }: { tags: string[]; onCh
         {tags.map((t) => (
           <span key={t} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">#{t}<button type="button" aria-label={`Remove ${t}`} onClick={() => onChange(tags.filter((x) => x !== t))}><X className="size-3" /></button></span>
         ))}
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} onBlur={() => draft && add(draft)} placeholder={tags.length ? "" : "Add tags"} className="flex-1 min-w-24 bg-transparent outline-none text-sm py-1" />
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} onBlur={() => draft && add(draft)} placeholder={tags.length ? "" : "Add tags"} aria-label="Tags" className="flex-1 min-w-24 bg-transparent outline-none text-base md:text-sm py-1" />
       </div>
       {draft && sug.length ? (
         <div className="flex gap-1 flex-wrap mt-1">{sug.map((s) => <button key={s} type="button" className="text-xs rounded-full border px-2 py-0.5 hover:bg-accent" onMouseDown={(e) => e.preventDefault() /* keep focus, so blur does not add the half-typed draft first */} onClick={() => add(s)}>#{s}</button>)}</div>

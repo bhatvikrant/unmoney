@@ -12,7 +12,7 @@ import { addMonths, todayISO } from "./dates";
 import { currencyInfo } from "./currencies";
 import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_INCOME_CATEGORIES, type AccountKind } from "./defaults";
 import { drawsFromLinked, resolveKind } from "./ledger";
-import { nextOccurrence, type Frequency } from "./repeat";
+import { firstDateAfter, nextOccurrence, type Frequency } from "./repeat";
 import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
 import { normName, normNote } from "./categoryLint";
@@ -110,7 +110,7 @@ export type AccountFields = {
 };
 export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
-  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter">>;
+  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "dismissedRecurring" | "recentImports">>;
 export type ImportRow = {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
   description?: string; subAmount?: string; subCurrency?: string;
@@ -122,6 +122,9 @@ export type ImportRow = {
   tags?: string;
 };
 export type NewImportAccount = { name: string; kind: AccountKind };
+export type ImportBatch = { id: string; name: string };
+/** How many past imports are remembered for Undo. */
+export const RECENT_IMPORTS = 10;
 export type CatType = "income" | "expense";
 /** A category in a tidy-up plan: an existing one, or one that a "create" step earlier in the plan makes. */
 export type CatRef = { id: Id<"categories"> } | { newKey: string };
@@ -182,6 +185,12 @@ export interface Ops {
    */
   "accounts.merge": { args: { sourceIds: Id<"accounts">[]; targetId: Id<"accounts"> }; result: { moved: number; droppedTransfers: number } };
   "accounts.payCard": { args: { id: Id<"accounts">; amount: number; date: string; fromAccountId?: Id<"accounts"> }; result: Id<"transactions"> };
+  /**
+   * "The bank says X": records `delta` (X minus what the app showed) as a transfer from or to the
+   * hidden Balance adjustments account, so income and spending stay as they were, and marks the
+   * method reconciled on `date`. `balance` is X, for the history line. A delta of 0 only marks it.
+   */
+  "accounts.adjustBalance": { args: { id: Id<"accounts">; delta: number; balance: number; date: string }; result: Id<"transactions"> | null };
 
   "categories.create": { args: { type: "income" | "expense"; name: string; parentId?: Id<"categories"> }; result: Id<"categories"> };
   "categories.update": { args: { id: Id<"categories">; name?: string; parentId?: Id<"categories"> | null }; result: void };
@@ -197,7 +206,8 @@ export interface Ops {
   "transactions.update": { args: TxFields & { id: Id<"transactions">; scope?: "one" | "future" }; result: void };
   "transactions.remove": { args: { id: Id<"transactions">; scope?: "one" | "future" | "all" }; result: void };
   "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
-  "transactions.bulkRemove": { args: { ids: Id<"transactions">[] }; result: void };
+  /** ifPresent: entries already gone are skipped rather than refusing the lot (a chunked restore, after the server's sweep). */
+  "transactions.bulkRemove": { args: { ids: Id<"transactions">[]; ifPresent?: boolean }; result: void };
   /** Link entries to the shared expense they became on UnSplit (or, with null, unlink them). Entries gone meanwhile are left out. */
   "transactions.setSplit": { args: { ids: Id<"transactions">[]; split: TxSplit | null }; result: void };
   "transactions.importRows": {
@@ -206,7 +216,11 @@ export interface Ops {
      * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry ·
      * rowOffset: numbering of the first row, for chunked imports · format: how the whole file writes dates and numbers
      */
-    args: { rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
+    args: {
+      rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number;
+      /** One file's import (every chunk sends the same): its entries carry the id, and it joins settings.recentImports so it can be undone. */
+      batch?: ImportBatch;
+    };
     result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
   };
   /** today: the device's date, so the server (in UTC) puts the copy on the same day. */
@@ -224,10 +238,21 @@ export interface Ops {
   "drafts.link": { args: { id: Id<"drafts">; transactionId: Id<"transactions"> }; result: void };
   /** "No, it's new": the draft stops pointing at the entry it looked like, goes back to the ledger and is never matched again. */
   "drafts.unmatch": { args: { id: Id<"drafts"> }; result: void };
+  /** Undo an import or a dismiss: the drafts are open again, and the entries in `transactionIds` that an import made from them are deleted. */
+  "drafts.reopen": { args: { ids: Id<"drafts">[]; transactionIds?: Id<"transactions">[] }; result: void };
 
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
   "repeats.remove": { args: { id: Id<"repeats"> }; result: void };
   "repeats.catchUp": { args: { today: string }; result: number };
+  /** Add the schedule's next entry now, dated `entryDate` (paying a bill early), and move the schedule on. `date` must still be its next date. */
+  "repeats.addNext": { args: { id: Id<"repeats">; date: string; entryDate: string }; result: Id<"transactions"> };
+  /** Skip the schedule's next date without adding anything. A date it is already past is a no-op. */
+  "repeats.skip": { args: { id: Id<"repeats">; date: string }; result: void };
+  /**
+   * A schedule anchored on `after` (a payment that already happened) whose first date is the first one later than `today`,
+   * so nothing is back-filled. `fromTransactionId` joins that payment to it.
+   */
+  "repeats.create": { args: { template: Template; frequency: Frequency; after: string; today: string; fromTransactionId?: Id<"transactions"> }; result: Id<"repeats"> };
 
   "bookmarks.create": { args: { template: Template; transactionId?: Id<"transactions"> }; result: Id<"bookmarks"> };
   "bookmarks.update": { args: { id: Id<"bookmarks">; template: Template }; result: void };
@@ -266,8 +291,20 @@ export type RestoreIds = {
   bookmarks?: Record<string, string>;
 };
 
+/**
+ * Why this is not a backup worth replacing everything with, or null. Restore clears every table
+ * first, so another app's JSON or a truncated file must be refused before that.
+ */
+export function backupProblem(data: unknown): string | null {
+  const d = data as BackupData | null;
+  if (!d || typeof d !== "object" || d.version !== 1) return "Not an UnMoney backup file";
+  if (!d.settings || typeof d.settings !== "object" || !Array.isArray(d.accounts) || !d.accounts.length) return "This backup is incomplete: it has no settings or payment methods";
+  return null;
+}
+
 export type BackupData = {
   version: number;
+  exportedAt?: string;
   settings?: Record<string, unknown> | null;
   accountGroups?: Record<string, unknown>[];
   accounts?: Record<string, unknown>[];
@@ -306,6 +343,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "accounts.setArchived": ["settings", "accounts"],
   "accounts.merge": ["settings", "accounts", "categories", "transactions", "repeats", "bookmarks"],
   "accounts.payCard": ["accounts", "transactions"],
+  "accounts.adjustBalance": ["accounts", "transactions"],
   "categories.create": ["categories"],
   "categories.update": ["categories"],
   "categories.remove": ["categories"],
@@ -327,9 +365,13 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "drafts.dismiss": ["drafts"],
   "drafts.link": ["drafts", "transactions"],
   "drafts.unmatch": ["drafts"],
+  "drafts.reopen": ["drafts", "transactions"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions", "accounts", "categories"],
+  "repeats.addNext": ["repeats", "transactions", "accounts", "categories"],
+  "repeats.skip": ["repeats"],
+  "repeats.create": ["repeats", "transactions", "accounts", "categories"],
   "bookmarks.create": ["accounts", "transactions", "bookmarks"],
   "bookmarks.update": ["bookmarks"],
   "bookmarks.remove": ["bookmarks"],
@@ -388,7 +430,9 @@ export function txScope(op: Op): TxScope {
     case "transactions.copy": return { ids: [id] };
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
     case "drafts.link": return { ids: [a.transactionId as string] };
+    case "drafts.reopen": return { ids: (a.transactionIds as string[] | undefined) ?? [] };
     case "repeats.remove": return { repeatIds: [id] };
+    case "repeats.create": return { ids: a.fromTransactionId ? [a.fromTransactionId as string] : [] };
     case "accounts.permanentlyDelete": return { accountIds: [id] };
     // a merge moves every entry from or to the methods being merged
     case "accounts.merge": return { accountIds: [a.targetId as string, ...(a.sourceIds as string[])] };
@@ -673,12 +717,21 @@ function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Ac
   return kind;
 }
 
+const FREQUENCIES: Record<Frequency, true> = { daily: true, weekly: true, biweekly: true, monthly: true, yearly: true };
+
+/** A schedule moves past `date`; past its end date it stops, as repeats.catchUp does. */
+function moveRepeatOn(w: Work, rep: Doc<"repeats">, date: string) {
+  const next = nextOccurrence(date, rep.startDate, rep.frequency);
+  w.patch("repeats", rep._id, rep.endDate && next > rep.endDate ? { nextDate: next, active: false } : { nextDate: next });
+}
+
 const templateOf = (t: TxFields): Template => ({
   type: t.type, accountId: t.accountId, toAccountId: t.toAccountId, categoryId: t.categoryId, subcategoryId: t.subcategoryId,
   amount: t.amount, note: t.note, description: t.description, tags: t.tags, feeAmount: t.feeAmount,
 });
 
-function horizonFor(s: Doc<"settings"> | null, today: string): string {
+/** The last date the app adds scheduled entries for, given today: today, or the month's end with "show repeats on the 1st". */
+export function horizonFor(s: Doc<"settings"> | null, today: string): string {
   if (s?.repeatDisplay === "firstOfMonth") return monthRange(monthKeyForDate(today, s.monthStartDay), s.monthStartDay).to;
   return today;
 }
@@ -1151,7 +1204,15 @@ const handlers: Handlers = {
     w.patch("accounts", id, { hidden });
   },
   "accounts.remove": (w, { id }) => {
-    w.must("accounts", id);
+    const a = w.must("accounts", id);
+    // A card billed to it, or a debit card or UPI spending from it, would keep moving money in a
+    // method nobody can see: they must point elsewhere first (merge refuses the same way).
+    for (const x of w.snap.accounts) {
+      if (x.deletedAt || x._id === id) continue;
+      const kind = resolveKind(x, w.snap.accountGroups);
+      if (kind === "card" && x.billingAccountId === id) throw new Error(`${x.name} is billed to ${a.name}. Change ${x.name}'s billing account first`);
+      if (drawsFromLinked({ kind, linkedAccountId: x.linkedAccountId }) && x.linkedAccountId === id) throw new Error(`${x.name} spends from ${a.name}. Change or delete ${x.name} first`);
+    }
     w.patch("accounts", id, { deletedAt: Date.now() });
   },
   "accounts.restore": (w, { id }) => {
@@ -1283,8 +1344,28 @@ const handlers: Handlers = {
     if (!from) throw new Error("No billing account set on this card");
     if (!Number.isInteger(amount) || amount <= 0) throw new Error("Amount must be positive");
     if (!isDate(date)) throw new Error("Bad date");
-    w.must("accounts", from);
+    // money from a deleted method would come from nowhere: no visible balance goes down
+    const source = w.must("accounts", from, "Pick an account to pay from");
+    if (source.deletedAt) throw new Error(`${source.name} has been deleted. Pick another account to pay from`);
+    if (from === id || resolveKind(source, w.snap.accountGroups) === "card") throw new Error("A card can't be paid from itself or another credit card");
     return w.insert("transactions", { type: "transfer", date, accountId: from, toAccountId: id, amount, note: `${card.name} payment`, tags: [], photoIds: [] });
+  },
+
+  "accounts.adjustBalance": (w, { id, delta, date }) => {
+    const acc = w.must("accounts", id, "That payment method is gone");
+    if (acc.deletedAt) throw new Error("That payment method is deleted");
+    if (acc.system) throw new Error("That account can't be adjusted");
+    if (drawsFromLinked({ kind: resolveKind(acc, w.snap.accountGroups), linkedAccountId: acc.linkedAccountId })) throw new Error("Adjust the bank account it draws from instead");
+    if (!isDate(date)) throw new Error("Bad date");
+    if (!Number.isInteger(delta)) throw new Error("Amount must be a whole number of minor units");
+    checkAmount(delta);
+    w.patch("accounts", id, { reconciledAt: date });
+    if (delta === 0) return null;
+    const adj = w.snap.accounts.find((a) => a.system === "adjustments" && !a.deletedAt)?._id ?? w.insert("accounts", {
+      system: "adjustments", kind: "other", name: "Balance adjustments", initialBalance: 0, includeInTotals: false, hidden: true, transferAsExpense: false, order: nextOrder(w.snap.accounts),
+    });
+    const [from, to] = delta > 0 ? [adj, id] : [id, adj];
+    return w.insert("transactions", { type: "transfer", date, accountId: from, toAccountId: to, amount: Math.abs(delta), note: "Balance adjustment", tags: [], photoIds: [] });
   },
 
   "categories.create": (w, { type, name, parentId }) => {
@@ -1424,8 +1505,9 @@ const handlers: Handlers = {
     }
   },
 
-  "transactions.bulkRemove": (w, { ids }) => {
+  "transactions.bulkRemove": (w, { ids, ifPresent }) => {
     for (const id of ids) {
+      if (ifPresent && !w.get("transactions", id)) continue;
       w.must("transactions", id);
       w.delete("transactions", id);
     }
@@ -1437,8 +1519,9 @@ const handlers: Handlers = {
     for (const id of ids) if (w.get("transactions", id)) w.patch("transactions", id, { split: link });
   },
 
-  "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
+  "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0, batch }) => {
     const settings = w.requireSettings();
+    if (batch && (typeof batch.id !== "string" || !batch.id || batch.id.length > 64 || typeof batch.name !== "string")) throw new Error("Bad import batch");
     const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
     // Payment methods the import should create first, all outside any group. Cards need a bank to bill / link to, so other kinds go first.
     // (An older app sends the kind as groupKind.)
@@ -1486,8 +1569,10 @@ const handlers: Handlers = {
       const date = parseImportDate(r.date ?? "", format?.dateOrder);
       if (!date) { errors.push({ row: rowNo, reason: `Bad date "${r.date}"` }); continue; }
       const tRaw = (r.type ?? "").trim().toLowerCase();
-      const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;
-      if (!type) { errors.push({ row: rowNo, reason: `Unknown type "${r.type}" (Income, Expenses or Transfer-Out)` }); continue; }
+      // "Refund" is UnMoney's own export of money back on an expense (stored below zero)
+      const refund = tRaw.startsWith("ref");
+      const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") || refund ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;
+      if (!type) { errors.push({ row: rowNo, reason: `Unknown type "${r.type}" (Income, Expenses, Refund or Transfer-Out)` }); continue; }
       const acc = accountName(r.account);
       if (!acc) { errors.push({ row: rowNo, reason: `Unknown account "${r.account}"` }); continue; }
       // The Type column says income or expense; a sign on the amount is only the file's convention.
@@ -1497,16 +1582,18 @@ const handlers: Handlers = {
       if (toMinor(amountMajor, settings.decimals) > MAX_AMOUNT) { errors.push({ row: rowNo, reason: `Amount too large "${r.amount}"` }); continue; }
       const time = r.time?.match(/^(\d{1,2}):(\d{2})/);
       const base: Prepared = {
-        _row: rowNo, type, date, _acc: acc, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
+        _row: rowNo, type, date, _acc: acc, amount: (refund ? -1 : 1) * toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
         description: r.description?.trim() || undefined, tags: splitTags(r.tags), photoIds: [],
         time: time ? `${time[1].padStart(2, "0")}:${time[2]}` : undefined,
       };
       if (r.subAmount && r.subCurrency && r.subCurrency.trim().toLowerCase() !== settings.mainCurrency.toLowerCase()) {
         const cur = w.snap.currencies.find((c) => c.code.toLowerCase() === r.subCurrency!.trim().toLowerCase());
         if (cur && cur.code !== settings.mainCurrency) {
+          const subMajor = Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0);
           base.subCurrency = cur.code;
-          base.subAmount = toMinor(Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0), cur.decimals);
-          base.exchangeRate = cur.rate;
+          base.subAmount = (refund ? -1 : 1) * toMinor(subMajor, cur.decimals);
+          // the rate the file's two amounts imply, not today's: the editor works the amount out from it
+          base.exchangeRate = subMajor && amountMajor ? subMajor / amountMajor : cur.rate;
         }
       }
       if (type === "transfer") {
@@ -1595,8 +1682,17 @@ const handlers: Handlers = {
         fields.categoryId = cat._id;
         fields.subcategoryId = _subName ? catByKey.get(catKey(fields.type, _subName, cat._id))?._id : undefined;
       }
-      w.insert("transactions", clean(fields));
+      w.insert("transactions", clean({ ...fields, importId: batch?.id }));
       inserted++;
+    }
+    if (batch && inserted) {
+      // the import joins (or, for a later chunk of the same file, adds to) the list Undo works from
+      const list = settings.recentImports ?? [];
+      const had = list.find((x) => x.id === batch.id);
+      const next = had
+        ? list.map((x) => (x.id === batch.id ? { ...x, count: x.count + inserted } : x))
+        : [{ id: batch.id, name: batch.name.trim().slice(0, 120) || "Import", at: w.at, count: inserted }, ...list].slice(0, RECENT_IMPORTS);
+      w.patch("settings", settings._id, { recentImports: next });
     }
     return { inserted, errors, createdAccounts, duplicates };
   },
@@ -1646,6 +1742,17 @@ const handlers: Handlers = {
   "drafts.unmatch": (w, { id }) => {
     const draft = w.must("drafts", id, "That draft is gone");
     if (draft.status === "open") w.patch("drafts", id, { matchedTransactionId: undefined, keptNew: true });
+  },
+  "drafts.reopen": (w, { ids, transactionIds = [] }) => {
+    const made = new Set<string>(transactionIds);
+    for (const id of ids) {
+      const d = w.get("drafts", id);
+      if (!d || d.status === "open") continue;
+      // only an entry this draft's import made: never one it was linked to
+      const t = d.transactionId && made.has(d.transactionId) ? w.get("transactions", d.transactionId) : undefined;
+      if (t && t.source?.messageId === d.messageId) w.delete("transactions", t._id);
+      w.patch("drafts", id, { status: "open", transactionId: undefined, resolvedAt: undefined });
+    }
   },
   "drafts.link": (w, { id, transactionId }) => {
     const draft = w.must("drafts", id, "That draft is gone");
@@ -1697,6 +1804,33 @@ const handlers: Handlers = {
       if (!stopped) w.patch("repeats", rep._id, { nextDate: next });
     }
     return created;
+  },
+
+  "repeats.addNext": (w, { id, date, entryDate }) => {
+    const rep = w.must("repeats", id, "That schedule is gone");
+    if (!isDate(date) || !isDate(entryDate)) throw new Error("Bad date");
+    if (rep.kind !== "repeat" || !rep.active || rep.nextDate !== date) throw new Error("That one was already added or skipped");
+    const t = validateTx(w, { ...rep.template, date: entryDate, photoIds: [] });
+    const txId = w.insert("transactions", { ...t, repeatId: rep._id });
+    moveRepeatOn(w, rep, date);
+    return txId;
+  },
+  "repeats.skip": (w, { id, date }) => {
+    const rep = w.must("repeats", id, "That schedule is gone");
+    if (!isDate(date)) throw new Error("Bad date");
+    if (rep.nextDate > date) return;
+    if (rep.kind !== "repeat" || !rep.active) throw new Error("That schedule is stopped");
+    if (rep.nextDate < date) throw new Error(`Add or skip the ${rep.nextDate} one first`);
+    moveRepeatOn(w, rep, date);
+  },
+  "repeats.create": (w, { template, frequency, after, today, fromTransactionId }) => {
+    if (!isDate(after) || !isDate(today)) throw new Error("Bad date");
+    if (!(frequency in FREQUENCIES)) throw new Error("Bad frequency");
+    const t = validateTx(w, { ...template, date: after, photoIds: [] });
+    const repeatId = w.insert("repeats", { kind: "repeat", frequency, startDate: after, nextDate: firstDateAfter(after, frequency, today), template: templateOf(t), active: true });
+    const from = fromTransactionId ? w.get("transactions", fromTransactionId) : undefined;
+    if (from && !from.repeatId && !from.installmentIndex) w.patch("transactions", from._id, { repeatId });
+    return repeatId;
   },
 
   "bookmarks.create": (w, { template, transactionId }) => {
@@ -1793,7 +1927,8 @@ const handlers: Handlers = {
   },
 
   "backup.restore": (w, { data, entries = true }) => {
-    if (!data || data.version !== 1) throw new Error("Not an UnMoney backup file");
+    const problem = backupProblem(data);
+    if (problem) throw new Error(problem);
     for (const t of ["notes", "categories", "repeats", "bookmarks", "budgets", "accounts", "accountGroups", "currencies"] as const) w.clear(t);
     if (entries) w.clear("transactions");
     // Backups from before payment methods had their own kind keep it on the group: carry it over.

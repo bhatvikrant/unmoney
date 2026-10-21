@@ -190,6 +190,11 @@ export function cardStatus(
   return { payable, outstanding, owed };
 }
 
+/** When a card's payable (the statement that closed last) is due: the first payment day from the start of the current cycle. */
+export function statementDue(account: { settlementDay?: number; paymentDay?: number }, today: ISODate = todayISO()): ISODate | undefined {
+  return account.paymentDay ? nextPaymentDate(account.paymentDay, cycleStart(account.settlementDay ?? 1, today)) : undefined;
+}
+
 /** Next payment date for a card. */
 export function nextPaymentDate(paymentDay: number, today: ISODate = todayISO()): ISODate {
   const { y, m, d } = parts(today);
