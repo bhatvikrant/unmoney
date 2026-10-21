@@ -128,7 +128,7 @@ export default function TransactionsPage() {
             {view !== "monthly" ? <SummaryBar income={totals.income} expense={totals.expense} total={total} totalLabel={settings.carryOver ? "Total (carried)" : "Total"} /> : null}
             {filtered ? (
               <div className="flex items-center gap-2 px-4 py-1.5 text-xs bg-muted/50 border-b">
-                <span className="text-muted-foreground">Filtered{filterType ? ` · ${filterType}` : ""}{filterAcc.size ? ` · ${filterAcc.size} accounts` : ""}{filterCat.size ? ` · ${filterCat.size} categories` : ""}{hiddenTransfers ? ` · ${hiddenTransfers} transfer${hiddenTransfers === 1 ? "" : "s"} hidden` : ""}</span>
+                <span className="text-muted-foreground">Filtered{filterType ? ` · ${filterType}` : ""}{filterAcc.size ? ` · ${filterAcc.size} payment method${filterAcc.size === 1 ? "" : "s"}` : ""}{filterCat.size ? ` · ${filterCat.size} categories` : ""}{hiddenTransfers ? ` · ${hiddenTransfers} transfer${hiddenTransfers === 1 ? "" : "s"} hidden` : ""}</span>
                 <button type="button" className="ml-auto flex items-center gap-1 underline-offset-4 hover:underline" onClick={clearFilter}><X className="size-3" />Clear</button>
               </div>
             ) : null}
