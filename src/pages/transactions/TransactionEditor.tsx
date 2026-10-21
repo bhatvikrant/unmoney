@@ -224,7 +224,13 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     return rate ? s / rate : null;
   }, [f.amount, f.subAmount, rate, sub]);
 
+  // An entry or draft opens with the amount it has; it is worked out again only once the second
+  // currency, its amount or the rate is changed (a rounded or stale rate must not rewrite it).
+  const untouched = useRef(true);
+  const openedWith = `${initial.subCurrency}|${initial.subAmount}|${initial.rate}`;
   useEffect(() => {
+    if (untouched.current && `${f.subCurrency}|${f.subAmount}|${rate}` === openedWith) return;
+    untouched.current = false;
     if (sub && mainMajor !== null) set("amount", localNumber(Math.round(mainMajor * 10 ** settings.decimals) / 10 ** settings.decimals));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainMajor, sub]);

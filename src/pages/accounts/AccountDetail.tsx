@@ -76,7 +76,7 @@ export default function AccountDetail() {
             <div className="text-right text-xs">
               <div>Payable <Money amount={data.card.payable} kind="expense" /></div>
               <div>Outstanding <Money amount={data.card.outstanding} kind="expense" /></div>
-              <Button size="sm" className="mt-1" onClick={() => setPay({ amount: amountInput(data.card!.payable || data.card!.owed, settings.decimals), date: todayISO(), from: a.billingAccountId ?? "" })}>Pay</Button>
+              <Button size="sm" className="mt-1" onClick={() => setPay({ amount: amountInput(data.card!.payable || data.card!.owed, settings.decimals), date: todayISO(), from: accounts.some((x) => x._id === a.billingAccountId && x.kind !== "card") ? a.billingAccountId! : "" })}>Pay</Button>
             </div>
           ) : null}
         </div>
