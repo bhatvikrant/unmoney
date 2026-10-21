@@ -15,19 +15,21 @@ export function BudgetBar({ item, label, elapsed, onClick }: { item: BudgetItem;
       <div className="flex items-end justify-between text-sm mb-1">
         <div>
           <div className="text-xs text-muted-foreground">{label}{item.isOverride ? " · this period" : ""}</div>
-          <div className="font-medium tabular">{fmt(item.limit)}</div>
+          <div className="font-medium tabular">{fmt(item.limit)} <span className="text-xs font-normal text-muted-foreground">budget</span></div>
         </div>
         <div className="text-right text-xs">
-          <div className={cn("font-medium", over ? "text-expense" : "text-income")}>{Math.round(ratio * 100)}%</div>
+          <div className={cn("font-medium", over ? "text-expense" : warn ? "text-expense/80" : "text-income")}>{Math.round(ratio * 100)}%</div>
         </div>
       </div>
-      <div className="relative h-5 rounded bg-muted overflow-hidden">
+      <div className="relative h-5 rounded bg-muted overflow-hidden" role="progressbar" aria-label={`${label} budget used`}
+        aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(ratio * 100)}
+        aria-valuetext={`${Math.round(ratio * 100)}% used, ${Math.round(elapsed * 100)}% of the period gone${over ? ", over budget" : warn ? ", ahead of pace" : ""}`}>
         <div className={cn("h-full rounded transition-all", over ? "bg-expense" : warn ? "bg-expense/70" : "bg-income")} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
         <div className="absolute top-0 bottom-0 w-0.5 bg-foreground/70" style={{ left: `${Math.min(100, elapsed * 100)}%` }} title="Today" />
       </div>
       <div className="flex justify-between text-xs mt-1">
-        <Money amount={item.spent} kind={over ? "expense" : "income"} />
-        <Money amount={item.remaining} className={item.remaining < 0 ? "text-expense" : "text-muted-foreground"} />
+        <span><Money amount={item.spent} kind={over ? "expense" : "income"} /> <span className="text-muted-foreground">spent</span></span>
+        <span className="text-muted-foreground"><Money amount={Math.abs(item.remaining)} className={item.remaining < 0 ? "text-expense" : undefined} /> {item.remaining < 0 ? "over" : "left"}</span>
       </div>
     </Wrapper>
   );
