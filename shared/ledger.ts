@@ -190,6 +190,54 @@ export function cardStatus(
   return { payable, outstanding, owed };
 }
 
+/** When a card's payable (the statement that closed last) is due: the first payment day from the start of the current cycle. */
+export function statementDue(account: { settlementDay?: number; paymentDay?: number; noDueTracking?: boolean }, today: ISODate = todayISO()): ISODate | undefined {
+  // paid outside UnMoney: the payable never comes down here, so a due date would only ever say "Overdue"
+  if (account.noDueTracking) return undefined;
+  return account.paymentDay ? nextPaymentDate(account.paymentDay, cycleStart(account.settlementDay ?? 1, today)) : undefined;
+}
+
+export type StatementCycle = { from: ISODate; to: ISODate; due?: ISODate; open: boolean };
+
+/** The settlement date in the month `n` months from `date`'s month. */
+function settlementIn(date: ISODate, n: number, settlementDay: number): ISODate {
+  const p = parts(addMonths(make(parts(date).y, parts(date).m, 1), n));
+  return make(p.y, p.m, clampDay(p.y, p.m, settlementDay));
+}
+
+/**
+ * A card's statement cycles, newest first: each runs from a settlement day to the day before the
+ * next one, and is due on the first payment day after it closes (as statementDue). The first is the
+ * open cycle, the one today is in.
+ */
+export function statementCycles(account: { settlementDay?: number; paymentDay?: number }, today: ISODate, count: number): StatementCycle[] {
+  const s = account.settlementDay ?? 1;
+  const out: StatementCycle[] = [];
+  let from = cycleStart(s, today);
+  for (let i = 0; i < count; i++) {
+    const next = settlementIn(from, 1, s);
+    const to = make(parts(next).y, parts(next).m, parts(next).d - 1);
+    out.push({ from, to, due: account.paymentDay ? nextPaymentDate(account.paymentDay, next) : undefined, open: i === 0 });
+    from = settlementIn(from, -1, s);
+  }
+  return out;
+}
+
+/** What a card's entries in a cycle add up to: charges (spending, fees, transfers out, less refunds) and payments into it. */
+export function cycleTotals(cardId: string, txs: TxLike[], cycle: { from: ISODate; to: ISODate }): { charges: number; payments: number } {
+  let charges = 0;
+  let payments = 0;
+  for (const tx of txs) {
+    if (tx.date < cycle.from || tx.date > cycle.to) continue;
+    if (tx.accountId === cardId) {
+      if (tx.type === "expense") charges += tx.amount;
+      else if (tx.type === "transfer") charges += tx.amount + (tx.feeAmount ?? 0);
+      else if (tx.type === "income") payments += tx.amount;
+    } else if (tx.type === "transfer" && tx.toAccountId === cardId) payments += tx.amount;
+  }
+  return { charges, payments };
+}
+
 /** Next payment date for a card. */
 export function nextPaymentDate(paymentDay: number, today: ISODate = todayISO()): ISODate {
   const { y, m, d } = parts(today);

@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { Bookmark, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Tags, WalletCards } from "lucide-react";
+import { Bookmark, CalendarClock, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Tags, WalletCards } from "lucide-react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { ReactNode } from "react";
@@ -65,6 +65,9 @@ export default function SettingsPage() {
           {link(<PiggyBank />, "Budgets", "/budget/settings")}
           {link(<Bookmark />, "Bookmarks", "/bookmarks", { hint: "Entries you save to add again" })}
         </Section>
+        <Section title="Look ahead">
+          {link(<CalendarClock />, "Bills & subscriptions", "/upcoming", { hint: "What's due in the next 30 days" })}
+        </Section>
         <Section title="Look back">
           {link(<Sparkles />, "Recaps", "/recaps", { hint: "Every month and year as a short story", under: ["/recap"] })}
         </Section>
@@ -76,7 +79,8 @@ export default function SettingsPage() {
         <Section title="Data">
           {link(<HardDriveDownload />, "Backup & export", "/settings/backup")}
           {link(<FileInput />, "Import", "/import", { hint: "Money Manager or a bank statement" })}
-          {link(<Mail />, "Gmail", "/settings/gmail", { value: gmail?.connected ? gmail.status === "reauth" ? "Reconnect" : gmail.open ? `${gmail.open} to review` : "On" : "Off", hint: "Turn money mail into entries", under: ["/gmail"] })}
+          {/* with drafts waiting, the row goes straight to them; their page links to the settings */}
+          {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && gmail.open ? "/gmail" : "/settings/gmail", { value: gmail?.connected ? gmail.status === "reauth" ? "Reconnect" : gmail.open ? `${gmail.open} to review` : "On" : "Off", hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
         </Section>
         <Section>
           <DeleteAccountRow />

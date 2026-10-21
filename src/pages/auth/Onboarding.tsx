@@ -1,6 +1,8 @@
-import { useOp } from "@/lib/store";
+import { useOp, useStore } from "@/lib/store";
 import { useMemo, useState } from "react";
-import { CURRENCIES } from "../../../shared/currencies";
+import { useAuthActions } from "@convex-dev/auth/react";
+import { CURRENCIES, guessCurrency } from "../../../shared/currencies";
+import { clearUnlock } from "@/lib/passcode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -9,12 +11,23 @@ import { toast } from "sonner";
 export default function Onboarding() {
   const complete = useOp("settings.completeOnboarding");
   const [q, setQ] = useState("");
-  const [code, setCode] = useState("USD");
+  // where the user seems to be, picked and listed first; USD when nothing says
+  const [guess] = useState(() => guessCurrency(navigator.languages ?? [navigator.language], Intl.DateTimeFormat().resolvedOptions().timeZone));
+  const [code, setCode] = useState(guess ?? "USD");
   const [busy, setBusy] = useState(false);
+  const { user, clearLocal } = useStore();
+  const { signOut } = useAuthActions();
   const list = useMemo(() => {
     const l = q.trim().toLowerCase();
-    return CURRENCIES.filter((c) => !l || c.code.toLowerCase().includes(l) || c.name.toLowerCase().includes(l));
-  }, [q]);
+    const found = CURRENCIES.filter((c) => !l || c.code.toLowerCase().includes(l) || c.name.toLowerCase().includes(l));
+    return guess ? [...found.filter((c) => c.code === guess), ...found.filter((c) => c.code !== guess)] : found;
+  }, [q, guess]);
+  // signed in with the wrong Google account: nothing is set up yet, so nothing to lose
+  async function notMe() {
+    clearUnlock();
+    await clearLocal();
+    await signOut();
+  }
 
   return (
     <div className="min-h-dvh flex items-center justify-center p-6">
@@ -50,6 +63,10 @@ export default function Onboarding() {
         >
           Start with {code}
         </Button>
+        <p className="mt-4 text-center text-xs text-muted-foreground">
+          {user?.email ? <>Signed in as {user.email}. </> : null}
+          <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => void notMe()}>Not you? Sign out</button>
+        </p>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 # Spec: Import a bank statement (CSV / Excel with column mapping)
 
-Status: built as specced, awaiting review · 2026-10-21 (roadmap C9 in docs/reviews/2026-10-21-product-review.md, size L)
+Status: approved and built · 2026-10-21 (roadmap C9 in docs/reviews/2026-10-21-product-review.md, size L)
 
 ## 1. The idea
 

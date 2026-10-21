@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Info, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,13 +45,22 @@ export function EmptyState({ title, hint, action, className }: { title: string; 
   );
 }
 
-export function Fab({ onClick, label = "Add", className, icon, title }: { onClick: (e: MouseEvent<HTMLButtonElement>) => void; label?: string; className?: string; icon?: ReactNode; title?: string }) {
+/** `onHold`: holding the button down (or a right-click) does something else, e.g. the quick-add sheet; the click after the hold is swallowed. */
+export function Fab({ onClick, onHold, label = "Add", className, icon, title }: { onClick: (e: MouseEvent<HTMLButtonElement>) => void; onHold?: () => void; label?: string; className?: string; icon?: ReactNode; title?: string }) {
+  const press = useRef<{ timer: number; fired: boolean }>({ timer: 0, fired: false });
+  const cancel = () => window.clearTimeout(press.current.timer);
+  const hold = onHold ? {
+    onPointerDown: () => { press.current.fired = false; cancel(); press.current.timer = window.setTimeout(() => { press.current.fired = true; navigator.vibrate?.(10); onHold(); }, 450); },
+    onPointerUp: cancel, onPointerLeave: cancel, onPointerCancel: cancel,
+    onContextMenu: (e: MouseEvent) => { e.preventDefault(); cancel(); if (!press.current.fired) onHold(); press.current.fired = true; },
+  } : {};
   return (
     <Button
       aria-label={label}
       title={title}
-      onClick={onClick}
-      className={cn("fixed bottom-[calc(var(--tabbar-h)+1.5rem)] right-4 md:bottom-8 md:right-8 z-30 size-14 rounded-full shadow-lg", className)}
+      onClick={(e) => { if (press.current.fired) { press.current.fired = false; return; } onClick(e); }}
+      {...hold}
+      className={cn("fixed bottom-[calc(var(--tabbar-h)+1.5rem)] right-4 md:bottom-8 md:right-8 z-30 size-14 rounded-full shadow-lg", onHold && "select-none [-webkit-touch-callout:none]", className)}
       size="icon"
     >
       {icon ?? <Plus className="size-6" />}

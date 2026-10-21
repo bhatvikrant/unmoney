@@ -1,7 +1,7 @@
 import { useSearchParams } from "react-router";
 import { useApp } from "@/lib/app";
-import { addDays, parts, todayISO } from "../../../shared/dates";
-import { monthKey, monthKeyForDate, monthRange, parseMonthKey, shiftMonthKey, weekRange, yearRange, type Range } from "../../../shared/period";
+import { addDays, todayISO } from "../../../shared/dates";
+import { monthKey, monthKeyForDate, monthRange, parseMonthKey, periodKey, shiftMonthKey, weekRange, yearRange, type Range } from "../../../shared/period";
 import { monthLabel, dateLabel } from "@/lib/format";
 
 export type StatPeriod = "weekly" | "monthly" | "yearly" | "custom";
@@ -14,7 +14,8 @@ export function useStatPeriod() {
   const today = todayISO();
   const month = sp.get("month") ?? monthKeyForDate(today, settings.monthStartDay);
   const week = sp.get("week") ?? weekRange(today, settings.weekStartDay).from;
-  const year = Number(sp.get("year") ?? parts(today).y);
+  // the logical year: with month start 25, 1–24 Jan still belongs to the year before
+  const year = Number(sp.get("year") ?? periodKey("yearly", today, settings.monthStartDay, settings.weekStartDay));
   const from = sp.get("from") ?? monthRange(month, settings.monthStartDay).from;
   const to = sp.get("to") ?? monthRange(month, settings.monthStartDay).to;
   const set = (patch: Record<string, string>) => { const n = new URLSearchParams(sp); for (const [k, v] of Object.entries(patch)) n.set(k, v); setSp(n, { replace: true }); };

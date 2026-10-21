@@ -58,6 +58,33 @@ test("a chunked restore ends up exactly where the one-shot restore did", () => {
   expect(chunked.repeats.length).toBe(oneShot.repeats.length);
 });
 
+test("restore refuses a file that would only wipe the ledger", () => {
+  const s = ledger();
+  const data = JSON.parse(JSON.stringify(backupExport(s))) as BackupData;
+  for (const bad of [{ version: 1 }, { ...data, settings: undefined }, { ...data, accounts: [] }, { ...data, version: 2 }]) {
+    expect(() => run(s, "backup.restore", { data: bad })).toThrow(/backup/);
+  }
+  expect(() => run(s, "backup.restore", { data })).not.toThrow();
+});
+
+test("a large restore removes the old entries only after the rest is in, skipping any the server already swept", () => {
+  const source = ledger();
+  const data = JSON.parse(JSON.stringify(backupExport(source))) as BackupData;
+  const fresh = run(emptySnapshot(), "settings.completeOnboarding", { currency: "USD" }).snap;
+  const food = fresh.categories.find((c) => c.name === "Food")!._id;
+  const target = run(fresh, "transactions.create", { type: "expense", accountId: fresh.accounts[0]._id, categoryId: food, amount: 1, note: "old", tags: [], photoIds: [], date: "2026-01-01" }).snap;
+  const oneShot = run(target, "backup.restore", { data }).snap;
+
+  const restored = run(target, "backup.restore", { data: { ...data, transactions: [] }, entries: false });
+  let chunked = restored.snap;
+  const old = target.transactions.map((t) => t._id);
+  // without ifPresent an entry that is already gone refuses the chunk
+  expect(() => run(chunked, "transactions.bulkRemove", { ids: [...old, "gone"] })).toThrow();
+  chunked = run(chunked, "transactions.bulkRemove", { ids: [...old, "gone"], ifPresent: true }).snap;
+  chunked = run(chunked, "transactions.restoreRows", { rows: restoreRowsFrom(data, restored.result as RestoreIds), bookmarks: (restored.result as RestoreIds).bookmarks }).snap;
+  expect(describe(chunked)).toEqual(describe(oneShot));
+});
+
 test("rescaling in chunks matches changing currency in one go", () => {
   const source = ledger();
   const oneShot = run(source, "settings.changeMainCurrency", { code: "JPY", keepData: true }).snap;
@@ -137,4 +164,17 @@ test("a tidy-up undone after a change of decimals puts budgets back at the new s
   const record = s.categoryCleanups[0];
   s = run(s, "categories.undoCleanup", { id: record._id }).snap;
   expect(s.budgets.find((b) => b.categoryId === social)!.amount).toBe(200);
+});
+
+test("a backup leaves the passcode out, and a restore keeps the passcode the account has now", () => {
+  let old = run(ledger(), "settings.setPasscode", { hash: "old-hash", salt: "old-salt" }).snap;
+  const exported = backupExport(old);
+  expect(exported.settings).not.toHaveProperty("passcodeHash");
+  expect(exported.settings).not.toHaveProperty("passcodeSalt");
+  // a backup made before this, which still carries a PIN hash
+  const data = JSON.parse(JSON.stringify({ ...exported, settings: { ...exported.settings, passcodeHash: "old-hash", passcodeSalt: "old-salt" } })) as BackupData;
+  old = run(old, "settings.setPasscode", { hash: "new-hash", salt: "new-salt" }).snap;
+  expect(run(old, "backup.restore", { data }).snap.settings[0]).toMatchObject({ passcodeHash: "new-hash", passcodeSalt: "new-salt" });
+  const unlocked = run(old, "settings.setPasscode", {}).snap;
+  expect(run(unlocked, "backup.restore", { data }).snap.settings[0].passcodeHash).toBeUndefined();
 });

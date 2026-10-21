@@ -18,6 +18,18 @@ import { Money } from "@/components/shell/Money";
 import { cn } from "@/lib/utils";
 import { dateLabel, monthLabel } from "@/lib/format";
 
+/** What was kept of the income: "Saved X (Y%)", or what spending went over it. */
+function SavedLine({ income, expense }: { income: number; expense: number }) {
+  const net = income - expense;
+  return (
+    <div className="flex items-center justify-center gap-1 border-b py-1.5 text-xs text-muted-foreground">
+      <span>{net >= 0 ? "Saved" : "Overspent"}</span>
+      <Money amount={Math.abs(net)} kind={net >= 0 ? "income" : "expense"} />
+      {income > 0 ? <span>({Math.round((net / income) * 100)}% of income)</span> : null}
+    </div>
+  );
+}
+
 export default function StatsPage() {
   const nav = useNavigate();
   const { pathname } = useLocation();
@@ -29,6 +41,8 @@ export default function StatsPage() {
   const setParam = (k: string, v: string, fallback: string) => setSp((prev) => { const n = new URLSearchParams(prev); if (v === fallback) n.delete(k); else n.set(k, v); return n; }, { replace: true });
   const setType = (t: "income" | "expense") => setParam("type", t, "expense");
   const setMode = (m: "list" | "trend") => setParam("mode", m, "list");
+  // the detail keeps this period (its week, year or custom range), with the Income / Expenses tab
+  const categoryQuery = (() => { const n = new URLSearchParams(sp); n.set("type", type); n.set("period", p.period); n.set("from", p.range.from); n.set("to", p.range.to); return n.toString(); })();
   const view = useView();
   const expense = useMemo(() => statsByCategory(view, p.range.from, p.range.to, "expense"), [view, p.range.from, p.range.to]);
   const income = useMemo(() => statsByCategory(view, p.range.from, p.range.to, "income"), [view, p.range.from, p.range.to]);
@@ -60,6 +74,7 @@ export default function StatsPage() {
             </button>
           ))}
         </div>
+        {income.total || expense.total ? <SavedLine income={income.total} expense={expense.total} /> : null}
         {recap ? (
           <div className="border-b bg-card">
             <Row icon={<Sparkles />} label={`${longMonth(p.month)} recap`} hint={`${recap.cards.length} cards · what you spent, where, what changed`} right={<ChevronRight className="size-4 text-muted-foreground" />} onClick={() => nav(`/recap/${p.month}`)} />
@@ -81,7 +96,7 @@ export default function StatsPage() {
             <div className="px-2 py-2">{data ? <CategoryPie items={data.items} /> : <div className="h-56" />}</div>
             <div className="bg-card border-y">
               {data?.items.map((it, i) => (
-                <button key={it.id} type="button" aria-current={pathname === `/stats/c/${encodeURIComponent(it.id)}` || undefined} onClick={() => nav(`/stats/c/${encodeURIComponent(it.id)}?type=${type}&from=${p.range.from}&to=${p.range.to}&period=${p.period}&month=${p.month}`)} className="w-full flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm hover:bg-accent/40 text-left aria-[current]:bg-accent">
+                <button key={it.id} type="button" aria-current={pathname === `/stats/c/${encodeURIComponent(it.id)}` || undefined} onClick={() => nav(`/stats/c/${encodeURIComponent(it.id)}?${categoryQuery}`)} className="w-full flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm hover:bg-accent/40 text-left aria-[current]:bg-accent">
                   <span className="flex items-center gap-1.5 w-14 shrink-0 text-[11px] tabular text-muted-foreground"><span className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ background: colorAt(i, data.items.length) }} /><span>{Math.round(it.pct * 100)}%</span></span>
                   <span className="flex-1 truncate">{it.name}</span>
                   <Money amount={it.amount} kind={type} />

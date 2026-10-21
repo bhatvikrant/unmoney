@@ -193,6 +193,20 @@ test("budgets ride on the in-vs-out card, or get a card of their own without inc
   expect(card(withIncome.cards, "inout")!.budgets).toEqual({ held: 1, total: 3, worst: { name: "Transport", over: 88500 } });
 });
 
+test("a recap only judges the budgets that existed in its month", () => {
+  const f = fresh();
+  september(f);
+  // made in October: September is not held against it, unless September got a limit of its own
+  const at = (iso: string) => (snap: Snapshot, kind: string, args: unknown) => applyOp(snap, { id: `op${++n}`, kind: kind as never, args, at: new Date(iso).getTime() }, ctx);
+  let s = run(f.snap, "budgets.upsert", { period: "monthly", categoryId: f.cat("Food"), amount: 10000 });
+  const late = at("2026-10-05T10:00:00");
+  const r = late(s, "budgets.upsert", { period: "monthly", categoryId: f.cat("Transport"), amount: 100000 });
+  s = r.snap;
+  expect(card(monthRecap(s, "2026-09")!.cards, "budgets")!.budgets).toEqual({ held: 0, total: 1, worst: { name: "Food", over: 5600 } });
+  s = late(s, "budgets.setOverride", { id: r.result, key: "2026-09", amount: 50000 }).snap;
+  expect(card(monthRecap(s, "2026-09")!.cards, "budgets")!.budgets).toEqual({ held: 0, total: 2, worst: { name: "Transport", over: 138500 } });
+});
+
 test("with monthStartDay 25 the recap covers 25 Sep to 24 Oct and compares the same logical months", () => {
   const f = fresh(25);
   for (let i = 0; i < 5; i++) f.expense(`2026-09-2${5 + i}`, 1000, "Food", "Coffee");

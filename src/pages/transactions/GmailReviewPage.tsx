@@ -1,6 +1,7 @@
 /**
  * /gmail: the entries Gmail found, as a list to pick from before anything is imported. Every one
- * starts ticked, except those that look like an entry the user already has; the bar at the bottom
+ * starts ticked, except those that look like an entry the user already has and ones the AI read
+ * from a sender not on the allowlist; the bar at the bottom
  * says how many are ticked and what they add up to, and imports them in one go. A gap the mail
  * left (no payment method, no category) is filled with the default method and "Other", and the
  * row says so; tapping a row opens it in the entry form to change anything first. Unticked ones
@@ -8,12 +9,17 @@
  */
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { Link2, Mail, Settings, X } from "lucide-react";
+import { BellOff, Link2, Mail, Settings, X } from "lucide-react";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import { matchesSender } from "../../../shared/gmail/query";
+import { senderAddress } from "../../../shared/gmail/mail";
 import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useOp, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { useOpenEntry } from "@/lib/nav";
+import { offerUndo } from "@/lib/undo";
 import { useShortcuts } from "@/lib/shortcuts";
 import { dateLabel } from "@/lib/format";
 import { draftMatches, draftsOpen } from "../../../shared/views";
@@ -21,7 +27,7 @@ import { importable, type Importable } from "../../../shared/gmail/importable";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { useBottomBar } from "@/components/shell/SplitLayout";
 import { EmptyState, Section } from "@/components/shell/misc";
-import { Money } from "@/components/shell/Money";
+import { EntryMoney } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -42,6 +48,9 @@ export default function GmailReviewPage() {
   const accept = useOp("drafts.accept");
   const dismiss = useOp("drafts.dismiss");
   const link = useOp("drafts.link");
+  const gmail = useQuery(api.gmail.status);
+  const muteSender = useMutation(api.gmail.muteSender);
+  const reopen = useOp("drafts.reopen");
   const entryOpen = /\/t\//.test(useLocation().pathname);
   const [busy, setBusy] = useState(false);
 
@@ -57,11 +66,14 @@ export default function GmailReviewPage() {
   const fresh = useMemo(() => items.filter((i) => !i.matched), [items]);
   const maybeAdded = useMemo(() => items.filter((i) => i.matched), [items]);
 
-  // Rows the user flipped away from their default: fresh ones start ticked, "already added?" ones
-  // unticked. Keeping the flips (not the ticks) means mail that arrives while the page is open
-  // shows up ticked too.
+  // A guess by the AI from a sender the user never listed (Purchases, a money word in the subject) is
+  // the likeliest to be wrong: it starts unticked, like an "already added?" one.
+  const unknownSender = (d: Draft) => d.how === "ai" && !!gmail && !matchesSender(d.from, gmail.senders);
+  const defaultOn = (i: Item) => !i.matched && !unknownSender(i.draft);
+  // Rows the user flipped away from their default. Keeping the flips (not the ticks) means mail
+  // that arrives while the page is open shows up as its default too.
   const [flipped, setFlipped] = useState<Set<string>>(() => new Set());
-  const isOn = (i: Item) => !!i.ready && (!i.matched !== flipped.has(i.draft._id));
+  const isOn = (i: Item) => !!i.ready && (defaultOn(i) !== flipped.has(i.draft._id));
   const toggle = (i: Item) => setFlipped((s) => { const n = new Set(s); if (n.has(i.draft._id)) n.delete(i.draft._id); else n.add(i.draft._id); return n; });
   const selected = items.filter(isOn);
   // "Select all" is about the new entries: the "maybe already added" ones keep their own ticks
@@ -69,7 +81,7 @@ export default function GmailReviewPage() {
   const allOn = selectable.length > 0 && selectable.every(isOn);
   const setAll = (on: boolean) => setFlipped((s) => {
     const n = new Set([...s].filter((id) => !selectable.some((i) => i.draft._id === id)));
-    if (!on) for (const i of selectable) n.add(i.draft._id);
+    for (const i of selectable) if (defaultOn(i) !== on) n.add(i.draft._id);
     return n;
   });
   let out = 0, inn = 0;
@@ -80,24 +92,43 @@ export default function GmailReviewPage() {
 
   async function importSelected() {
     setBusy(true);
-    let done = 0, failed = 0;
+    let failed = 0;
+    const ids: Id<"drafts">[] = [];
+    const made: Id<"transactions">[] = [];
     for (const i of selected) {
-      try { await accept({ id: i.draft._id, ...i.ready!.fields }); done++; } catch { failed++; }
+      try { made.push(await accept({ id: i.draft._id, ...i.ready!.fields })); ids.push(i.draft._id); } catch { failed++; }
     }
     setBusy(false);
     // imported rows leave the list; the ones the user unticked stay unticked
-    if (done) toast.success(`Imported ${plural(done, "entry", "entries")}`, { action: { label: "Open ledger", onClick: () => nav("/") } });
+    if (ids.length) offerUndo(`Imported ${plural(ids.length, "entry", "entries")}`, () => reopen({ ids, transactionIds: made }));
     if (failed) toast.error(`${plural(failed, "entry", "entries")} could not be imported. Open ${failed === 1 ? "it" : "them"} to check.`);
   }
   async function dismissSelected() {
     const n = selected.length;
     if (!(await confirm({ title: `Dismiss ${plural(n, "entry", "entries")}?`, description: "They won't be imported, and these mails won't be offered again.", action: "Dismiss" }))) return;
-    await dismiss({ ids: selected.map((i) => i.draft._id) });
-    toast(`Dismissed ${plural(n, "entry", "entries")}`);
+    const ids = selected.map((i) => i.draft._id);
+    await dismiss({ ids });
+    offerUndo(`Dismissed ${plural(n, "entry", "entries")}`, () => reopen({ ids }));
   }
   async function dismissOne(d: Draft) {
     await dismiss({ ids: [d._id] });
-    toast("Dismissed. This mail won't be offered again.");
+    offerUndo("Dismissed. This mail won't be offered again.", () => reopen({ ids: [d._id] }));
+  }
+  /** "Not money mail from this sender": it is never read again, and what it sent that is still waiting goes. */
+  async function mute(d: Draft) {
+    const address = senderAddress(d.from);
+    const theirs = items.filter((i) => senderAddress(i.draft.from) === address).map((i) => i.draft._id);
+    const ok = await confirm({
+      title: `Stop reading mail from ${address}?`,
+      description: `${theirs.length > 1 ? `Its ${theirs.length} entries waiting here are dismissed, and n` : "This entry is dismissed, and n"}ew mail from it is never read. Bring it back in Settings › Gmail.`,
+      action: "Stop reading",
+    });
+    if (!ok) return;
+    try {
+      await muteSender({ from: d.from, muted: true });
+      await dismiss({ ids: theirs });
+      offerUndo(`Muted ${address}`, () => Promise.all([muteSender({ from: d.from, muted: false }), reopen({ ids: theirs })]));
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not mute it. Check your connection."); }
   }
   async function sameEntry(d: Draft, txId: Id<"transactions">) {
     await link({ id: d._id, transactionId: txId });
@@ -123,7 +154,8 @@ export default function GmailReviewPage() {
   const row = (i: Item) => (
     <ReviewRow key={i.draft._id} item={i} on={isOn(i)} focused={cursor === i.draft._id}
       onToggle={() => toggle(i)} onOpen={() => openEntry("new", { draft: i.draft._id })} onFocus={() => setCursor(i.draft._id)}
-      onDismiss={() => void dismissOne(i.draft)} onSame={i.matched ? () => void sameEntry(i.draft, i.matched!._id) : undefined} />
+      onDismiss={() => void dismissOne(i.draft)} onSame={i.matched ? () => void sameEntry(i.draft, i.matched!._id) : undefined}
+      onMute={() => void mute(i.draft)} unknown={unknownSender(i.draft)} />
   );
   const importLabel = busy ? "Importing…" : selected.length > 1 && selected.length === items.length ? `Import all ${selected.length}` : selected.length ? `Import ${selected.length}` : "Import";
 
@@ -179,8 +211,11 @@ export default function GmailReviewPage() {
   );
 }
 
-function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, onSame }: {
+function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, onSame, onMute, unknown }: {
   item: Item; on: boolean; focused: boolean; onToggle: () => void; onOpen: () => void; onFocus: () => void; onDismiss: () => void; onSame?: () => void;
+  onMute: () => void;
+  /** Read by the AI from a sender not on the allowlist: it starts unticked, and says why. */
+  unknown?: boolean;
 }) {
   const { accountName, categoryLabel, fmt } = useApp();
   const { draft: d, ready, matched } = item;
@@ -190,6 +225,8 @@ function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, on
   const label = isTransfer ? "Transfer" : f?.categoryId ? categoryLabel(f) : "No category";
   const method = isTransfer ? (p.accountId && p.toAccountId ? `${accountName(p.accountId)} → ${accountName(p.toAccountId)}` : "") : f ? accountName(f.accountId) : "";
   const filled = ready?.filled ?? [];
+  // who sent it: the main reason to trust a row, above all one read by AI
+  const domain = senderAddress(d.from).split("@")[1] ?? "";
   const guess = (what: "method" | "category") => filled.includes(what) && "text-amber-600 dark:text-amber-400";
   return (
     <div className={cn("flex items-start gap-3 border-b px-4 py-2.5 text-sm last:border-b-0", focused && "bg-accent/40")} onMouseEnter={onFocus}>
@@ -202,20 +239,23 @@ function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, on
         <div className="min-w-0 flex-1">
           <div className="truncate">{p.note || label}</div>
           <div className="truncate text-xs text-muted-foreground">
+            {domain ? <span title={d.from}>{domain} · </span> : null}
             {method ? <span className={cn(guess("method"))}>{method}</span> : <span className="text-amber-600 dark:text-amber-400">Open it to pick both methods</span>}
             {p.description ? ` · ${p.description}` : ""}
           </div>
           {filled.length ? <div className="text-[11px] text-amber-600 dark:text-amber-400">{filled.length === 2 ? "Method and category" : filled[0] === "method" ? "Method" : "Category"} filled in; tap to change</div> : null}
+          {unknown ? <div className="mt-0.5 truncate text-xs text-muted-foreground" title={senderAddress(d.from)}>Sender not on your list, so unticked</div> : null}
           {matched ? <div className="mt-0.5 truncate text-xs text-muted-foreground">Looks like: {matched.note || categoryLabel(matched) || "an entry"} · {fmt(matched.amount)} · {dateLabel(matched.date)}</div> : null}
         </div>
         <div className="shrink-0 text-right">
-          <Money amount={p.amount} kind={p.type === "income" ? "income" : p.type === "expense" ? "expense" : "transfer"} />
+          <EntryMoney type={p.type} amount={p.amount} />
           {d.confidence !== "high" ? <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{d.confidence}</div> : null}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
         <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Dismiss" title="Dismiss (x)" onClick={onDismiss}><X className="size-4" /></Button>
         {onSame ? <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Same entry: link it" title="Same entry: link it" onClick={onSame}><Link2 className="size-4" /></Button> : null}
+        <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Not money mail from this sender" title="Not money mail from this sender" onClick={onMute}><BellOff className="size-4" /></Button>
       </div>
     </div>
   );

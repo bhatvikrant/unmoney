@@ -67,7 +67,7 @@ When it is a transaction:
 - merchant: the shop, service or person on the other side, written the way a person would ("Swiggy", not "SWIGGY*ORDER 8812-BLR"). For a salary, the employer. Short.
 - bankName and last4 when the mail names the bank, card or account; channel if it is clear.
 - methodRef: the id of the payment method the money moved on, only when the mail's bank or last 4 digits match one. Otherwise leave it out.
-- categoryRef: the id of the category that fits best, only among the given ones of the right type (expense for debit, income for credit and refund). Leave it out if none fits.
+- categoryRef: the id of the category that fits best, only among the given ones of the right type (expense for debit and refund, income for credit). Leave it out if none fits.
 - confidence: "high" when amount, date and merchant are explicit; "medium" when something was inferred; "low" when unsure.
 - reason: one short phrase.`;
 
@@ -141,7 +141,7 @@ export function validateAiResults(raw: unknown, mails: Mail[], ids: AiIds, categ
     const merchant = typeof r.merchant === "string" ? r.merchant.trim().slice(0, MAX_MERCHANT) : "";
     if (!KINDS.has(kind) || !(amount > 0) || amount > MAX_AMOUNT || !/^[A-Z]{3}$/.test(currency) || !ISO.test(date) || !merchant) { dropped++; continue; }
     if (date < addDays(received, -3) || date > addDays(received, 3)) { dropped++; continue; }
-    const type = kind === "debit" ? "expense" : kind === "cardPayment" ? undefined : "income";
+    const type = kind === "debit" || kind === "refund" ? "expense" : kind === "cardPayment" ? undefined : "income";
     const categoryId = typeof r.categoryRef === "string" ? ids.categories[r.categoryRef] : undefined;
     const accountId = typeof r.methodRef === "string" ? ids.methods[r.methodRef] : undefined;
     const last4 = typeof r.last4 === "string" && /^\d{4}$/.test(r.last4.trim()) ? r.last4.trim() : undefined;

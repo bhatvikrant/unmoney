@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TrendBars } from "./charts";
 import { EmptyState } from "@/components/shell/misc";
+import { useToday } from "@/lib/today";
+import { diffDays } from "../../../shared/dates";
 
 export default function BudgetPage() {
   const nav = useNavigate();
@@ -27,7 +29,21 @@ export default function BudgetPage() {
   const rangeKey = ranges.map((r) => r.key).join(",");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const trend = useMemo(() => (detail ? statsTrend(view, "expense", detail.item.budget.categoryId, ranges) : undefined), [view, detail, rangeKey]);
+  // each bar against its own period's limit (its override and carry), not this period's
+  const limits = useMemo(() => {
+    if (!detail) return undefined;
+    const id = detail.item.budget._id;
+    return ranges.map((r) => { const st = budgetStatus(view, period, r.key); return (st?.total?.budget._id === id ? st.total : st?.perCategory.find((it) => it.budget._id === id))?.limit ?? detail.item.limit; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, detail, period, rangeKey]);
   const label = period === "weekly" ? "Weekly" : period === "yearly" ? "Annual" : "Monthly";
+  // In the current period: what can still go out each day, and where spending at this rate ends up.
+  const today = useToday();
+  const pace = status && status.spentAll && today >= status.range.from && today <= status.range.to && status.elapsed > 0 ? {
+    perDay: status.total && status.total.remaining > 0 ? Math.floor(status.total.remaining / (diffDays(today, status.range.to) + 1)) : null,
+    end: Math.round(status.spentAll / status.elapsed),
+    over: !!status.total && status.spentAll / status.elapsed > status.total.limit,
+  } : null;
   return (
     <>
       <PageHeader title={null} className="border-b-0" sub={<StatsHeaderBar />} />
@@ -36,6 +52,12 @@ export default function BudgetPage() {
           <div>
             <div className="text-xs text-muted-foreground">{status && !status.total ? `Spent (${label}, no total budget)` : `Remaining (${label})`}</div>
             <div className="text-2xl font-semibold tabular">{status?.total ? <Money amount={status.total.remaining} kind={status.total.remaining < 0 ? "expense" : "plain"} /> : status ? <Money amount={status.spentAll} kind="expense" /> : "—"}</div>
+            {pace ? (
+              <div className="text-xs text-muted-foreground">
+                {pace.perDay !== null ? <><Money amount={pace.perDay} muted /> left per day · </> : null}
+                On pace for <Money amount={pace.end} kind={pace.over ? "expense" : "plain"} muted={!pace.over} />
+              </div>
+            ) : null}
           </div>
           <Button variant="secondary" size="sm" onClick={() => nav(`/budget/settings?period=${period}&key=${key}`)}>Budget setting ›</Button>
         </div>
@@ -50,8 +72,8 @@ export default function BudgetPage() {
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>{detail?.label}</DialogTitle></DialogHeader>
-          {trend && detail ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} limit={detail.item.limit} /> : <div className="h-48" />}
-          {detail ? <div className="text-xs text-muted-foreground">Budget <Money amount={detail.item.limit} /> · bars turn red above it.</div> : null}
+          {trend && detail ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} limit={detail.item.limit} limits={limits} /> : <div className="h-48" />}
+          {detail ? <div className="text-xs text-muted-foreground">Budget <Money amount={detail.item.limit} /> · bars turn red above their period's budget.</div> : null}
         </DialogContent>
       </Dialog>
     </>

@@ -146,6 +146,7 @@ export default function ImportPage() {
                 ))}
               </Section>
             ) : null}
+            <RecentImports />
             <MoneyManagerSteps />
             <Section title="Or pick the file">
               <Row
@@ -169,6 +170,43 @@ export default function ImportPage() {
         )}
       </Page>
     </>
+  );
+}
+
+/** The last imports, each with Undo: removes the entries it added (payment methods and categories it made stay). */
+function RecentImports() {
+  const view = useView();
+  const { settings } = useApp();
+  const bulk = useBulkOps();
+  const confirm = useConfirm();
+  const list = settings.recentImports ?? [];
+  // what is left of each import now (entries deleted since don't count)
+  const left = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of view.transactions) if (t.importId) m.set(t.importId, (m.get(t.importId) ?? 0) + 1);
+    return m;
+  }, [view.transactions]);
+  if (!list.length) return null;
+  async function undo(id: string, name: string, n: number) {
+    const ok = await confirm({
+      title: `Undo the import of ${name}?`,
+      description: `Its ${n.toLocaleString()} ${n === 1 ? "entry is" : "entries are"} deleted, including any you edited since. Payment methods and categories it created stay. A safety copy is kept on this device for a week (Backup & data).`,
+      action: "Undo import",
+    });
+    if (ok) await bulk.undoImport(id).catch(() => {});
+  }
+  return (
+    <Section title="Recent imports">
+      {list.map((x) => {
+        const n = left.get(x.id) ?? 0;
+        const when = new Date(x.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+        return (
+          <Row key={x.id} label={x.name}
+            hint={x.undoneAt ? `${when} · undone` : `${when} · ${n.toLocaleString()} of ${x.count.toLocaleString()} ${x.count === 1 ? "entry" : "entries"} still here`}
+            right={!x.undoneAt && n ? <Button size="sm" variant="outline" onClick={() => void undo(x.id, x.name, n)}>Undo</Button> : null} />
+        );
+      })}
+    </Section>
   );
 }
 
@@ -364,9 +402,11 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
     const dup = new Set(dry.duplicates);
     const rows = loaded.rows.filter((_, i) => !dup.has(i + 1));
     const opIds: string[] = [];
+    // every chunk carries the same batch, so the whole file can be undone at once
+    const batch = { id: `imp_${crypto.randomUUID?.() ?? Date.now().toString(36)}`, name: loaded.name };
     try {
       for (let i = 0; i < rows.length; i += CHUNK) {
-        const { id, result } = await dispatchTracked("transactions.importRows", { rows: rows.slice(i, i + CHUNK), format, newAccounts, createMissing, createAccounts, skipInvalid: true, rowOffset: i });
+        const { id, result } = await dispatchTracked("transactions.importRows", { rows: rows.slice(i, i + CHUNK), format, newAccounts, createMissing, createAccounts, skipInvalid: true, rowOffset: i, batch });
         opIds.push(id);
         inserted += result.inserted;
         setProgress(Math.min(1, (i + CHUNK) / rows.length));
@@ -385,7 +425,10 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
       setBusy(false);
       return;
     }
-    toast.success(`Imported ${inserted} ${inserted === 1 ? "entry" : "entries"}`);
+    toast.success(`Imported ${inserted} ${inserted === 1 ? "entry" : "entries"}`, {
+      duration: 10000,
+      action: { label: "Undo", onClick: () => void bulk.undoImport(batch.id).catch(() => {}) },
+    });
     await onDone();
   }
 
