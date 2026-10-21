@@ -118,6 +118,13 @@ export default defineSchema({
      */
     archivedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
+    /** The day the user last checked this balance against the bank's (accounts.adjustBalance). */
+    reconciledAt: v.optional(v.string()),
+    /**
+     * Made by the app, not the user: "adjustments" is the hidden, left-out-of-totals account that
+     * balance adjustments are transfers from, so they never count as income or spending.
+     */
+    system: v.optional(v.literal("adjustments")),
   })
     .index("by_user", ["userId"])
     .index("by_group", ["groupId"]),

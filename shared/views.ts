@@ -108,16 +108,20 @@ export type AccountGroupRow = { id: string; name: string; group: Doc<"accountGro
 export const NO_GROUP = "none";
 export const NO_GROUP_NAME = "No group";
 /** `groups` holds the methods in use; archived ones are only in `archived` (and `accounts`), and still count in the totals. */
-export type AccountsList = { groups: AccountGroupRow[]; archived: AccountRow[]; accounts: AccountRow[]; assets: number; liabilities: number; total: number };
+export type AccountsList = {
+  groups: AccountGroupRow[]; archived: AccountRow[]; accounts: AccountRow[]; assets: number; liabilities: number; total: number;
+  /** Accounts the app keeps for itself (Balance adjustments): in no list, but their names still show on entries. */
+  system: AccountRow[];
+};
 
 export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
   const ledger = ledgerOf(snap);
   const txs = snap.transactions;
   const balances = computeBalances(txs, ledger, today);
   const upcoming = computeBalances(txs, ledger, undefined, today);
-  const live = snap.accounts.filter((a) => !a.deletedAt).sort((a, b) => a.order - b.order);
+  const live = snap.accounts.filter((a) => !a.deletedAt && !a.system).sort((a, b) => a.order - b.order);
   const liveGroups = groupsList(snap);
-  const rows: AccountRow[] = live.map((a) => {
+  const row = (a: Doc<"accounts">): AccountRow => {
     const kind = ledger.accounts.get(a._id)!.kind as AccountKind;
     const linked = drawsFromLinked({ kind, linkedAccountId: a.linkedAccountId });
     const balance = balances.get(a._id) ?? 0;
@@ -129,7 +133,8 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
       ...a, groupId, kind, linked, balance, upcoming: upcoming.get(a._id) ?? 0, payable: card?.payable, outstanding: card?.outstanding,
       nextPayment: kind === "card" && a.paymentDay ? nextPaymentDate(a.paymentDay, today) : undefined, monthlyUsage,
     };
-  });
+  };
+  const rows = live.map(row);
   let assets = 0;
   let liabilities = 0;
   for (const r of rows) {
@@ -149,7 +154,8 @@ export function accountsList(snap: Snapshot, today = todayISO()): AccountsList {
     ...liveGroups.map((g) => section(g._id, g.name, g, inUse.filter((r) => r.groupId === g._id))),
     section(NO_GROUP, NO_GROUP_NAME, null, inUse.filter((r) => !r.groupId)),
   ].filter((g) => g.accounts.length > 0);
-  return { groups, archived: rows.filter((r) => r.archivedAt), accounts: rows, assets, liabilities, total: assets - liabilities };
+  const system = snap.accounts.filter((a) => !a.deletedAt && a.system).map(row);
+  return { groups, archived: rows.filter((r) => r.archivedAt), accounts: rows, assets, liabilities, total: assets - liabilities, system };
 }
 
 export function accountsListDeleted(snap: Snapshot) {
