@@ -42,6 +42,7 @@ export default function GmailSettings() {
   const disconnect = useAction(api.gmail.disconnect);
   const syncNow = useAction(api.gmail.syncNow);
   const update = useMutation(api.gmail.updateSettings);
+  const claimConnection = useMutation(api.gmail.claimConnection);
   const confirm = useConfirm();
   const [sp, setSp] = useSearchParams();
   const [lookback, setLookback] = useState<Lookback>(30);
@@ -51,24 +52,37 @@ export default function GmailSettings() {
    * Back from connecting: the first check is running, and what it finds opens as a list to pick
    * from. It started as Google sent the browser back, a moment before this page loaded.
    */
-  const [waitingSince] = useState<number | null>(() => (sp.get("gmail") === "connected" ? Date.now() - FIRST_CHECK_SLACK_MS : null));
+  const [waitingSince, setWaitingSince] = useState<number | null>(() => (sp.get("gmail") === "claim" ? Date.now() - FIRST_CHECK_SLACK_MS : null));
   const firstCheck = waitingSince !== null && s?.connected ? s.log.find((l) => l.at >= waitingSince) : undefined;
   const waiting = waitingSince !== null && !!s?.connected && s.lookbackDays !== 0 && !firstCheck;
   const handled = useRef(false);
+  const claimed = useRef<string | null>(null);
 
   // back from Google's consent screen
   useEffect(() => {
     const outcome = sp.get("gmail");
     if (!outcome) return;
-    if (outcome === "connected") toast.success("Gmail connected");
-    else if (outcome === "denied") toast("Gmail was not connected.");
+    if (outcome === "claim") {
+      // Google gave the grant to this browser: attach it, if this account is the one that asked
+      const claim = sp.get("claim") ?? "";
+      // once: a second claim of the same grant (StrictMode runs effects twice) would read as expired
+      if (claimed.current === claim) return;
+      claimed.current = claim;
+      void claimConnection({ claim }).then((r) => {
+        if (r === "connected") return void toast.success("Gmail connected");
+        setWaitingSince(null);
+        if (r === "other-account") toast.error("That Gmail link was started from another UnMoney account, so nothing was connected. To connect your Gmail, use Connect below.", { duration: 10000 });
+        else toast.error("That link has expired. Connect again.");
+      }, () => { setWaitingSince(null); toast.error("Could not connect Gmail. Try again."); });
+    } else if (outcome === "denied") toast("Gmail was not connected.");
     else if (outcome === "no-scope") toast.error("Google didn't give UnMoney access to your mail. Connect again and tick the Gmail box on Google's screen.", { duration: 10000 });
     else if (outcome === "api-off") toast.error("Gmail can't be connected yet: the Gmail API is switched off in UnMoney's Google Cloud project.", { duration: 10000 });
     else toast.error("Could not connect Gmail. Try again.");
     const n = new URLSearchParams(sp);
     n.delete("gmail");
+    n.delete("claim");
     setSp(n, { replace: true });
-  }, [sp, setSp]);
+  }, [sp, setSp, claimConnection]);
 
   // the first check finished: show what it found before anything is imported
   useEffect(() => {

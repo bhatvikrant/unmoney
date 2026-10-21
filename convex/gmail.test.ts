@@ -228,3 +228,40 @@ test("a callback whose Gmail call is refused for setup reasons says which, inste
   expect(await run(answer("openid email", Response.json({}, { status: 403 })) as typeof fetch)).toBe("https://app.test/settings/gmail?gmail=no-scope");
   expect(await t.run((ctx) => ctx.db.query("gmailConnections").collect())).toEqual([]);
 });
+
+test("a grant from Google attaches only to the account that started connecting, once", async () => {
+  const { t, userId } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const attacker = await t.run((ctx) => ctx.db.insert("users", { email: "attacker@example.com" }));
+  const real = globalThis.fetch;
+  const google = (async (input: string | URL | Request) => {
+    const u = String(input instanceof Request ? input.url : input);
+    if (u.startsWith("https://oauth2.googleapis.com/token")) return Response.json({ access_token: "at", refresh_token: "rt", scope: "https://www.googleapis.com/auth/gmail.readonly" });
+    if (u.startsWith("https://gmail.googleapis.com/")) return Response.json({ emailAddress: "victim@gmail.com" });
+    return real(input as RequestInfo);
+  }) as typeof fetch;
+  /** The victim's browser coming back from Google with a link the given account started. */
+  const consent = async (startedBy: Id<"users">) => {
+    const payload = `${startedBy}.30.${Date.now()}`;
+    globalThis.fetch = google;
+    try {
+      const location = (await t.fetch(`/gmail/callback?code=c&state=${payload}.${await sign(payload)}`)).headers.get("Location")!;
+      expect(location).toMatch(/^https:\/\/app\.test\/settings\/gmail\?gmail=claim&claim=/);
+      return new URL(location).searchParams.get("claim")!;
+    } finally { globalThis.fetch = real; }
+  };
+  const victim = t.withIdentity({ subject: `${userId}|session` });
+  const connections = () => t.run((ctx) => ctx.db.query("gmailConnections").collect());
+
+  // the attacker sent the victim their own connect link: the victim's mailbox lands nowhere
+  expect(await victim.mutation(api.gmail.claimConnection, { claim: await consent(attacker) })).toBe("other-account");
+  expect(await connections()).toEqual([]);
+  // nor can the attacker claim it: the claim went to the victim's browser, and it is used up
+  expect(await t.run((ctx) => ctx.db.query("gmailPending").collect())).toEqual([]);
+
+  const claim = await consent(userId);
+  expect(await victim.mutation(api.gmail.claimConnection, { claim })).toBe("connected");
+  expect((await connections()).map((c) => [c.userId, c.email])).toEqual([[userId, "victim@gmail.com"]]);
+  expect(await victim.mutation(api.gmail.claimConnection, { claim })).toBe("expired");
+});
