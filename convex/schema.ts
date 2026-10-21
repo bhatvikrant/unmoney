@@ -335,7 +335,26 @@ export default defineSchema({
     aiCalls: v.number(),
     /** The last 10 checks. */
     log: v.array(v.object({ at: v.number(), scanned: v.number(), found: v.number(), error: v.optional(v.string()), note: v.optional(v.string()) })),
+    /**
+     * Mails read that made no draft (triage dropped them, or the AI said they are not a payment), so
+     * a later check's overlap does not fetch them and ask the AI again. Kept while a window can still reach them.
+     */
+    processed: v.optional(v.array(v.object({ id: v.string(), receivedAt: v.number() }))),
   }).index("by_user", ["userId"]),
+
+  /**
+   * A Gmail grant back from Google, waiting for the app to claim it with the one-time `claim` it was
+   * sent back with. Only the account that started connecting can, so a connect link someone sends
+   * to another person attaches nothing. Dropped after 10 minutes.
+   */
+  gmailPending: defineTable({
+    userId: v.id("users"),
+    claim: v.string(),
+    email: v.string(),
+    refreshTokenEnc: v.string(),
+    iv: v.string(),
+    lookbackDays: v.number(),
+  }).index("by_claim", ["claim"]).index("by_user", ["userId"]),
 
   /**
    * Entries read from mail, waiting for the user to check and save them. Never counted anywhere:

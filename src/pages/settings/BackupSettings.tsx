@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useView } from "@/lib/store";
 import { useBulkOps } from "@/lib/bulk";
 import { backupExport, txCsvRows } from "../../../shared/views";
-import { type BackupData } from "../../../shared/ops";
+import { backupProblem, type BackupData } from "../../../shared/ops";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
@@ -40,13 +40,23 @@ export default function BackupSettings() {
   }
   async function onRestoreFile(file: File | undefined) {
     if (!file) return;
-    if (!(await confirm({ title: "Restore this backup?", description: "Restore replaces ALL current data with the backup. This cannot be undone.", action: "Restore" }))) { if (restoreRef.current) restoreRef.current.value = ""; return; }
+    const reset = () => { if (restoreRef.current) restoreRef.current.value = ""; };
+    let data: BackupData;
+    try { data = JSON.parse(await file.text()) as BackupData; }
+    catch { toast.error("That file is not a backup"); reset(); return; }
+    const problem = backupProblem(data);
+    if (problem) { toast.error(problem); reset(); return; }
+    const made = data.exportedAt && !Number.isNaN(Date.parse(data.exportedAt)) ? new Date(data.exportedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null;
+    const count = (n: number | undefined, one: string, many: string) => `${(n ?? 0).toLocaleString()} ${n === 1 ? one : many}`;
+    const has = `${count(data.transactions?.length, "entry", "entries")}, ${count(data.accounts?.length, "payment method", "payment methods")} and ${count(data.categories?.length, "category", "categories")}`;
+    const description = `${made ? `This backup from ${made}` : "This backup"} has ${has}. Restoring replaces ALL current data with it. This cannot be undone.`;
+    if (!(await confirm({ title: "Restore this backup?", description, action: "Restore" }))) { reset(); return; }
     setBusy(true);
     // the toast from bulk.restore reports how the sync ends
-    try { await bulk.restore(JSON.parse(await file.text()) as BackupData); }
-    catch (e) { if (e instanceof SyntaxError) toast.error("That file is not a backup"); }
+    try { await bulk.restore(data); }
+    catch (e) { if (!(e as { reported?: boolean }).reported) toast.error(e instanceof Error ? e.message : "Could not restore"); }
     setBusy(false);
-    if (restoreRef.current) restoreRef.current.value = "";
+    reset();
   }
   return (
     <>

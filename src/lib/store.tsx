@@ -55,6 +55,8 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toSt
 /** An op that writes many documents is sent on its own, so one server transaction stays within Convex's limits. */
 const isHeavy = (op: QueuedOp) =>
   SEND_ALONE.has(op.kind) || op.kind === "transactions.restoreRows" || ((op.args as { ids?: unknown[] }).ids?.length ?? 0) > 100;
+/** Waits before sending again an op whose send threw (an overload or a deploy, not a rejection); dropped after the last. */
+const RETRY_MS = [2_000, 15_000, 60_000];
 const isAuthError = (e: unknown) => /not signed in|unauthenticated|authentication/i.test(e instanceof Error ? e.message : String(e));
 
 type Live = { [T in Table]: Doc<T>[] | null | undefined };
@@ -120,12 +122,27 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const pumping = useRef(false);
   const liveRef = useRef(false);
   const connectedRef = useRef(false);
+  const meRef = useRef<typeof me>(undefined);
+  meRef.current = me;
+  const attempts = useRef(new Map<string, number>());
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ---- boot from IndexedDB ----
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const r = await local.readAll();
+      let r: Awaited<ReturnType<typeof local.readAll>>;
+      try {
+        r = await local.readAll();
+      } catch {
+        // storage blocked or broken: run from memory, online only, rather than load forever
+        local.runInMemory();
+        if (!cancelled) {
+          setReady(true);
+          toast.warning("This browser won't let UnMoney save data on this device, so it works online only for now.");
+        }
+        return;
+      }
       if (cancelled) return;
       setBase(r.snapshot);
       setMeta(r.meta);
@@ -249,12 +266,13 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   // ---- sync loop ----
   const pump = useCallback(async () => {
-    if (pumping.current) return;
+    if (pumping.current || retryTimer.current) return; // a send that threw is retried on its timer
     pumping.current = true;
     setSyncing(true);
     let limit = BATCH;
     try {
-      while (liveRef.current && connectedRef.current && opsRef.current.length) {
+      // the queue belongs to metaRef's user; until the adopt effect has wiped another user's queue, send nothing
+      while (liveRef.current && connectedRef.current && opsRef.current.length && metaRef.current.userId === meRef.current?.userId) {
         const queue = opsRef.current;
         const first = queue[0];
         const drop = async (op: QueuedOp, error?: string) => {
@@ -319,10 +337,19 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         } catch (e) {
           if (isAuthError(e)) break;
           if (batch.length > 1) { limit = 1; continue; }
+          const tries = attempts.current.get(first.id) ?? 0;
+          if (tries < RETRY_MS.length) {
+            // the reducer's own rejections come back as results, so this is the server being unavailable
+            attempts.current.set(first.id, tries + 1);
+            retryTimer.current = setTimeout(() => { retryTimer.current = null; void pumpRef.current(); }, RETRY_MS[tries]);
+            break;
+          }
+          attempts.current.delete(first.id);
           await drop(first, e instanceof Error ? e.message : "Rejected by the server");
           continue;
         }
         limit = BATCH;
+        for (const b of batch) attempts.current.delete(b.id);
         const idMap: Record<string, string> = {};
         const done: number[] = [];
         const errors: string[] = [];
@@ -349,10 +376,16 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       setSyncing(false);
     }
   }, [convex, mergeIdMap, setQueue, settle]);
+  const pumpRef = useRef(pump);
+  pumpRef.current = pump;
+  useEffect(() => () => {
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    retryTimer.current = null;
+  }, []);
 
   useEffect(() => {
-    if (allLive && conn.isWebSocketConnected && ops.length) void pump();
-  }, [allLive, conn.isWebSocketConnected, ops.length, pump]);
+    if (allLive && conn.isWebSocketConnected && ops.length && meta.userId === me?.userId) void pump();
+  }, [allLive, conn.isWebSocketConnected, ops.length, meta.userId, me?.userId, pump]);
 
   // ---- misc ----
   const rememberPhotoUrls = useCallback((urls: Record<string, string | null>) => {

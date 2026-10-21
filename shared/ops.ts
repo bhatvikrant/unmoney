@@ -197,7 +197,8 @@ export interface Ops {
   "transactions.update": { args: TxFields & { id: Id<"transactions">; scope?: "one" | "future" }; result: void };
   "transactions.remove": { args: { id: Id<"transactions">; scope?: "one" | "future" | "all" }; result: void };
   "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
-  "transactions.bulkRemove": { args: { ids: Id<"transactions">[] }; result: void };
+  /** ifPresent: entries already gone are skipped rather than refusing the lot (a chunked restore, after the server's sweep). */
+  "transactions.bulkRemove": { args: { ids: Id<"transactions">[]; ifPresent?: boolean }; result: void };
   /** Link entries to the shared expense they became on UnSplit (or, with null, unlink them). Entries gone meanwhile are left out. */
   "transactions.setSplit": { args: { ids: Id<"transactions">[]; split: TxSplit | null }; result: void };
   "transactions.importRows": {
@@ -264,8 +265,20 @@ export type RestoreIds = {
   bookmarks?: Record<string, string>;
 };
 
+/**
+ * Why this is not a backup worth replacing everything with, or null. Restore clears every table
+ * first, so another app's JSON or a truncated file must be refused before that.
+ */
+export function backupProblem(data: unknown): string | null {
+  const d = data as BackupData | null;
+  if (!d || typeof d !== "object" || d.version !== 1) return "Not an UnMoney backup file";
+  if (!d.settings || typeof d.settings !== "object" || !Array.isArray(d.accounts) || !d.accounts.length) return "This backup is incomplete: it has no settings or payment methods";
+  return null;
+}
+
 export type BackupData = {
   version: number;
+  exportedAt?: string;
   settings?: Record<string, unknown> | null;
   accountGroups?: Record<string, unknown>[];
   accounts?: Record<string, unknown>[];
@@ -1148,7 +1161,15 @@ const handlers: Handlers = {
     w.patch("accounts", id, { hidden });
   },
   "accounts.remove": (w, { id }) => {
-    w.must("accounts", id);
+    const a = w.must("accounts", id);
+    // A card billed to it, or a debit card or UPI spending from it, would keep moving money in a
+    // method nobody can see: they must point elsewhere first (merge refuses the same way).
+    for (const x of w.snap.accounts) {
+      if (x.deletedAt || x._id === id) continue;
+      const kind = resolveKind(x, w.snap.accountGroups);
+      if (kind === "card" && x.billingAccountId === id) throw new Error(`${x.name} is billed to ${a.name}. Change ${x.name}'s billing account first`);
+      if (drawsFromLinked({ kind, linkedAccountId: x.linkedAccountId }) && x.linkedAccountId === id) throw new Error(`${x.name} spends from ${a.name}. Change or delete ${x.name} first`);
+    }
     w.patch("accounts", id, { deletedAt: Date.now() });
   },
   "accounts.restore": (w, { id }) => {
@@ -1280,7 +1301,10 @@ const handlers: Handlers = {
     if (!from) throw new Error("No billing account set on this card");
     if (!Number.isInteger(amount) || amount <= 0) throw new Error("Amount must be positive");
     if (!isDate(date)) throw new Error("Bad date");
-    w.must("accounts", from);
+    // money from a deleted method would come from nowhere: no visible balance goes down
+    const source = w.must("accounts", from, "Pick an account to pay from");
+    if (source.deletedAt) throw new Error(`${source.name} has been deleted. Pick another account to pay from`);
+    if (from === id || resolveKind(source, w.snap.accountGroups) === "card") throw new Error("A card can't be paid from itself or another credit card");
     return w.insert("transactions", { type: "transfer", date, accountId: from, toAccountId: id, amount, note: `${card.name} payment`, tags: [], photoIds: [] });
   },
 
@@ -1421,8 +1445,9 @@ const handlers: Handlers = {
     }
   },
 
-  "transactions.bulkRemove": (w, { ids }) => {
+  "transactions.bulkRemove": (w, { ids, ifPresent }) => {
     for (const id of ids) {
+      if (ifPresent && !w.get("transactions", id)) continue;
       w.must("transactions", id);
       w.delete("transactions", id);
     }
@@ -1501,9 +1526,11 @@ const handlers: Handlers = {
       if (r.subAmount && r.subCurrency && r.subCurrency.trim().toLowerCase() !== settings.mainCurrency.toLowerCase()) {
         const cur = w.snap.currencies.find((c) => c.code.toLowerCase() === r.subCurrency!.trim().toLowerCase());
         if (cur && cur.code !== settings.mainCurrency) {
+          const subMajor = Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0);
           base.subCurrency = cur.code;
-          base.subAmount = toMinor(Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0), cur.decimals);
-          base.exchangeRate = cur.rate;
+          base.subAmount = toMinor(subMajor, cur.decimals);
+          // the rate the file's two amounts imply, not today's: the editor works the amount out from it
+          base.exchangeRate = subMajor && amountMajor ? subMajor / amountMajor : cur.rate;
         }
       }
       if (type === "transfer") {
@@ -1784,7 +1811,8 @@ const handlers: Handlers = {
   },
 
   "backup.restore": (w, { data, entries = true }) => {
-    if (!data || data.version !== 1) throw new Error("Not an UnMoney backup file");
+    const problem = backupProblem(data);
+    if (problem) throw new Error(problem);
     for (const t of ["notes", "categories", "repeats", "bookmarks", "budgets", "accounts", "accountGroups", "currencies"] as const) w.clear(t);
     if (entries) w.clear("transactions");
     // Backups from before payment methods had their own kind keep it on the group: carry it over.
