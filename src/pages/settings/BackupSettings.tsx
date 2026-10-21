@@ -64,7 +64,7 @@ export default function BackupSettings() {
           <Row label="Export as TSV" hint="Re-importable here" right={<Button size="sm" variant="outline" onClick={() => exportCSV("\t")}>TSV</Button>} />
         </Section>
         <Section title="Import">
-          <Row label="Import from Money Manager, Excel, CSV or TSV" hint="Review what will be added before anything is imported" onClick={() => nav("/import")} right={<ChevronRight className="size-4 text-muted-foreground" />} />
+          <Row label="Import from Money Manager or a bank statement" hint="Excel, CSV or TSV. Review what will be added before anything is imported" onClick={() => nav("/import")} right={<ChevronRight className="size-4 text-muted-foreground" />} />
         </Section>
         <Section title="Danger zone">
           <Row label="Delete all entries" hint="Removes transactions, notes, schedules, bookmarks and budgets. Payment methods and categories stay." right={<Button size="sm" variant="destructive" onClick={async () => { if (await confirm({ title: "Delete all entries?", description: "Removes every transaction, note, schedule, bookmark and budget. Payment methods and categories stay. This cannot be undone.", action: "Delete all" })) void bulk.wipeAll().catch(() => {}); }}>Delete</Button>} />
