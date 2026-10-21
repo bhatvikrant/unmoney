@@ -14,6 +14,8 @@ import { guessMapping, headerNames, mappingReady, toImportRows, type BankMapping
 import { Section } from "@/components/shell/misc";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const MEMORY_KEY = "unmoney.bankMapping";
@@ -65,11 +67,19 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
     return map;
   }, [view.transactions, categoryById]);
   const categoryFor = (note: string, type: "income" | "expense") => history.get(`${type}|${normNote(note)}`);
+  // past spending notes and their categories, for a refund that names its merchant among bank codes
+  const spent = useMemo(() => [...history].filter(([k]) => k.startsWith("expense|")).map(([k, c]) => [k.slice(8), c] as [string, string]), [history]);
 
+  // money in that says refund or reversal becomes a refund (less spending), unless turned off here
+  const [refunds, setRefunds] = useState(true);
   const ready = mappingReady(m) && !!account;
-  const result = useMemo(() => (ready ? toImportRows(grid, m, { account: account!.name, categoryFor }) : { rows: [], noAmount: 0 }),
+  const result = useMemo(() => (ready ? toImportRows(grid, m, { account: account!.name, categoryFor, refunds, spent }) : { rows: [], noAmount: 0, refunds: 0 }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ready, grid, m, account, history]);
+    [ready, grid, m, account, history, refunds, spent]);
+  // how many rows read as refunds with the switch on, so the switch shows only when there are some
+  const refundRows = useMemo(() => (ready && !refunds ? toImportRows(grid, m, { account: account!.name, refunds: true }).refunds : result.refunds),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ready, refunds, result, grid, m, account]);
 
   const set = (patch: Partial<BankMapping>) => setM((x) => ({ ...x, ...patch }));
   const colSelect = (label: string, value: number, onChange: (c: number) => void, optional = false) => (
@@ -148,11 +158,21 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
       </Section>
 
       <Section title={`Preview${result.rows.length ? ` · ${result.rows.length} rows` : ""}`}>
+        {refundRows ? (
+          <div className="flex items-start justify-between gap-3 px-4 py-2.5 border-b">
+            <div>
+              <Label htmlFor="bank-refunds" className="font-normal">Money back is a refund</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">{refundRows} {refundRows === 1 ? "row says" : "rows say"} refund or reversal: {refunds ? "they reduce spending in their category instead of counting as income" : "they come in as income"}.</p>
+            </div>
+            <Switch id="bank-refunds" checked={refunds} onCheckedChange={setRefunds} />
+          </div>
+        ) : null}
         {!ready ? <div className="px-4 py-3 text-sm text-muted-foreground">Pick the date and amount columns to see the entries.</div>
           : !result.rows.length ? <div className="px-4 py-3 text-sm text-muted-foreground">No rows with an amount. Check the amount columns and the header row.</div>
           : result.rows.slice(0, 5).map((r, i) => {
             const minor = toMinor(Math.abs(parseNumber(r.amount) ?? 0), settings.decimals);
-            const income = r.type === "Income";
+            const refund = r.type === "Refund";
+            const income = r.type === "Income" || refund;
             const fromHistory = m.category < 0 && r.category !== "Other";
             return (
               <div key={i} className="flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm">
@@ -160,13 +180,16 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
                   <div className="text-foreground tabular">{r.date}</div>
                   <div className="truncate">{r.category}{fromHistory ? "*" : ""}</div>
                 </div>
-                <div className="min-w-0 flex-1 truncate">{r.note || <span className="text-muted-foreground">No description</span>}</div>
+                <div className="min-w-0 flex-1 truncate">
+                  {refund ? <span className="mr-1.5 rounded bg-muted px-1 py-0.5 text-[10px] uppercase text-muted-foreground">Refund</span> : null}
+                  {r.note || <span className="text-muted-foreground">No description</span>}
+                </div>
                 <Money amount={minor} kind={income ? "income" : "expense"} sign={income} className="shrink-0" />
               </div>
             );
           })}
         {result.noAmount ? <p className="px-4 py-2 text-xs text-muted-foreground">{result.noAmount} {result.noAmount === 1 ? "row has" : "rows have"} no amount and will be left out.</p> : null}
-        {ready && m.category < 0 && result.rows.some((r) => r.category !== "Other") ? <p className="px-4 py-2 text-xs text-muted-foreground">* Category from your history: the one you last used for the same note. The rest go to Other.</p> : null}
+        {ready && m.category < 0 && result.rows.some((r) => r.category !== "Other") ? <p className="px-4 py-2 text-xs text-muted-foreground">* Category from your history for the same note or merchant. The rest go to Other.</p> : null}
       </Section>
 
       <div className="flex gap-2 px-4 pt-4">
