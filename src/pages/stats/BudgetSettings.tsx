@@ -19,8 +19,8 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toMinor } from "../../../shared/money";
 import { amountInput, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
-import { monthKeyForDate, weekRange } from "../../../shared/period";
-import { parts, todayISO } from "../../../shared/dates";
+import { periodKey } from "../../../shared/period";
+import { todayISO } from "../../../shared/dates";
 
 type Period = "weekly" | "monthly" | "yearly";
 
@@ -42,11 +42,11 @@ export default function BudgetSettings() {
     confirm({ title: "Delete this budget?", description: "Spending in this category will no longer be tracked against a limit." })
       .then((ok) => { if (ok) void remove({ id }); return ok; }).finally(swipe.close);
   const today = todayISO();
+  const currentKey = periodKey(period, today, settings.monthStartDay, settings.weekStartDay);
   // the period the user came from (overrides apply to it), else the current one
   const fromPage = sp.get("period") === period ? sp.get("key") ?? sp.get("month") : null;
-  const key = fromPage ?? (period === "monthly" ? monthKeyForDate(today, settings.monthStartDay) : period === "weekly" ? weekRange(today, settings.weekStartDay).from : String(parts(today).y));
+  const key = fromPage ?? currentKey;
   const keyLabel = period === "monthly" ? monthLabel(key) : period === "weekly" ? `week of ${key}` : key;
-  const currentKey = period === "monthly" ? monthKeyForDate(today, settings.monthStartDay) : period === "weekly" ? weekRange(today, settings.weekStartDay).from : String(parts(today).y);
   const nextWord = period === "weekly" ? "week" : period === "yearly" ? "year" : "month";
   const mains = categories.filter((c) => c.type === "expense" && !c.parentId && !c.deletedAt && !c.archivedAt);
   const available = mains.filter((c) => !list.some((b) => b.categoryId === c._id));

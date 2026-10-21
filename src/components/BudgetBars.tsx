@@ -6,8 +6,9 @@ export type BudgetItem = { budget: { _id: string; categoryId?: string; period: s
 
 export function BudgetBar({ item, label, elapsed, onClick }: { item: BudgetItem; label: string; elapsed: number; onClick?: () => void }) {
   const { fmt } = useApp();
-  const ratio = item.limit ? item.spent / item.limit : item.spent > 0 ? 1 : 0;
-  const over = item.limit > 0 && item.spent > item.limit;
+  const ratio = item.limit > 0 ? item.spent / item.limit : item.spent > 0 ? 1 : 0;
+  // a zero (or carried-below-zero) budget is over as soon as anything is spent
+  const over = item.spent > 0 && item.spent > item.limit;
   const warn = !over && ratio > elapsed + 0.0001;
   const Wrapper = onClick ? "button" : "div";
   return (
