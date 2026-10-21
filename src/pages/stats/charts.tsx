@@ -34,7 +34,9 @@ function Row({ color, name, value, hint }: { color: string; name: string; value:
 
 const pieConfig = { amount: { label: "Amount" } } satisfies ChartConfig;
 
-export function CategoryPie({ items }: { items: { id: string; name: string; amount: number; pct: number }[] }) {
+export function CategoryPie({ items: all }: { items: { id: string; name: string; amount: number; pct: number }[] }) {
+  // a category that refunds outweighed in the period has nothing to draw
+  const items = all.filter((i) => i.amount > 0);
   const { fmt } = useApp();
   const n = colouredCount(items.length);
   const top = items.slice(0, n);

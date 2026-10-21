@@ -20,6 +20,8 @@ import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
 import { DeletePaymentMethodDialog } from "./DeletePaymentMethodDialog";
 import { MergePaymentMethodsDialog } from "./MergePaymentMethodsDialog";
 import { HistorySection } from "@/components/HistorySection";
+import { reconciledLabel, dateLabel } from "@/lib/format";
+import { useToday } from "@/lib/today";
 
 /** A section's header: a tinted band, so the rows under it read as its contents. */
 const sectionHead = "w-full flex items-center px-4 py-2 text-sm text-muted-foreground bg-muted/60";
@@ -29,10 +31,13 @@ export default function AccountsPage() {
   const nav = useNavigate();
   const { pathname } = useLocation();
   const { accountGroups, archivedAccounts, accountsSummary, accounts, loading } = useApp();
+  const today = useToday();
   const move = useOp("accounts.move");
   const setArchived = useOp("accounts.setArchived");
   const [showArchived, setShowArchived] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  /** Groups whose hidden methods are shown (dimmed) under the rest. */
+  const [showHidden, setShowHidden] = useState<Set<string>>(new Set());
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moving, setMoving] = useState(false);
@@ -42,7 +47,8 @@ export default function AccountsPage() {
   /** The row swiped open to show Delete, and the method waiting on the delete confirmation. */
   const [swiped, setSwiped] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<{ _id: Id<"accounts">; name: string } | null>(null);
-  const toggle = (id: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const flip = (s: Set<string>, id: string) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; };
+  const toggle = (id: string) => setCollapsed((s) => flip(s, id));
   const pick = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const exit = () => { setSelecting(false); setSelected(new Set()); };
   const startSelecting = () => { setSwiped(null); setSelecting(true); };
@@ -55,13 +61,23 @@ export default function AccountsPage() {
 
   /** One method's row: indented under its group's name when it is in one, dimmed when archived. */
   const renderRow = (a: AccountRow, { dim = false, indent = false } = {}) => {
+    // what is payable on a card falls due on its payment day; past it, the card is overdue
+    const due = a.kind === "card" && a.nextPayment && (a.payable ?? 0) > 0
+      ? (today > a.nextPayment ? { text: "Overdue", overdue: true } : { text: `Due ${dateLabel(a.nextPayment)}`, overdue: false })
+      : null;
     const row = cn("w-full flex items-center gap-3 py-3 pr-4 text-sm hover:bg-accent/40 text-left", indent ? "pl-9" : "pl-4", selected.has(a._id) && "bg-primary/10", dim && "text-muted-foreground [&_.tabular]:opacity-70");
     const body = (
       <>
         {a.kind === "card" || a.kind === "debitCard" ? <CardThumb color={cardColorOf(a)} /> : null}
         <span className="flex-1 min-w-0">
           <span className="block truncate">{a.name}</span>
-          {a.bankName || a.last4 ? <span className="block truncate text-xs text-muted-foreground">{[a.bankName, a.last4 && `•• ${a.last4}`].filter(Boolean).join(" · ")}</span> : null}
+          {a.bankName || a.last4 || due ? (
+            <span className="block truncate text-xs text-muted-foreground">
+              {/* the due state first, so a narrow row never cuts it off */}
+              {due ? <><span className={cn(due.overdue && "text-destructive font-medium")}>{due.text}</span>{a.bankName || a.last4 ? " · " : ""}</> : null}
+              {[a.bankName, a.last4 && `•• ${a.last4}`].filter(Boolean).join(" · ")}
+            </span>
+          ) : a.reconciledAt ? <span className="block truncate text-xs text-muted-foreground">{reconciledLabel(a.reconciledAt, today)}</span> : null}
         </span>
         {a.kind === "card" ? (
           <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><Money amount={a.payable ?? 0} kind="expense" /><div className="text-[10px] text-muted-foreground"><Money amount={a.balance} muted /></div></span><span><Money amount={a.outstanding ?? 0} kind="expense" />{a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={-a.upcoming} sign muted /> upcoming</div> : null}</span></span>
@@ -121,9 +137,12 @@ export default function AccountsPage() {
         {!loading && !accounts.length ? <EmptyState title="No payment methods" action={<Button onClick={() => nav("/payment-methods/new")}>Add a payment method</Button>} /> : null}
         {accountGroups.map((g) => {
           const visible = g.accounts.filter((a) => !a.hidden);
-          if (!visible.length) return null;
+          // hidden methods still count in the totals: a dimmed row says how many, and shows them
+          const hidden = g.accounts.filter((a) => a.hidden);
+          const hiddenOpen = showHidden.has(g.id);
+          if (!visible.length && selecting) return null;
           // Groups are only folders: a section shows card totals when everything in it is a credit card.
-          const allCards = visible.every((a) => a.kind === "card");
+          const allCards = (visible.length ? visible : hidden).every((a) => a.kind === "card");
           const open = selecting || !collapsed.has(g.id);
           return (
             <div key={g.id} className="mt-3 border-y">
@@ -137,6 +156,16 @@ export default function AccountsPage() {
               {open ? (
                 <div className="bg-card border-t">
                   {visible.map((a) => renderRow(a, { indent: !!g.group }))}
+                  {hidden.length && !selecting ? (
+                    <>
+                      {hiddenOpen ? hidden.map((a) => renderRow(a, { indent: !!g.group, dim: true })) : null}
+                      <button type="button" aria-expanded={hiddenOpen} onClick={() => setShowHidden((s) => flip(s, g.id))}
+                        className={cn("w-full flex items-center gap-1 py-2 pr-4 text-xs text-muted-foreground hover:bg-accent/40 text-left border-t", g.group ? "pl-9" : "pl-4")}>
+                        <ChevronDown className={cn("size-3.5 transition-transform", !hiddenOpen && "-rotate-90")} />
+                        {hidden.length} hidden
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
             </div>

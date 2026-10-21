@@ -1,4 +1,5 @@
 import { CloudOff, RefreshCw, Check, AlertTriangle } from "lucide-react";
+import { useNavigate } from "react-router";
 import { useStore } from "@/lib/store";
 import { InfoHint } from "./misc";
 import { cn } from "@/lib/utils";
@@ -22,11 +23,23 @@ export function SyncLine({ className }: { className?: string }) {
   );
 }
 
-/** A dot on the mobile "More" tab when something is pending or the app is offline. */
-export function SyncDot() {
+/**
+ * Phones (no sidebar): a line under the page header while offline or after a sync problem, saying
+ * what waits ("Offline · 3 changes waiting"). Tapping it opens More, where sync is explained.
+ */
+export function SyncStrip() {
   const { status } = useStore();
-  if (status.connected && !status.pending && !status.lastError) return null;
-  return <span className={cn("absolute -top-0.5 -right-1 size-2 rounded-full", !status.connected ? "bg-muted-foreground" : status.lastError && !status.pending ? "bg-destructive" : "bg-primary")} aria-hidden />;
+  const nav = useNavigate();
+  const problem = status.connected && !!status.lastError && !status.pending;
+  if (status.connected && !problem) return null;
+  const d = describe(status);
+  return (
+    <button type="button" onClick={() => nav("/settings")} aria-live="polite"
+      className={cn("md:hidden flex w-full items-center justify-center gap-1.5 border-t px-4 py-1 text-xs bg-muted/50", d.tone)}>
+      <d.icon className="size-3.5 shrink-0" />
+      <span className="truncate">{d.text}</span>
+    </button>
+  );
 }
 
 /** A line under the user's name in Settings; the (i) explains how syncing works, or what went wrong. */
