@@ -43,3 +43,12 @@ test("a Money Manager Excel round trip keeps entries without a time untimed, and
   expect(byNote.morning).toEqual({ date: "2026-03-05", time: "09:05" });
   expect(byNote.midnight).toEqual({ date: "2026-03-05", time: "00:00" });
 });
+
+test("a CSV exported here imports back with notes that toCSV escaped as they were", async () => {
+  const { toCSV } = await import("./csv");
+  const text = toCSV([{ Date: "2026-10-01", Account: "Cash", Category: "Food", Note: "=1+1", Amount: 120, "Income/Expense": "Expense" }]);
+  expect(text).toContain("'=1+1");
+  const parsed = await readImportFile(new Blob([text], { type: "text/csv" }), "export.csv");
+  expect(parsed.bank).toBeUndefined();
+  expect(parsed.rows.map((r) => r.note)).toEqual(["=1+1"]);
+});
