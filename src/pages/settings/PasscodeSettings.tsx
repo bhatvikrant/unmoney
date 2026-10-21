@@ -18,28 +18,31 @@ export default function PasscodeSettings() {
   const [stage, setStage] = useState<Stage>(null);
   const [first, setFirst] = useState("");
   const [err, setErr] = useState(false);
+  const [message, setMessage] = useState<string>();
+  const fail = (text: string) => { setMessage(text); setErr(true); setTimeout(() => setErr(false), 400); };
   return (
     <>
       <PageHeader back="/settings" title="Passcode" />
       <Page className="pb-8">
         {stage ? (
           <div className="py-10">
-            <PinPad title={typeof stage === "object" ? "Enter your current passcode" : stage === "enter" ? "Choose a 4-digit passcode" : "Enter it again"} error={err} onComplete={async (pin) => {
+            <PinPad title={typeof stage === "object" ? "Enter your current passcode" : stage === "enter" ? "Choose a 4-digit passcode" : "Enter it again"} error={err} message={message} onComplete={async (pin) => {
+              setMessage(undefined);
               if (typeof stage === "object") {
-                if ((await hashPin(pin, s.passcodeSalt ?? "")) !== s.passcodeHash) { setErr(true); setTimeout(() => setErr(false), 400); return; }
+                if ((await hashPin(pin, s.passcodeSalt ?? "")) !== s.passcodeHash) { fail("Wrong passcode. Try again."); return; }
                 if (stage.verify === "change") { setStage("enter"); return; }
                 await setPasscode({});
                 setStage(null);
                 return;
               }
               if (stage === "enter") { setFirst(pin); setStage("confirm"); return; }
-              if (pin !== first) { setErr(true); setTimeout(() => setErr(false), 400); setStage("enter"); return; }
+              if (pin !== first) { fail("Those didn't match. Choose it again."); setStage("enter"); return; }
               const salt = newSalt();
               await setPasscode({ hash: await hashPin(pin, salt), salt });
               markUnlocked();
               setStage(null);
             }} />
-            <div className="text-center mt-6"><Button variant="ghost" onClick={() => setStage(null)}>Cancel</Button></div>
+            <div className="text-center mt-6"><Button variant="ghost" onClick={() => { setMessage(undefined); setStage(null); }}>Cancel</Button></div>
           </div>
         ) : (
           <>

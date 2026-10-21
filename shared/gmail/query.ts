@@ -61,11 +61,13 @@ export function matchesSender(from: string, senders: string[]): boolean {
  * by Gmail under Purchases when that is on, or with a money word in the subject. Spam and trash
  * are left out by Gmail itself.
  */
-export function buildQuery(opts: { senders: string[]; scanPurchases: boolean; afterSeconds: number }): string {
+export function buildQuery(opts: { senders: string[]; scanPurchases: boolean; afterSeconds: number; muted?: string[] }): string {
   const parts: string[] = [];
   const senders = opts.senders.map(normaliseSender).filter(Boolean);
   if (senders.length) parts.push(`from:(${senders.join(" OR ")})`);
   if (opts.scanPurchases) parts.push("category:purchases");
   parts.push(`subject:(${MONEY_SUBJECT_WORDS.join(" OR ")})`);
-  return `after:${Math.max(0, Math.floor(opts.afterSeconds))} (${parts.join(" OR ")})`;
+  const muted = (opts.muted ?? []).map(normaliseSender).filter(Boolean);
+  // senders the user muted are never fetched, whatever else matches
+  return `after:${Math.max(0, Math.floor(opts.afterSeconds))} (${parts.join(" OR ")})${muted.length ? ` -from:(${muted.join(" OR ")})` : ""}`;
 }

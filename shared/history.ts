@@ -65,6 +65,7 @@ function accountChanges(before: Snapshot, after: Snapshot, was: Doc<"accounts">,
   if (now.bankName !== was.bankName) out.push(now.bankName ? `bank ${now.bankName}` : "bank name removed");
   if (now.last4 !== was.last4) out.push(now.last4 ? `last 4 digits ${now.last4}` : "last 4 digits removed");
   if (now.color !== was.color) out.push("card colour changed");
+  if (now.creditLimit !== was.creditLimit) out.push(now.creditLimit !== undefined ? `credit limit ${money(after, now.creditLimit)}` : "credit limit removed");
   if ((now.description ?? "") !== (was.description ?? "")) out.push(now.description ? "description changed" : "description removed");
   return out;
 }
@@ -113,6 +114,11 @@ const describers: Partial<Record<OpKind, Describe>> = {
     const extra = [`${r.moved} ${r.moved === 1 ? "entry" : "entries"} moved`];
     if (r.droppedTransfers) extra.push(`${r.droppedTransfers} ${r.droppedTransfers === 1 ? "transfer" : "transfers"} between them removed`);
     return pm(`Merged ${from} into ${names(before).accountName(a.targetId)} (${extra.join(", ")})`);
+  },
+  "accounts.adjustBalance": (a, before, after) => {
+    const name = names(before).accountName(a.id);
+    const delta = a.delta as number;
+    return pm(delta ? `Adjusted ${name} to ${money(after, a.balance as number)} (${delta > 0 ? "+" : "−"}${money(after, Math.abs(delta))})` : `Checked ${name}: it matched`);
   },
   "settings.setDefaultAccount": (a, before) => pm(a.id ? `Made ${names(before).accountName(a.id)} the default payment method` : "New entries start on the first payment method again"),
 
