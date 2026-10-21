@@ -182,6 +182,12 @@ export interface Ops {
    */
   "accounts.merge": { args: { sourceIds: Id<"accounts">[]; targetId: Id<"accounts"> }; result: { moved: number; droppedTransfers: number } };
   "accounts.payCard": { args: { id: Id<"accounts">; amount: number; date: string; fromAccountId?: Id<"accounts"> }; result: Id<"transactions"> };
+  /**
+   * "The bank says X": records `delta` (X minus what the app showed) as a transfer from or to the
+   * hidden Balance adjustments account, so income and spending stay as they were, and marks the
+   * method reconciled on `date`. `balance` is X, for the history line. A delta of 0 only marks it.
+   */
+  "accounts.adjustBalance": { args: { id: Id<"accounts">; delta: number; balance: number; date: string }; result: Id<"transactions"> | null };
 
   "categories.create": { args: { type: "income" | "expense"; name: string; parentId?: Id<"categories"> }; result: Id<"categories"> };
   "categories.update": { args: { id: Id<"categories">; name?: string; parentId?: Id<"categories"> | null }; result: void };
@@ -304,6 +310,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "accounts.setArchived": ["settings", "accounts"],
   "accounts.merge": ["settings", "accounts", "categories", "transactions", "repeats", "bookmarks"],
   "accounts.payCard": ["accounts", "transactions"],
+  "accounts.adjustBalance": ["accounts", "transactions"],
   "categories.create": ["categories"],
   "categories.update": ["categories"],
   "categories.remove": ["categories"],
@@ -1282,6 +1289,23 @@ const handlers: Handlers = {
     if (!isDate(date)) throw new Error("Bad date");
     w.must("accounts", from);
     return w.insert("transactions", { type: "transfer", date, accountId: from, toAccountId: id, amount, note: `${card.name} payment`, tags: [], photoIds: [] });
+  },
+
+  "accounts.adjustBalance": (w, { id, delta, date }) => {
+    const acc = w.must("accounts", id, "That payment method is gone");
+    if (acc.deletedAt) throw new Error("That payment method is deleted");
+    if (acc.system) throw new Error("That account can't be adjusted");
+    if (drawsFromLinked({ kind: resolveKind(acc, w.snap.accountGroups), linkedAccountId: acc.linkedAccountId })) throw new Error("Adjust the bank account it draws from instead");
+    if (!isDate(date)) throw new Error("Bad date");
+    if (!Number.isInteger(delta)) throw new Error("Amount must be a whole number of minor units");
+    checkAmount(delta);
+    w.patch("accounts", id, { reconciledAt: date });
+    if (delta === 0) return null;
+    const adj = w.snap.accounts.find((a) => a.system === "adjustments" && !a.deletedAt)?._id ?? w.insert("accounts", {
+      system: "adjustments", kind: "other", name: "Balance adjustments", initialBalance: 0, includeInTotals: false, hidden: true, transferAsExpense: false, order: nextOrder(w.snap.accounts),
+    });
+    const [from, to] = delta > 0 ? [adj, id] : [id, adj];
+    return w.insert("transactions", { type: "transfer", date, accountId: from, toAccountId: to, amount: Math.abs(delta), note: "Balance adjustment", tags: [], photoIds: [] });
   },
 
   "categories.create": (w, { type, name, parentId }) => {

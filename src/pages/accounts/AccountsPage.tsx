@@ -20,6 +20,8 @@ import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
 import { DeletePaymentMethodDialog } from "./DeletePaymentMethodDialog";
 import { MergePaymentMethodsDialog } from "./MergePaymentMethodsDialog";
 import { HistorySection } from "@/components/HistorySection";
+import { reconciledLabel } from "@/lib/format";
+import { useToday } from "@/lib/today";
 
 /** A section's header: a tinted band, so the rows under it read as its contents. */
 const sectionHead = "w-full flex items-center px-4 py-2 text-sm text-muted-foreground bg-muted/60";
@@ -29,6 +31,7 @@ export default function AccountsPage() {
   const nav = useNavigate();
   const { pathname } = useLocation();
   const { accountGroups, archivedAccounts, accountsSummary, accounts, loading } = useApp();
+  const today = useToday();
   const move = useOp("accounts.move");
   const setArchived = useOp("accounts.setArchived");
   const [showArchived, setShowArchived] = useState(false);
@@ -61,7 +64,8 @@ export default function AccountsPage() {
         {a.kind === "card" || a.kind === "debitCard" ? <CardThumb color={cardColorOf(a)} /> : null}
         <span className="flex-1 min-w-0">
           <span className="block truncate">{a.name}</span>
-          {a.bankName || a.last4 ? <span className="block truncate text-xs text-muted-foreground">{[a.bankName, a.last4 && `•• ${a.last4}`].filter(Boolean).join(" · ")}</span> : null}
+          {a.bankName || a.last4 ? <span className="block truncate text-xs text-muted-foreground">{[a.bankName, a.last4 && `•• ${a.last4}`].filter(Boolean).join(" · ")}</span>
+            : a.reconciledAt ? <span className="block truncate text-xs text-muted-foreground">{reconciledLabel(a.reconciledAt, today)}</span> : null}
         </span>
         {a.kind === "card" ? (
           <span className="grid grid-cols-2 gap-4 text-right text-xs"><span><Money amount={a.payable ?? 0} kind="expense" /><div className="text-[10px] text-muted-foreground"><Money amount={a.balance} muted /></div></span><span><Money amount={a.outstanding ?? 0} kind="expense" />{a.upcoming ? <div className="text-[10px] text-muted-foreground"><Money amount={-a.upcoming} sign muted /> upcoming</div> : null}</span></span>
