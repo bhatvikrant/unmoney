@@ -72,7 +72,9 @@ test("debit cards, the adjustments account itself and deleted methods can't be a
   const x = run(s, "accounts.adjustBalance", { id: bank, delta: 100, balance: 80100, date: "2026-10-21" }).snap;
   const adj = x.accounts.find((a) => a.system)!._id;
   expect(() => run(x, "accounts.adjustBalance", { id: adj, delta: 100, balance: 100, date: "2026-10-21" })).toThrow(/can't be adjusted/);
-  const gone = run(x, "accounts.remove", { id: bank }).snap;
-  expect(() => run(gone, "accounts.adjustBalance", { id: bank, delta: 100, balance: 80200, date: "2026-10-21" })).toThrow(/deleted/);
+  // a method nothing bills to or spends from, so it can be deleted
+  const spare = run(x, "accounts.create", { name: "Spare", kind: "bank", initialBalance: 0, includeInTotals: true, hidden: false, transferAsExpense: false });
+  const gone = run(spare.snap, "accounts.remove", { id: spare.result }).snap;
+  expect(() => run(gone, "accounts.adjustBalance", { id: spare.result, delta: 100, balance: 100, date: "2026-10-21" })).toThrow(/deleted/);
   expect(() => run(x, "accounts.adjustBalance", { id: bank, delta: 1.5, balance: 80100, date: "2026-10-21" })).toThrow(/whole number/);
 });
