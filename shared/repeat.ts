@@ -25,6 +25,13 @@ export function nextOccurrence(current: ISODate, start: ISODate, frequency: Freq
   }
 }
 
+/** The first date of a schedule anchored on `after` that is later than `today`, so nothing before it is back-filled. */
+export function firstDateAfter(after: ISODate, frequency: Frequency, today: ISODate): ISODate {
+  let d = nextOccurrence(after, after, frequency);
+  for (let guard = 0; d <= today && guard < 4000; guard++) d = nextOccurrence(d, after, frequency);
+  return d;
+}
+
 export function addYearsSafe(d: ISODate, n: number): ISODate {
   return addYears(d, n);
 }

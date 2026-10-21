@@ -122,8 +122,9 @@ async function readState(state: string): Promise<{ userId: Id<"users">; lookback
 }
 
 /**
- * GET /gmail/callback?code&state, from Google. Ends on the settings page with ?gmail=denied | error
- * | …, or ?gmail=claim&claim=… for the app to attach the mailbox (claimConnection). The state says
+ * GET /gmail/callback?code&state, from Google. Ends on the settings page with ?gmail=connected |
+ * denied | error | …, or ?gmail=claim&claim=… for the app to attach a mailbox that isn't the
+ * account's own address (claimConnection). The state says
  * which account started connecting, but anyone can be sent that account's Google link: only the
  * signed-in app that started it can claim the grant.
  */
@@ -142,6 +143,14 @@ export const callback = httpAction(async (ctx, req) => {
     if (!tokens.refreshToken) throw new Error("Google returned no refresh token");
     const { email } = await gmailApi.profile(tokens.accessToken);
     const { enc, iv } = await encryptText(tokens.refreshToken);
+    // The account's own mailbox can't be someone else's: attach it now, as before (an app still on
+    // the previous version only knows ?gmail=connected). Another mailbox waits for this browser's claim.
+    const signedInAs = await ctx.runQuery(internal.gmail.signInEmail, { userId: state.userId });
+    if (signedInAs && signedInAs.toLowerCase() === email.toLowerCase()) {
+      await ctx.runMutation(internal.gmail.saveConnection, { userId: state.userId, email, refreshTokenEnc: enc, iv, lookbackDays: state.lookbackDays });
+      await ctx.scheduler.runAfter(0, internal.gmail.syncUser, { userId: state.userId });
+      return back("connected");
+    }
     const claim = crypto.randomUUID();
     await ctx.runMutation(internal.gmail.holdConnection, { userId: state.userId, claim, email, refreshTokenEnc: enc, iv, lookbackDays: state.lookbackDays });
     return back(`claim&claim=${claim}`);

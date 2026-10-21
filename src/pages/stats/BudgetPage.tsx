@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TrendBars } from "./charts";
 import { EmptyState } from "@/components/shell/misc";
+import { useToday } from "@/lib/today";
+import { diffDays } from "../../../shared/dates";
 
 export default function BudgetPage() {
   const nav = useNavigate();
@@ -28,6 +30,13 @@ export default function BudgetPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const trend = useMemo(() => (detail ? statsTrend(view, "expense", detail.item.budget.categoryId, ranges) : undefined), [view, detail, rangeKey]);
   const label = period === "weekly" ? "Weekly" : period === "yearly" ? "Annual" : "Monthly";
+  // In the current period: what can still go out each day, and where spending at this rate ends up.
+  const today = useToday();
+  const pace = status && status.spentAll && today >= status.range.from && today <= status.range.to && status.elapsed > 0 ? {
+    perDay: status.total && status.total.remaining > 0 ? Math.floor(status.total.remaining / (diffDays(today, status.range.to) + 1)) : null,
+    end: Math.round(status.spentAll / status.elapsed),
+    over: !!status.total && status.spentAll / status.elapsed > status.total.limit,
+  } : null;
   return (
     <>
       <PageHeader title={null} className="border-b-0" sub={<StatsHeaderBar />} />
@@ -36,6 +45,12 @@ export default function BudgetPage() {
           <div>
             <div className="text-xs text-muted-foreground">{status && !status.total ? `Spent (${label}, no total budget)` : `Remaining (${label})`}</div>
             <div className="text-2xl font-semibold tabular">{status?.total ? <Money amount={status.total.remaining} kind={status.total.remaining < 0 ? "expense" : "plain"} /> : status ? <Money amount={status.spentAll} kind="expense" /> : "—"}</div>
+            {pace ? (
+              <div className="text-xs text-muted-foreground">
+                {pace.perDay !== null ? <><Money amount={pace.perDay} muted /> left per day · </> : null}
+                On pace for <Money amount={pace.end} kind={pace.over ? "expense" : "plain"} muted={!pace.over} />
+              </div>
+            ) : null}
           </div>
           <Button variant="secondary" size="sm" onClick={() => nav(`/budget/settings?period=${period}&key=${key}`)}>Budget setting ›</Button>
         </div>

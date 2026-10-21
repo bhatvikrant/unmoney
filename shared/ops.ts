@@ -12,7 +12,7 @@ import { addMonths, todayISO } from "./dates";
 import { currencyInfo } from "./currencies";
 import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_INCOME_CATEGORIES, type AccountKind } from "./defaults";
 import { drawsFromLinked, resolveKind } from "./ledger";
-import { nextOccurrence, type Frequency } from "./repeat";
+import { firstDateAfter, nextOccurrence, type Frequency } from "./repeat";
 import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
 import { normName, normNote } from "./categoryLint";
@@ -107,10 +107,12 @@ export type AccountFields = {
   bankName?: string;
   last4?: string;
   color?: string;
+  /** Credit cards only. Left out keeps the card's limit (callers that don't know about it); null removes it. */
+  creditLimit?: number | null;
 };
 export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
-  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter">>;
+  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "dismissedRecurring" | "recentImports">>;
 export type ImportRow = {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
   description?: string; subAmount?: string; subCurrency?: string;
@@ -122,6 +124,9 @@ export type ImportRow = {
   tags?: string;
 };
 export type NewImportAccount = { name: string; kind: AccountKind };
+export type ImportBatch = { id: string; name: string };
+/** How many past imports are remembered for Undo. */
+export const RECENT_IMPORTS = 10;
 export type CatType = "income" | "expense";
 /** A category in a tidy-up plan: an existing one, or one that a "create" step earlier in the plan makes. */
 export type CatRef = { id: Id<"categories"> } | { newKey: string };
@@ -182,6 +187,12 @@ export interface Ops {
    */
   "accounts.merge": { args: { sourceIds: Id<"accounts">[]; targetId: Id<"accounts"> }; result: { moved: number; droppedTransfers: number } };
   "accounts.payCard": { args: { id: Id<"accounts">; amount: number; date: string; fromAccountId?: Id<"accounts"> }; result: Id<"transactions"> };
+  /**
+   * "The bank says X": records `delta` (X minus what the app showed) as a transfer from or to the
+   * hidden Balance adjustments account, so income and spending stay as they were, and marks the
+   * method reconciled on `date`. `balance` is X, for the history line. A delta of 0 only marks it.
+   */
+  "accounts.adjustBalance": { args: { id: Id<"accounts">; delta: number; balance: number; date: string }; result: Id<"transactions"> | null };
 
   "categories.create": { args: { type: "income" | "expense"; name: string; parentId?: Id<"categories"> }; result: Id<"categories"> };
   "categories.update": { args: { id: Id<"categories">; name?: string; parentId?: Id<"categories"> | null }; result: void };
@@ -207,7 +218,11 @@ export interface Ops {
      * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry ·
      * rowOffset: numbering of the first row, for chunked imports · format: how the whole file writes dates and numbers
      */
-    args: { rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
+    args: {
+      rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number;
+      /** One file's import (every chunk sends the same): its entries carry the id, and it joins settings.recentImports so it can be undone. */
+      batch?: ImportBatch;
+    };
     result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
   };
   /** today: the device's date, so the server (in UTC) puts the copy on the same day. */
@@ -225,10 +240,21 @@ export interface Ops {
   "drafts.link": { args: { id: Id<"drafts">; transactionId: Id<"transactions"> }; result: void };
   /** "No, it's new": the draft stops pointing at the entry it looked like, goes back to the ledger and is never matched again. */
   "drafts.unmatch": { args: { id: Id<"drafts"> }; result: void };
+  /** Undo an import or a dismiss: the drafts are open again, and the entries in `transactionIds` that an import made from them are deleted. */
+  "drafts.reopen": { args: { ids: Id<"drafts">[]; transactionIds?: Id<"transactions">[] }; result: void };
 
   "repeats.update": { args: { id: Id<"repeats">; frequency?: Frequency; endDate?: string | null; nextDate?: string; active?: boolean; template?: Template }; result: void };
   "repeats.remove": { args: { id: Id<"repeats"> }; result: void };
   "repeats.catchUp": { args: { today: string }; result: number };
+  /** Add the schedule's next entry now, dated `entryDate` (paying a bill early), and move the schedule on. `date` must still be its next date. */
+  "repeats.addNext": { args: { id: Id<"repeats">; date: string; entryDate: string }; result: Id<"transactions"> };
+  /** Skip the schedule's next date without adding anything. A date it is already past is a no-op. */
+  "repeats.skip": { args: { id: Id<"repeats">; date: string }; result: void };
+  /**
+   * A schedule anchored on `after` (a payment that already happened) whose first date is the first one later than `today`,
+   * so nothing is back-filled. `fromTransactionId` joins that payment to it.
+   */
+  "repeats.create": { args: { template: Template; frequency: Frequency; after: string; today: string; fromTransactionId?: Id<"transactions"> }; result: Id<"repeats"> };
 
   "bookmarks.create": { args: { template: Template; transactionId?: Id<"transactions"> }; result: Id<"bookmarks"> };
   "bookmarks.update": { args: { id: Id<"bookmarks">; template: Template }; result: void };
@@ -238,6 +264,8 @@ export interface Ops {
   "budgets.upsert": { args: { id?: Id<"budgets">; categoryId?: Id<"categories">; period: Doc<"budgets">["period"]; amount: number }; result: Id<"budgets"> };
   "budgets.setOverride": { args: { id: Id<"budgets">; key: string; amount: number | null }; result: void };
   "budgets.remove": { args: { id: Id<"budgets"> }; result: void };
+  /** Carry each period's leftover (or overspend) into the next one, from the period `from` on; null turns it off. */
+  "budgets.setRollover": { args: { id: Id<"budgets">; from: string | null }; result: void };
 
   "notes.upsert": { args: { id?: Id<"notes">; date: string; text: string; color: string }; result: Id<"notes"> };
   "notes.remove": { args: { id: Id<"notes"> }; result: void };
@@ -317,6 +345,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "accounts.setArchived": ["settings", "accounts"],
   "accounts.merge": ["settings", "accounts", "categories", "transactions", "repeats", "bookmarks"],
   "accounts.payCard": ["accounts", "transactions"],
+  "accounts.adjustBalance": ["accounts", "transactions"],
   "categories.create": ["categories"],
   "categories.update": ["categories"],
   "categories.remove": ["categories"],
@@ -338,9 +367,13 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "drafts.dismiss": ["drafts"],
   "drafts.link": ["drafts", "transactions"],
   "drafts.unmatch": ["drafts"],
+  "drafts.reopen": ["drafts", "transactions"],
   "repeats.update": ["repeats"],
   "repeats.remove": ["repeats", "transactions"],
   "repeats.catchUp": ["settings", "repeats", "transactions", "accounts", "categories"],
+  "repeats.addNext": ["repeats", "transactions", "accounts", "categories"],
+  "repeats.skip": ["repeats"],
+  "repeats.create": ["repeats", "transactions", "accounts", "categories"],
   "bookmarks.create": ["accounts", "transactions", "bookmarks"],
   "bookmarks.update": ["bookmarks"],
   "bookmarks.remove": ["bookmarks"],
@@ -348,6 +381,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "budgets.upsert": ["categories", "budgets"],
   "budgets.setOverride": ["budgets"],
   "budgets.remove": ["budgets"],
+  "budgets.setRollover": ["budgets"],
   "notes.upsert": ["notes"],
   "notes.remove": ["notes"],
   "currencies.add": ["currencies"],
@@ -398,7 +432,9 @@ export function txScope(op: Op): TxScope {
     case "transactions.copy": return { ids: [id] };
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
     case "drafts.link": return { ids: [a.transactionId as string] };
+    case "drafts.reopen": return { ids: (a.transactionIds as string[] | undefined) ?? [] };
     case "repeats.remove": return { repeatIds: [id] };
+    case "repeats.create": return { ids: a.fromTransactionId ? [a.fromTransactionId as string] : [] };
     case "accounts.permanentlyDelete": return { accountIds: [id] };
     // a merge moves every entry from or to the methods being merged
     case "accounts.merge": return { accountIds: [a.targetId as string, ...(a.sourceIds as string[])] };
@@ -670,6 +706,7 @@ function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Ac
     }
   }
   if (kind === "debitCard" && !a.linkedAccountId) throw new Error("A debit card needs a linked bank account");
+  if (a.creditLimit !== undefined && a.creditLimit !== null && (!Number.isInteger(a.creditLimit) || a.creditLimit < 0 || a.creditLimit > MAX_AMOUNT)) throw new Error("Credit limit must be a positive amount");
   if (isCardKind(kind)) {
     if (a.last4 && !/^\d{4}$/.test(a.last4)) throw new Error("The last 4 digits must be 4 numbers");
     if (a.bankName && a.bankName.trim().length > MAX_NAME) throw new Error("Bank name must be at most 40 characters");
@@ -683,12 +720,21 @@ function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Ac
   return kind;
 }
 
+const FREQUENCIES: Record<Frequency, true> = { daily: true, weekly: true, biweekly: true, monthly: true, yearly: true };
+
+/** A schedule moves past `date`; past its end date it stops, as repeats.catchUp does. */
+function moveRepeatOn(w: Work, rep: Doc<"repeats">, date: string) {
+  const next = nextOccurrence(date, rep.startDate, rep.frequency);
+  w.patch("repeats", rep._id, rep.endDate && next > rep.endDate ? { nextDate: next, active: false } : { nextDate: next });
+}
+
 const templateOf = (t: TxFields): Template => ({
   type: t.type, accountId: t.accountId, toAccountId: t.toAccountId, categoryId: t.categoryId, subcategoryId: t.subcategoryId,
   amount: t.amount, note: t.note, description: t.description, tags: t.tags, feeAmount: t.feeAmount,
 });
 
-function horizonFor(s: Doc<"settings"> | null, today: string): string {
+/** The last date the app adds scheduled entries for, given today: today, or the month's end with "show repeats on the 1st". */
+export function horizonFor(s: Doc<"settings"> | null, today: string): string {
   if (s?.repeatDisplay === "firstOfMonth") return monthRange(monthKeyForDate(today, s.monthStartDay), s.monthStartDay).to;
   return today;
 }
@@ -1009,7 +1055,7 @@ function resumePaused(w: Work) {
 /** Opening balances, budgets and what repeats and bookmarks will enter, when amounts change scale. */
 function rescaleOtherAmounts(w: Work, factor: number) {
   const scale = (n: number) => scaleAmount(n, factor);
-  for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: scale(a.initialBalance) });
+  for (const a of [...w.snap.accounts]) w.patch("accounts", a._id, { initialBalance: scale(a.initialBalance), creditLimit: a.creditLimit === undefined ? undefined : scale(a.creditLimit) });
   for (const b of [...w.snap.budgets]) {
     const overrides: Record<string, number> = {};
     for (const [k, val] of Object.entries(b.overrides)) overrides[k] = scale(val);
@@ -1139,10 +1185,10 @@ const handlers: Handlers = {
 
   "accounts.create": (w, a) => {
     const kind = validateAccount(w, a);
-    return w.insert("accounts", { ...a, kind, ...cardFields(kind, a), name: a.name.trim(), order: nextOrder(w.snap.accounts) });
+    return w.insert("accounts", { ...a, kind, ...cardFields(kind, a), creditLimit: kind === "card" ? a.creditLimit ?? undefined : undefined, name: a.name.trim(), order: nextOrder(w.snap.accounts) });
   },
   "accounts.update": (w, { id, ...a }) => {
-    w.must("accounts", id);
+    const was = w.must("accounts", id);
     const kind = validateAccount(w, a, id);
     w.patch("accounts", id, {
       ...a,
@@ -1154,6 +1200,7 @@ const handlers: Handlers = {
       paymentDay: kind === "card" ? a.paymentDay : undefined,
       linkedAccountId: kind === "debitCard" || kind === "upi" ? a.linkedAccountId : undefined,
       ...cardFields(kind, a),
+      creditLimit: kind !== "card" || a.creditLimit === null ? undefined : a.creditLimit ?? was.creditLimit,
     });
   },
   "accounts.setHidden": (w, { id, hidden }) => {
@@ -1308,6 +1355,23 @@ const handlers: Handlers = {
     return w.insert("transactions", { type: "transfer", date, accountId: from, toAccountId: id, amount, note: `${card.name} payment`, tags: [], photoIds: [] });
   },
 
+  "accounts.adjustBalance": (w, { id, delta, date }) => {
+    const acc = w.must("accounts", id, "That payment method is gone");
+    if (acc.deletedAt) throw new Error("That payment method is deleted");
+    if (acc.system) throw new Error("That account can't be adjusted");
+    if (drawsFromLinked({ kind: resolveKind(acc, w.snap.accountGroups), linkedAccountId: acc.linkedAccountId })) throw new Error("Adjust the bank account it draws from instead");
+    if (!isDate(date)) throw new Error("Bad date");
+    if (!Number.isInteger(delta)) throw new Error("Amount must be a whole number of minor units");
+    checkAmount(delta);
+    w.patch("accounts", id, { reconciledAt: date });
+    if (delta === 0) return null;
+    const adj = w.snap.accounts.find((a) => a.system === "adjustments" && !a.deletedAt)?._id ?? w.insert("accounts", {
+      system: "adjustments", kind: "other", name: "Balance adjustments", initialBalance: 0, includeInTotals: false, hidden: true, transferAsExpense: false, order: nextOrder(w.snap.accounts),
+    });
+    const [from, to] = delta > 0 ? [adj, id] : [id, adj];
+    return w.insert("transactions", { type: "transfer", date, accountId: from, toAccountId: to, amount: Math.abs(delta), note: "Balance adjustment", tags: [], photoIds: [] });
+  },
+
   "categories.create": (w, { type, name, parentId }) => {
     if (!name.trim()) throw new Error("Name is required");
     if (parentId) {
@@ -1459,8 +1523,9 @@ const handlers: Handlers = {
     for (const id of ids) if (w.get("transactions", id)) w.patch("transactions", id, { split: link });
   },
 
-  "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
+  "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0, batch }) => {
     const settings = w.requireSettings();
+    if (batch && (typeof batch.id !== "string" || !batch.id || batch.id.length > 64 || typeof batch.name !== "string")) throw new Error("Bad import batch");
     const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
     // Payment methods the import should create first, all outside any group. Cards need a bank to bill / link to, so other kinds go first.
     // (An older app sends the kind as groupKind.)
@@ -1508,8 +1573,10 @@ const handlers: Handlers = {
       const date = parseImportDate(r.date ?? "", format?.dateOrder);
       if (!date) { errors.push({ row: rowNo, reason: `Bad date "${r.date}"` }); continue; }
       const tRaw = (r.type ?? "").trim().toLowerCase();
-      const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;
-      if (!type) { errors.push({ row: rowNo, reason: `Unknown type "${r.type}" (Income, Expenses or Transfer-Out)` }); continue; }
+      // "Refund" is UnMoney's own export of money back on an expense (stored below zero)
+      const refund = tRaw.startsWith("ref");
+      const type = tRaw.startsWith("in") ? "income" : tRaw.startsWith("exp") || refund ? "expense" : tRaw.startsWith("trans") ? "transfer" : null;
+      if (!type) { errors.push({ row: rowNo, reason: `Unknown type "${r.type}" (Income, Expenses, Refund or Transfer-Out)` }); continue; }
       const acc = accountName(r.account);
       if (!acc) { errors.push({ row: rowNo, reason: `Unknown account "${r.account}"` }); continue; }
       // The Type column says income or expense; a sign on the amount is only the file's convention.
@@ -1519,7 +1586,7 @@ const handlers: Handlers = {
       if (toMinor(amountMajor, settings.decimals) > MAX_AMOUNT) { errors.push({ row: rowNo, reason: `Amount too large "${r.amount}"` }); continue; }
       const time = r.time?.match(/^(\d{1,2}):(\d{2})/);
       const base: Prepared = {
-        _row: rowNo, type, date, _acc: acc, amount: toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
+        _row: rowNo, type, date, _acc: acc, amount: (refund ? -1 : 1) * toMinor(amountMajor, settings.decimals), note: (r.note ?? "").trim(),
         description: r.description?.trim() || undefined, tags: splitTags(r.tags), photoIds: [],
         time: time ? `${time[1].padStart(2, "0")}:${time[2]}` : undefined,
       };
@@ -1528,7 +1595,7 @@ const handlers: Handlers = {
         if (cur && cur.code !== settings.mainCurrency) {
           const subMajor = Math.abs(parseNumber(r.subAmount, format?.decimal) ?? 0);
           base.subCurrency = cur.code;
-          base.subAmount = toMinor(subMajor, cur.decimals);
+          base.subAmount = (refund ? -1 : 1) * toMinor(subMajor, cur.decimals);
           // the rate the file's two amounts imply, not today's: the editor works the amount out from it
           base.exchangeRate = subMajor && amountMajor ? subMajor / amountMajor : cur.rate;
         }
@@ -1619,8 +1686,17 @@ const handlers: Handlers = {
         fields.categoryId = cat._id;
         fields.subcategoryId = _subName ? catByKey.get(catKey(fields.type, _subName, cat._id))?._id : undefined;
       }
-      w.insert("transactions", clean(fields));
+      w.insert("transactions", clean({ ...fields, importId: batch?.id }));
       inserted++;
+    }
+    if (batch && inserted) {
+      // the import joins (or, for a later chunk of the same file, adds to) the list Undo works from
+      const list = settings.recentImports ?? [];
+      const had = list.find((x) => x.id === batch.id);
+      const next = had
+        ? list.map((x) => (x.id === batch.id ? { ...x, count: x.count + inserted } : x))
+        : [{ id: batch.id, name: batch.name.trim().slice(0, 120) || "Import", at: w.at, count: inserted }, ...list].slice(0, RECENT_IMPORTS);
+      w.patch("settings", settings._id, { recentImports: next });
     }
     return { inserted, errors, createdAccounts, duplicates };
   },
@@ -1670,6 +1746,17 @@ const handlers: Handlers = {
   "drafts.unmatch": (w, { id }) => {
     const draft = w.must("drafts", id, "That draft is gone");
     if (draft.status === "open") w.patch("drafts", id, { matchedTransactionId: undefined, keptNew: true });
+  },
+  "drafts.reopen": (w, { ids, transactionIds = [] }) => {
+    const made = new Set<string>(transactionIds);
+    for (const id of ids) {
+      const d = w.get("drafts", id);
+      if (!d || d.status === "open") continue;
+      // only an entry this draft's import made: never one it was linked to
+      const t = d.transactionId && made.has(d.transactionId) ? w.get("transactions", d.transactionId) : undefined;
+      if (t && t.source?.messageId === d.messageId) w.delete("transactions", t._id);
+      w.patch("drafts", id, { status: "open", transactionId: undefined, resolvedAt: undefined });
+    }
   },
   "drafts.link": (w, { id, transactionId }) => {
     const draft = w.must("drafts", id, "That draft is gone");
@@ -1723,6 +1810,33 @@ const handlers: Handlers = {
     return created;
   },
 
+  "repeats.addNext": (w, { id, date, entryDate }) => {
+    const rep = w.must("repeats", id, "That schedule is gone");
+    if (!isDate(date) || !isDate(entryDate)) throw new Error("Bad date");
+    if (rep.kind !== "repeat" || !rep.active || rep.nextDate !== date) throw new Error("That one was already added or skipped");
+    const t = validateTx(w, { ...rep.template, date: entryDate, photoIds: [] });
+    const txId = w.insert("transactions", { ...t, repeatId: rep._id });
+    moveRepeatOn(w, rep, date);
+    return txId;
+  },
+  "repeats.skip": (w, { id, date }) => {
+    const rep = w.must("repeats", id, "That schedule is gone");
+    if (!isDate(date)) throw new Error("Bad date");
+    if (rep.nextDate > date) return;
+    if (rep.kind !== "repeat" || !rep.active) throw new Error("That schedule is stopped");
+    if (rep.nextDate < date) throw new Error(`Add or skip the ${rep.nextDate} one first`);
+    moveRepeatOn(w, rep, date);
+  },
+  "repeats.create": (w, { template, frequency, after, today, fromTransactionId }) => {
+    if (!isDate(after) || !isDate(today)) throw new Error("Bad date");
+    if (!(frequency in FREQUENCIES)) throw new Error("Bad frequency");
+    const t = validateTx(w, { ...template, date: after, photoIds: [] });
+    const repeatId = w.insert("repeats", { kind: "repeat", frequency, startDate: after, nextDate: firstDateAfter(after, frequency, today), template: templateOf(t), active: true });
+    const from = fromTransactionId ? w.get("transactions", fromTransactionId) : undefined;
+    if (from && !from.repeatId && !from.installmentIndex) w.patch("transactions", from._id, { repeatId });
+    return repeatId;
+  },
+
   "bookmarks.create": (w, { template, transactionId }) => {
     w.must("accounts", template.accountId, "Pick an account");
     // the entry may have been deleted meanwhile: keep the bookmark, drop the link
@@ -1769,6 +1883,12 @@ const handlers: Handlers = {
   "budgets.remove": (w, { id }) => {
     w.must("budgets", id);
     w.delete("budgets", id);
+  },
+
+  "budgets.setRollover": (w, { id, from }) => {
+    w.must("budgets", id, "That budget is gone");
+    if (from !== null && !/^\d{4}(-\d{2}(-\d{2})?)?$/.test(from)) throw new Error("Bad period");
+    w.patch("budgets", id, { rolloverFrom: from ?? undefined });
   },
 
   "notes.upsert": (w, { id, date, text, color }) => {

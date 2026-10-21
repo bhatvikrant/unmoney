@@ -1,6 +1,6 @@
 import { formatMoney, type CurrencyFormat, type DecimalMark } from "../../shared/money";
 import type { ImportFormat } from "../../shared/ops";
-import { MONTH_SHORT, WEEKDAY_SHORT, parts, type ISODate } from "../../shared/dates";
+import { MONTH_SHORT, WEEKDAY_SHORT, diffDays, parts, type ISODate } from "../../shared/dates";
 import { parseMonthKey, type MonthKey } from "../../shared/period";
 
 export { formatMoney };
@@ -46,4 +46,13 @@ export function shortRange(from: ISODate, to: ISODate): string {
 
 export function pct(n: number): string {
   return `${Math.round(n * 100)}%`;
+}
+
+/** "Reconciled today", "… yesterday", "… 3 days ago", or a date once it is a month old. */
+export function reconciledLabel(date: ISODate, today: ISODate): string {
+  const days = diffDays(date, today);
+  if (days <= 0) return "Reconciled today";
+  if (days === 1) return "Reconciled yesterday";
+  if (days < 31) return `Reconciled ${days} days ago`;
+  return `Reconciled ${dateLabel(date, { year: parts(date).y !== parts(today).y })}`;
 }
