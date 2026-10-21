@@ -20,6 +20,7 @@ import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
 import { DeletePaymentMethodDialog } from "./DeletePaymentMethodDialog";
 import { MergePaymentMethodsDialog } from "./MergePaymentMethodsDialog";
 import { HistorySection } from "@/components/HistorySection";
+import { CardBills } from "./CardBills";
 import { reconciledLabel, dateLabel } from "@/lib/format";
 import { useToday } from "@/lib/today";
 
@@ -135,6 +136,8 @@ export default function AccountsPage() {
       <Page className={cn("pb-8", selecting && "pb-32")}>
         {loading ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
         {!loading && !accounts.length ? <EmptyState title="No payment methods" action={<Button onClick={() => nav("/payment-methods/new")}>Add a payment method</Button>} /> : null}
+        {/* cards due within a few days or overdue: one line, opened for Pay */}
+        {!selecting ? <CardBills className={sectionHead} /> : null}
         {accountGroups.map((g) => {
           const visible = g.accounts.filter((a) => !a.hidden);
           // hidden methods still count in the totals: a dimmed row says how many, and shows them
