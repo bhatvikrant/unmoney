@@ -110,7 +110,7 @@ export type AccountFields = {
 };
 export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
-  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter">>;
+  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "recentImports">>;
 export type ImportRow = {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
   description?: string; subAmount?: string; subCurrency?: string;
@@ -122,6 +122,9 @@ export type ImportRow = {
   tags?: string;
 };
 export type NewImportAccount = { name: string; kind: AccountKind };
+export type ImportBatch = { id: string; name: string };
+/** How many past imports are remembered for Undo. */
+export const RECENT_IMPORTS = 10;
 export type CatType = "income" | "expense";
 /** A category in a tidy-up plan: an existing one, or one that a "create" step earlier in the plan makes. */
 export type CatRef = { id: Id<"categories"> } | { newKey: string };
@@ -207,7 +210,11 @@ export interface Ops {
      * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry ·
      * rowOffset: numbering of the first row, for chunked imports · format: how the whole file writes dates and numbers
      */
-    args: { rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number };
+    args: {
+      rows: ImportRow[]; format?: ImportFormat; createMissing?: boolean; createAccounts?: boolean; newAccounts?: NewImportAccount[]; skipInvalid?: boolean; skipDuplicates?: boolean; rowOffset?: number;
+      /** One file's import (every chunk sends the same): its entries carry the id, and it joins settings.recentImports so it can be undone. */
+      batch?: ImportBatch;
+    };
     result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
   };
   /** today: the device's date, so the server (in UTC) puts the copy on the same day. */
@@ -1463,8 +1470,9 @@ const handlers: Handlers = {
     for (const id of ids) if (w.get("transactions", id)) w.patch("transactions", id, { split: link });
   },
 
-  "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0 }) => {
+  "transactions.importRows": (w, { rows, format, createMissing, createAccounts, newAccounts, skipInvalid, skipDuplicates, rowOffset = 0, batch }) => {
     const settings = w.requireSettings();
+    if (batch && (typeof batch.id !== "string" || !batch.id || batch.id.length > 64 || typeof batch.name !== "string")) throw new Error("Bad import batch");
     const accByName = new Map(w.snap.accounts.filter((a) => !a.deletedAt).map((a) => [a.name.trim().toLowerCase(), a]));
     // Payment methods the import should create first, all outside any group. Cards need a bank to bill / link to, so other kinds go first.
     // (An older app sends the kind as groupKind.)
@@ -1623,8 +1631,17 @@ const handlers: Handlers = {
         fields.categoryId = cat._id;
         fields.subcategoryId = _subName ? catByKey.get(catKey(fields.type, _subName, cat._id))?._id : undefined;
       }
-      w.insert("transactions", clean(fields));
+      w.insert("transactions", clean({ ...fields, importId: batch?.id }));
       inserted++;
+    }
+    if (batch && inserted) {
+      // the import joins (or, for a later chunk of the same file, adds to) the list Undo works from
+      const list = settings.recentImports ?? [];
+      const had = list.find((x) => x.id === batch.id);
+      const next = had
+        ? list.map((x) => (x.id === batch.id ? { ...x, count: x.count + inserted } : x))
+        : [{ id: batch.id, name: batch.name.trim().slice(0, 120) || "Import", at: w.at, count: inserted }, ...list].slice(0, RECENT_IMPORTS);
+      w.patch("settings", settings._id, { recentImports: next });
     }
     return { inserted, errors, createdAccounts, duplicates };
   },
