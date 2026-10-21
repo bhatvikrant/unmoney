@@ -52,7 +52,7 @@ export default function GmailSettings() {
    * Back from connecting: the first check is running, and what it finds opens as a list to pick
    * from. It started as Google sent the browser back, a moment before this page loaded.
    */
-  const [waitingSince, setWaitingSince] = useState<number | null>(() => (sp.get("gmail") === "claim" ? Date.now() - FIRST_CHECK_SLACK_MS : null));
+  const [waitingSince, setWaitingSince] = useState<number | null>(() => (sp.get("gmail") === "claim" || sp.get("gmail") === "connected" ? Date.now() - FIRST_CHECK_SLACK_MS : null));
   const firstCheck = waitingSince !== null && s?.connected ? s.log.find((l) => l.at >= waitingSince) : undefined;
   const waiting = waitingSince !== null && !!s?.connected && s.lookbackDays !== 0 && !firstCheck;
   const handled = useRef(false);
@@ -74,7 +74,8 @@ export default function GmailSettings() {
         if (r === "other-account") toast.error("That Gmail link was started from another UnMoney account, so nothing was connected. To connect your Gmail, use Connect below.", { duration: 10000 });
         else toast.error("That link has expired. Connect again.");
       }, () => { setWaitingSince(null); toast.error("Could not connect Gmail. Try again."); });
-    } else if (outcome === "denied") toast("Gmail was not connected.");
+    } else if (outcome === "connected") toast.success("Gmail connected");
+    else if (outcome === "denied") toast("Gmail was not connected.");
     else if (outcome === "no-scope") toast.error("Google didn't give UnMoney access to your mail. Connect again and tick the Gmail box on Google's screen.", { duration: 10000 });
     else if (outcome === "api-off") toast.error("Gmail can't be connected yet: the Gmail API is switched off in UnMoney's Google Cloud project.", { duration: 10000 });
     else toast.error("Could not connect Gmail. Try again.");

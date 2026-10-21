@@ -264,4 +264,15 @@ test("a grant from Google attaches only to the account that started connecting, 
   expect(await victim.mutation(api.gmail.claimConnection, { claim })).toBe("connected");
   expect((await connections()).map((c) => [c.userId, c.email])).toEqual([[userId, "victim@gmail.com"]]);
   expect(await victim.mutation(api.gmail.claimConnection, { claim })).toBe("expired");
+
+  // the account's own mailbox (same address as its sign-in) attaches straight away, as before
+  await t.run(async (ctx) => { for (const c of await ctx.db.query("gmailConnections").collect()) await ctx.db.delete(c._id); });
+  await t.run((ctx) => ctx.db.patch(userId, { email: "Victim@gmail.com" }));
+  const payload = `${userId}.30.${Date.now()}`;
+  globalThis.fetch = google;
+  try {
+    expect((await t.fetch(`/gmail/callback?code=c&state=${payload}.${await sign(payload)}`)).headers.get("Location")).toBe("https://app.test/settings/gmail?gmail=connected");
+  } finally { globalThis.fetch = real; }
+  expect((await connections()).map((c) => [c.userId, c.email])).toEqual([[userId, "victim@gmail.com"]]);
+  expect(await t.run((ctx) => ctx.db.query("gmailPending").collect())).toEqual([]);
 });
