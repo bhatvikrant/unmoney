@@ -112,6 +112,8 @@ export default defineSchema({
     last4: v.optional(v.string()),
     /** Cards only: background of the card in the app, "#rrggbb". */
     color: v.optional(v.string()),
+    /** Credit cards only: the most the card can owe, for "available credit" and how much of it is used. */
+    creditLimit: v.optional(v.number()),
     /**
      * Set when the user archives a method they no longer use. It drops out of pickers and the
      * grouped list, but its balance and every entry on it stay exactly as they were.

@@ -27,6 +27,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { BudgetBar } from "@/components/BudgetBars";
 import { RecapNudge } from "@/pages/recap/RecapNudge";
 import { GmailNudge } from "@/pages/transactions/GmailNudge";
+import { CardDueNudge } from "@/pages/transactions/CardDueNudge";
 import { downloadText, toCSV } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 import { kindLabel } from "../../../shared/defaults";
@@ -135,6 +136,7 @@ export default function TransactionsPage() {
       <Page className={cn(bulk.active && view === "daily" && "pb-40")}>
         {/* first week of the month: last month's recap, under the summary bar */}
         <RecapNudge month={month} />
+        <CardDueNudge month={month} />
         <GmailNudge from={range.from} to={range.to} />
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
         {raw && view === "daily" ? <TransactionList txs={txs} drafts={drafts} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
