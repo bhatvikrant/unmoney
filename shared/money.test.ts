@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { evaluateExpression, parseNumber, toMinor } from "./money";
+import { guessCurrency } from "./currencies";
 
 describe("parseNumber", () => {
   test.each([
@@ -53,4 +54,12 @@ test("toMinor reads a string the same way", () => {
   expect(toMinor("12,50", 2)).toBe(1250);
   expect(toMinor("1.234,56", 2)).toBe(123456);
   expect(toMinor("1.500", 0, ",")).toBe(1500);
+});
+
+test("the first guess at a main currency comes from the time zone, then the browser language", () => {
+  expect(guessCurrency(["en-US"], "Asia/Kolkata")).toBe("INR");
+  expect(guessCurrency(["de-DE"], "Europe/Berlin")).toBe("EUR");
+  expect(guessCurrency(["en-GB"])).toBe("GBP");
+  expect(guessCurrency(["hi"])).toBe("INR");
+  expect(guessCurrency(["xx"])).toBeNull();
 });
