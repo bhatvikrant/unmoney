@@ -68,6 +68,39 @@ test("a check's drafts are written once each, folds reach open drafts, and the c
   expect((await t.run((ctx) => ctx.db.get(cid)))!.accountMap).toEqual({ "hdfcbank.net|4521": accounts[0]._id });
 });
 
+test("a receipt folded into a draft stays seen once that draft is handled", async () => {
+  const { t, userId, connect, insert } = await setup();
+  await connect();
+  const at = Date.parse("2026-10-20T10:00:00Z");
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: at, inserts: [insert("alert", { extraMessageIds: ["receipt"] })], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 2 });
+  const seen = () => t.query(internal.gmail.seenMessageIds, { userId, ids: ["alert", "receipt", "new"] });
+  expect(await seen()).toEqual(["alert", "receipt"]);
+  for (const status of ["accepted", "dismissed"] as const) {
+    await t.run(async (ctx) => { for (const d of await ctx.db.query("drafts").collect()) await ctx.db.patch(d._id, { status }); });
+    expect(await seen()).toEqual(["alert", "receipt"]);
+  }
+});
+
+test("mail that made no draft is not read again, and mail the AI skipped holds the window back", async () => {
+  const { t, userId, connect } = await setup();
+  const cid = await connect();
+  const at = Date.parse("2026-10-20T10:00:00Z");
+  const hour = 60 * 60 * 1000;
+  const write = (startedAt: number, processed: { id: string; receivedAt: number }[], syncedUpTo?: number) =>
+    t.mutation(internal.gmail.writeSync, { userId, startedAt, inserts: [], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 0, processed, syncedUpTo });
+  // "shipped" was not a payment; a mail the AI could not get to (the cap) arrived 5 days ago, so the
+  // check holds syncedUpTo where the next window (it starts two days before) still reaches it
+  const held = at - 5 * 24 * hour + 2 * 24 * hour;
+  await write(at, [{ id: "shipped", receivedAt: at - hour }], held);
+  let c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect(c.syncedUpTo).toBe(held);
+  expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["shipped", "other"] })).toEqual(["shipped"]);
+  // three days on, no window reaches it: forgotten
+  await write(at + 3 * 24 * hour, []);
+  c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect([c.syncedUpTo, c.processed]).toEqual([at + 3 * 24 * hour, []]);
+});
+
 test("a check matches open drafts to entries typed in since, but never undoes \"no, it's new\"", async () => {
   const { t, userId, accounts, connect, insert } = await setup();
   await connect();
@@ -194,4 +227,52 @@ test("a callback whose Gmail call is refused for setup reasons says which, inste
   // the user left Gmail unticked on the consent screen
   expect(await run(answer("openid email", Response.json({}, { status: 403 })) as typeof fetch)).toBe("https://app.test/settings/gmail?gmail=no-scope");
   expect(await t.run((ctx) => ctx.db.query("gmailConnections").collect())).toEqual([]);
+});
+
+test("a grant from Google attaches only to the account that started connecting, once", async () => {
+  const { t, userId } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const attacker = await t.run((ctx) => ctx.db.insert("users", { email: "attacker@example.com" }));
+  const real = globalThis.fetch;
+  const google = (async (input: string | URL | Request) => {
+    const u = String(input instanceof Request ? input.url : input);
+    if (u.startsWith("https://oauth2.googleapis.com/token")) return Response.json({ access_token: "at", refresh_token: "rt", scope: "https://www.googleapis.com/auth/gmail.readonly" });
+    if (u.startsWith("https://gmail.googleapis.com/")) return Response.json({ emailAddress: "victim@gmail.com" });
+    return real(input as RequestInfo);
+  }) as typeof fetch;
+  /** The victim's browser coming back from Google with a link the given account started. */
+  const consent = async (startedBy: Id<"users">) => {
+    const payload = `${startedBy}.30.${Date.now()}`;
+    globalThis.fetch = google;
+    try {
+      const location = (await t.fetch(`/gmail/callback?code=c&state=${payload}.${await sign(payload)}`)).headers.get("Location")!;
+      expect(location).toMatch(/^https:\/\/app\.test\/settings\/gmail\?gmail=claim&claim=/);
+      return new URL(location).searchParams.get("claim")!;
+    } finally { globalThis.fetch = real; }
+  };
+  const victim = t.withIdentity({ subject: `${userId}|session` });
+  const connections = () => t.run((ctx) => ctx.db.query("gmailConnections").collect());
+
+  // the attacker sent the victim their own connect link: the victim's mailbox lands nowhere
+  expect(await victim.mutation(api.gmail.claimConnection, { claim: await consent(attacker) })).toBe("other-account");
+  expect(await connections()).toEqual([]);
+  // nor can the attacker claim it: the claim went to the victim's browser, and it is used up
+  expect(await t.run((ctx) => ctx.db.query("gmailPending").collect())).toEqual([]);
+
+  const claim = await consent(userId);
+  expect(await victim.mutation(api.gmail.claimConnection, { claim })).toBe("connected");
+  expect((await connections()).map((c) => [c.userId, c.email])).toEqual([[userId, "victim@gmail.com"]]);
+  expect(await victim.mutation(api.gmail.claimConnection, { claim })).toBe("expired");
+
+  // the account's own mailbox (same address as its sign-in) attaches straight away, as before
+  await t.run(async (ctx) => { for (const c of await ctx.db.query("gmailConnections").collect()) await ctx.db.delete(c._id); });
+  await t.run((ctx) => ctx.db.patch(userId, { email: "Victim@gmail.com" }));
+  const payload = `${userId}.30.${Date.now()}`;
+  globalThis.fetch = google;
+  try {
+    expect((await t.fetch(`/gmail/callback?code=c&state=${payload}.${await sign(payload)}`)).headers.get("Location")).toBe("https://app.test/settings/gmail?gmail=connected");
+  } finally { globalThis.fetch = real; }
+  expect((await connections()).map((c) => [c.userId, c.email])).toEqual([[userId, "victim@gmail.com"]]);
+  expect(await t.run((ctx) => ctx.db.query("gmailPending").collect())).toEqual([]);
 });

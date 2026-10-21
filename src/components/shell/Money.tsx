@@ -31,3 +31,9 @@ export function SummaryBar({ income, expense, total, totalLabel = "Total" }: { i
     </div>
   );
 }
+
+/** An entry's amount in its type's colour. An expense below zero is a refund: money coming back, shown "+₹899" in the income colour. */
+export function EntryMoney({ type, amount, className }: { type: "income" | "expense" | "transfer"; amount: number; className?: string }) {
+  if (type === "expense" && amount < 0) return <Money amount={-amount} kind="income" sign className={className} />;
+  return <Money amount={amount} kind={type} className={className} />;
+}

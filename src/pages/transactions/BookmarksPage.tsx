@@ -1,6 +1,10 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "react-router";
-import { ArrowDown, ArrowUp, Pencil, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Link2, Pencil, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useQuickSave } from "@/components/tx/QuickAdd";
+import { useToday } from "@/lib/today";
+import { fromTemplate, templateUsable } from "../../../shared/quickAdd";
 import { useOp, useView } from "@/lib/store";
 import { useUndoableDelete } from "@/lib/undo";
 import { bookmarksList } from "../../../shared/views";
@@ -27,6 +31,18 @@ export default function BookmarksPage() {
   const reorder = useOp("bookmarks.reorder");
   const [edit, setEdit] = useState(false);
   const swipe = useSwipedRow();
+  const quickSave = useQuickSave();
+  const today = useToday();
+  // the link a Shortcut or Back Tap opens to add this bookmark for today, no form
+  const copyLink = async (id: string) => {
+    const url = `${location.origin}/t/new?bookmark=${id}&save=1`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copied. Open it from a Shortcut to add this in one tap.");
+    } catch {
+      toast(url, { description: "Copy this link into a Shortcut's Open URLs action", duration: 15000 });
+    }
+  };
   const remove = (id: string) => {
     const doc = view.bookmarks.find((x) => x._id === id);
     if (!doc) return;
@@ -67,12 +83,16 @@ export default function BookmarksPage() {
                     </div>
                     <Money amount={t.amount} kind={kind} />
                   </button>
+                  {/* one tap, no form: for the ones with an amount whose method and category are still there */}
+                  {!edit && t.amount > 0 && templateUsable(view, t) ? <Button variant="ghost" size="icon" className="size-8 -mr-2" aria-label={`Add ${t.note || "this"} for today`} title="Add for today" onClick={() => void quickSave(fromTemplate(t, today))}><Plus className="size-4" /></Button> : null}
+                  {edit ? <Button variant="ghost" size="icon" className="size-7" aria-label="Copy quick-add link" title="Copy quick-add link (for a Shortcut)" onClick={() => void copyLink(b._id)}><Link2 className="size-4" /></Button> : null}
                   {edit ? <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => remove(b._id)}><Trash2 className="size-4" /></Button> : null}
                 </div>
               </SwipeToDelete>
             );
           })}
         </div>
+        {list?.length ? <p className="px-4 py-3 text-xs text-muted-foreground">Tap + to add one for today. Hold the + in the ledger for your top four. In edit mode, copy a bookmark's link for an iPhone Shortcut or Back Tap.</p> : null}
       </Page>
     </>
   );

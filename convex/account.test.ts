@@ -7,6 +7,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { Op } from "../shared/ops";
 
 const modules = import.meta.glob("./**/*.ts");
+const userTables = (Object.keys(schema.tables) as (keyof typeof schema.tables)[]).filter((t) => "userId" in (schema.tables[t].validator as { fields?: object }).fields!);
 
 test("deleting an account removes every document, file and sign-in of that user, and nothing of anyone else's", async () => {
   vi.useFakeTimers();
@@ -30,6 +31,7 @@ test("deleting an account removes every document, file and sign-in of that user,
         userId, source: "gmail", messageId: "m", extraMessageIds: [], threadId: "t", receivedAt: 1, from: "a@b", subject: "s",
         proposal: { type: "expense", date: "2026-01-01", amount: 1, note: "" }, confidence: "high", how: "rule", status: "open",
       });
+      await ctx.db.insert("aiUsage", { userId, lastRunAt: 1, summaryHash: "h", result: [] });
     });
     return { userId, as, photo };
   };
@@ -50,7 +52,8 @@ test("deleting an account removes every document, file and sign-in of that user,
   const left = await t.run(async (ctx) => {
     const count = async (userId: Id<"users">) => {
       const n: Record<string, number> = {};
-      for (const table of ["transactions", "notes", "accounts", "categories", "settings", "fileOwners", "syncOps", "authSessions", "gmailConnections", "drafts"] as const) {
+      // every table that holds a userId, so a table added later cannot be forgotten
+      for (const table of userTables) {
         const rows = (await ctx.db.query(table).collect()) as { userId?: Id<"users"> }[];
         n[table] = rows.filter((r) => r.userId === userId).length;
       }
@@ -63,7 +66,8 @@ test("deleting an account removes every document, file and sign-in of that user,
       myPhoto: await ctx.storage.getUrl(me.photo), theirPhoto: await ctx.storage.getUrl(other.photo),
     };
   });
-  expect(Object.values(left.mine).every((n) => n === 0)).toBe(true);
+  expect(userTables).toContain("aiUsage");
+  expect(Object.entries(left.mine).filter(([, n]) => n > 0)).toEqual([]);
   expect(left.user).toBeNull();
   expect(left.myPhoto).toBeNull();
   expect(left.theirs.transactions).toBe(3);

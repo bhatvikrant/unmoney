@@ -1,4 +1,22 @@
 /** Symbols are the ones people write locally, made distinct where two would clash (CN¥ vs ¥, CA$ vs $). */
+/** The currency of a country (ISO region), for the ones in CURRENCIES. */
+const BY_REGION: Record<string, string> = {
+  US: "USD", GB: "GBP", IN: "INR", JP: "JPY", KR: "KRW", CN: "CNY", AU: "AUD", CA: "CAD", CH: "CHF", LI: "CHF", SG: "SGD", HK: "HKD", NZ: "NZD",
+  SE: "SEK", NO: "NOK", DK: "DKK", PL: "PLN", CZ: "CZK", HU: "HUF", RU: "RUB", TR: "TRY", BR: "BRL", MX: "MXN", AR: "ARS", CL: "CLP", CO: "COP",
+  ZA: "ZAR", NG: "NGN", KE: "KES", EG: "EGP", AE: "AED", SA: "SAR", IL: "ILS", PK: "PKR", BD: "BDT", LK: "LKR", NP: "NPR", TH: "THB", VN: "VND",
+  ID: "IDR", MY: "MYR", PH: "PHP", TW: "TWD",
+  ...Object.fromEntries("AT BE CY DE EE ES FI FR GR HR IE IT LT LU LV MT NL PT SI SK".split(" ").map((r) => [r, "EUR"])),
+};
+/** Time zones that name the country better than a browser language like "en-US" does. */
+const BY_ZONE: Record<string, string> = { "Asia/Kolkata": "IN", "Asia/Calcutta": "IN", "Asia/Dubai": "AE", "Asia/Singapore": "SG", "Asia/Karachi": "PK", "Asia/Dhaka": "BD", "Asia/Kathmandu": "NP", "Asia/Colombo": "LK", "Europe/London": "GB" };
+
+/** A first guess at the user's main currency, from their time zone or browser language; null when neither says. */
+export function guessCurrency(languages: readonly string[], timeZone?: string): string | null {
+  const regions = [timeZone ? BY_ZONE[timeZone] : undefined, ...languages.map((l) => { try { return new Intl.Locale(l).maximize().region; } catch { return undefined; } })];
+  for (const r of regions) if (r && BY_REGION[r]) return BY_REGION[r];
+  return null;
+}
+
 export type CurrencyInfo = { code: string; name: string; symbol: string; decimals: number; position?: "before" | "after" };
 
 export const CURRENCIES: CurrencyInfo[] = [
