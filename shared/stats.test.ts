@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "./ops";
-import { statsByCategory, statsEntries } from "./views";
+import { statsByCategory, statsEntries, statsTrend } from "./views";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -28,4 +28,22 @@ test("each Stats figure is exactly the sum of the entries its category screen li
   }
   expect(entries.filter((e) => e.bucket === "none").map((e) => e.amount)).toEqual([70]);
   expect(stats.total).toBe(1820);
+});
+
+test("a transfer's fee counts under Fees, apart from the transfer itself", () => {
+  let s = run(emptySnapshot(), "settings.completeOnboarding", { currency: "USD" });
+  const [cash, bank] = s.accounts;
+  const tx = { accountId: cash._id, tags: [], photoIds: [], note: "", date: "2026-01-05" };
+  // a plain transfer only spends its fee
+  s = run(s, "transactions.create", { ...tx, type: "transfer", toAccountId: bank._id, amount: 500, feeAmount: 20 });
+  let stats = statsByCategory(s, "2026-01-01", "2026-01-31", "expense");
+  expect(stats.items.map((i) => [i.id, i.amount])).toEqual([["fees", 20]]);
+  // to an account that counts as spending: the amount under "Transfer to", the fee under Fees
+  s = run(s, "accounts.update", { ...bank, id: bank._id, transferAsExpense: true });
+  stats = statsByCategory(s, "2026-01-01", "2026-01-31", "expense");
+  expect(stats.items.map((i) => [i.id, i.amount])).toEqual([[`transfer:${bank._id}`, 500], ["fees", 20]]);
+  expect(stats.total).toBe(520);
+  const r = [{ key: "2026-01", from: "2026-01-01", to: "2026-01-31" }];
+  expect(statsTrend(s, "expense", "fees", r)[0].amount).toBe(20);
+  expect(statsTrend(s, "expense", `transfer:${bank._id}`, r)[0].amount).toBe(500);
 });

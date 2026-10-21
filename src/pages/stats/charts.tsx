@@ -75,23 +75,24 @@ export function CategoryPie({ items: all }: { items: { id: string; name: string;
 const barConfig = { major: { label: "Amount" } } satisfies ChartConfig;
 
 /** `onPick`: tapping a bar opens that period. */
-export function TrendBars({ data, color = "var(--expense)", limit, onPick }: { data: { label: string; amount: number }[]; color?: string; limit?: number; onPick?: (index: number) => void }) {
+/** `limit` draws the dashed line; `limits` (one per bar, else `limit`) decides which bars are over. */
+export function TrendBars({ data, color = "var(--expense)", limit, limits, onPick }: { data: { label: string; amount: number }[]; color?: string; limit?: number; limits?: number[]; onPick?: (index: number) => void }) {
   const { fmt, settings } = useApp();
-  const rows = data.map((d) => ({ ...d, major: toMajor(d.amount, settings.decimals) }));
-  const fillFor = (amount: number) => (limit === undefined ? color : amount > limit ? "var(--expense)" : "var(--income)");
+  const rows = data.map((d, i) => ({ ...d, major: toMajor(d.amount, settings.decimals), limit: limits?.[i] ?? limit }));
+  const fillFor = (d: { amount: number; limit?: number }) => (d.limit === undefined ? color : d.amount > d.limit ? "var(--expense)" : "var(--income)");
   return (
     <ChartContainer config={barConfig} className="h-48 w-full">
       <BarChart accessibilityLayer data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%">
         <CartesianGrid vertical={false} />
         <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={16} />
         <YAxis tickLine={false} axisLine={false} width={40} tickFormatter={axisTick} />
-        <ChartTooltip cursor={{ fillOpacity: 0.5 }} content={<ChartTooltipContent formatter={(_v, _n, item) => <Row color={fillFor(item.payload?.amount ?? 0)} name={limit !== undefined ? "Spent" : "Amount"} value={fmt(item.payload?.amount ?? 0)} />} />} />
+        <ChartTooltip cursor={{ fillOpacity: 0.5 }} content={<ChartTooltipContent formatter={(_v, _n, item) => <Row color={fillFor({ amount: item.payload?.amount ?? 0, limit: item.payload?.limit })} name={limit !== undefined ? "Spent" : "Amount"} value={fmt(item.payload?.amount ?? 0)} />} />} />
         {limit !== undefined ? (
           <ReferenceLine y={toMajor(limit, settings.decimals)} stroke="var(--muted-foreground)" strokeDasharray="4 4" ifOverflow="extendDomain" />
         ) : null}
         <Bar dataKey="major" fill={color} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false}
           onClick={onPick ? (_d, i) => onPick(i) : undefined} className={onPick ? "cursor-pointer" : undefined}>
-          {limit !== undefined ? rows.map((d, i) => <Cell key={i} fill={fillFor(d.amount)} />) : null}
+          {limit !== undefined ? rows.map((d, i) => <Cell key={i} fill={fillFor(d)} />) : null}
         </Bar>
       </BarChart>
     </ChartContainer>
