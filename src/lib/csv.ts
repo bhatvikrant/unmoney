@@ -13,12 +13,16 @@ export function downloadText(filename: string, text: string, mime = "text/plain"
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** A text cell starting with = + - @ gets a leading ' so a spreadsheet shows it rather than running it as a formula. */
 export function toCSV(rows: Record<string, unknown>[], delimiter = ","): string {
-  return Papa.unparse(rows, { delimiter });
+  return Papa.unparse(rows, { delimiter, escapeFormulae: true });
 }
 
+/** The ' that toCSV puts before a would-be formula comes off again, so an export imports back as it was. */
+const unescapeFormula = (v: string) => (/^'[=+\-@\t\r]/.test(v) ? v.slice(1) : v);
+
 export function parseTable(text: string): { headers: string[]; rows: Record<string, string>[] } {
-  const res = Papa.parse<Record<string, string>>(text.trim(), { header: true, skipEmptyLines: true, delimiter: "" });
+  const res = Papa.parse<Record<string, string>>(text.trim(), { header: true, skipEmptyLines: true, delimiter: "", transform: unescapeFormula });
   const headers = res.meta.fields ?? [];
   return { headers, rows: res.data };
 }
