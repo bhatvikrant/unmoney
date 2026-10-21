@@ -4,6 +4,8 @@ import { Search, Star, SlidersHorizontal, StickyNote, Download, X, CheckSquare }
 import { toast } from "sonner";
 import { useView } from "@/lib/store";
 import { budgetStatus, draftsRange, notesRange, txCarryBefore, txCsvRows, txListRange } from "../../../shared/views";
+import { upcomingOccurrences } from "../../../shared/upcoming";
+import { useToday } from "@/lib/today";
 import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
 import { useShortcuts, useSwipe } from "@/lib/shortcuts";
@@ -96,6 +98,9 @@ export default function TransactionsPage() {
 
   // drafts from Gmail sit on their days as faded rows, never in the sums; a filtered list hides them
   const drafts = useMemo(() => (filtered ? [] : draftsRange(snap, range.from, range.to)), [snap, filtered, range.from, range.to]);
+  // and so do the coming dates of repeats (bills, salary), until they are added
+  const today = useToday();
+  const upcoming = useMemo(() => (filtered ? [] : upcomingOccurrences(snap, range.from, range.to, today)), [snap, filtered, range.from, range.to, today]);
   const totals = useMemo(() => sumKinds(txs, ledger), [txs, ledger]);
   const total = totals.income - totals.expense + (settings.carryOver ? carry : 0);
 
@@ -137,7 +142,7 @@ export default function TransactionsPage() {
         <RecapNudge month={month} />
         <GmailNudge from={range.from} to={range.to} />
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
-        {raw && view === "daily" ? <TransactionList txs={txs} drafts={drafts} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
+        {raw && view === "daily" ? <TransactionList txs={txs} drafts={drafts} upcoming={upcoming} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}
         {raw && view === "weekly" ? <WeeklyView txs={txs} range={range} /> : null}
         {view === "monthly" ? <MonthlyView month={month} reachable={reachable} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}

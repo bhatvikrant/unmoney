@@ -48,6 +48,7 @@ import PaymentMethodsSettings from "@/pages/settings/PaymentMethodsSettings";
 import PreferencesSettings from "@/pages/settings/PreferencesSettings";
 import GmailSettings from "@/pages/settings/GmailSettings";
 import GmailReviewPage from "@/pages/transactions/GmailReviewPage";
+import UpcomingPage from "@/pages/transactions/UpcomingPage";
 import PrivacyPage from "@/pages/legal/PrivacyPage";
 
 function Splash({ text = "Loading…" }: { text?: string }) {
@@ -145,6 +146,7 @@ function Gate() {
           {/* back from UnSplit with the expense it made from entries chosen here */}
           <Route path="unsplit/return" element={<UnsplitReturn />} />
           <Route path="recaps" element={<RecapsPage />} />
+          <Route path="upcoming" element={<UpcomingPage />} />
           <Route path="stats" element={<SplitLayout list={<StatsPage />} label="Category" />}>
             <Route path="c/:id" element={<CategoryDetail />} />
           </Route>

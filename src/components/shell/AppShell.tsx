@@ -19,6 +19,7 @@ const tabs = [
 function isActive(pathname: string, to: string) {
   if (to === "/") return pathname === "/" || pathname.startsWith("/t/") || ["/search", "/bookmarks", "/notes"].some((p) => pathname === p || pathname.startsWith(`${p}/`));
   if (to === "/stats") return pathname.startsWith("/stats") || pathname.startsWith("/budget");
+  if (to === "/settings") return pathname.startsWith("/settings") || pathname.startsWith("/upcoming");
   return pathname.startsWith(to);
 }
 
