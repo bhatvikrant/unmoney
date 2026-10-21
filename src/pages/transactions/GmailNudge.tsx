@@ -3,9 +3,10 @@
  * the way to the review page; or, when the connection broke, the way to reconnect. One tappable
  * line, never a card or a dialog, so the ledger keeps the screen (spec §6.1).
  */
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router";
-import { useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
+import { toast } from "sonner";
 import { ChevronRight, Mail } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import { useView } from "@/lib/store";
@@ -19,14 +20,50 @@ export function GmailNudge({ from, to }: { from: string; to: string }) {
   const status = useQuery(api.gmail.status);
   const here = useMemo(() => draftsRange(view, from, to).length, [view, from, to]);
   const matched = useMemo(() => draftMatches(view).size, [view]);
+  const update = useMutation(api.gmail.updateSettings);
   if (status?.connected && status.status === "reauth") {
     return <Strip warn label="Gmail needs reconnecting" action="Reconnect" onClick={() => nav("/settings/gmail")} />;
+  }
+  // stopped after failing several times in a row (a pause the user chose has no error, and needs no nudge)
+  if (status?.connected && status.status === "paused" && status.lastError) {
+    const resume = () => update({ paused: false }).then(() => toast.success("Gmail checks resumed"), () => toast.error("Could not resume. Try again from Settings › Gmail."));
+    return <Strip warn label={`Gmail checks stopped: ${status.lastError}`} action="Resume" onClick={() => void resume()} />;
   }
   if (!here && !matched) return null;
   const label = here ? `${here} ${here === 1 ? "entry" : "entries"} found in Gmail` : `Gmail found ${matched} you may already have`;
   // the "may already be added" count rides along, muted, so the strip stays one line
   const extra = here && matched ? `+${matched} maybe added` : undefined;
   return <Strip label={label} extra={extra} action="Review" onClick={() => nav("/gmail")} />;
+}
+
+const CHECK_AFTER_MS = 15 * 60_000;
+
+/**
+ * New money mail without waiting for the hourly check: when the app opens or comes back to the
+ * front and the last check is over 15 minutes old, check now (the server allows one a minute).
+ */
+export function useGmailCheckOnFocus() {
+  const status = useQuery(api.gmail.status);
+  const syncNow = useAction(api.gmail.syncNow);
+  const latest = useRef(status);
+  const tried = useRef(0);
+  useEffect(() => { latest.current = status; }, [status]);
+  const ready = !!status?.connected && status.status === "ok";
+  useEffect(() => {
+    if (!ready) return;
+    const check = () => {
+      const s = latest.current;
+      if (document.visibilityState !== "visible" || !s?.connected || s.status !== "ok") return;
+      const now = Date.now();
+      if (now - (s.lastSyncAt ?? 0) < CHECK_AFTER_MS || now - tried.current < CHECK_AFTER_MS) return;
+      tried.current = now;
+      void syncNow().catch(() => {});
+    };
+    check();
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("focus", check);
+    return () => { document.removeEventListener("visibilitychange", check); window.removeEventListener("focus", check); };
+  }, [ready, syncNow]);
 }
 
 /**
