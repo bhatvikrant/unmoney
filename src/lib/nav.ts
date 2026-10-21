@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useMediaQuery, WIDE } from "@/lib/media";
+import { LINK_PARAMS } from "../../shared/quickAdd";
 
 /**
  * Back to the previous screen, or to `fallback` when UnMoney was opened straight on this one
@@ -19,7 +20,7 @@ const ENTRY_LISTS = ["/search", "/bookmarks", "/gmail"];
 const entryListOf = (pathname: string) => ENTRY_LISTS.find((l) => pathname === l || pathname.startsWith(`${l}/t/`));
 
 /** Params that belong to the entry form rather than to the list it was opened from. */
-const ENTRY_PARAMS = ["date", "bookmark", "type", "from", "draft"];
+const ENTRY_PARAMS = ["date", "bookmark", "type", "from", "draft", ...LINK_PARAMS];
 
 /** The list's own params (month, view, filters) from a URL's query string. */
 function listQuery(search: string): string {

@@ -27,6 +27,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { BudgetBar } from "@/components/BudgetBars";
 import { RecapNudge } from "@/pages/recap/RecapNudge";
 import { GmailNudge } from "@/pages/transactions/GmailNudge";
+import { QuickAddSheet } from "@/components/tx/QuickAdd";
 import { downloadText, toCSV } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 import { kindLabel } from "../../../shared/defaults";
@@ -63,11 +64,12 @@ export default function TransactionsPage() {
   const prev = () => { if (nb.prev) setMonth(nb.prev); };
   const next = () => { if (nb.next) setMonth(nb.next); };
   // not while an entry is open beside the list: they would replace it and lose unsaved edits
-  useShortcuts({ n: () => openEntry("new", { date: addDate() }), "/": () => nav("/search"), ArrowLeft: prev, ArrowRight: next, t: goToday }, !entryOpen);
+  useShortcuts({ n: () => openEntry("new", { date: addDate() }), q: () => setQuickOpen(true), "/": () => nav("/search"), ArrowLeft: prev, ArrowRight: next, t: goToday }, !entryOpen);
   const [sp, setSp] = useSearchParams();
   const view = (sp.get("view") as View) || settings.startScreen;
   const setView = (v: View) => { const n = new URLSearchParams(sp); n.set("view", v); setSp(n, { replace: true }); };
   const [filterOpen, setFilterOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
   // a fresh sheet on every open, so it starts from the filter in the URL (not ticks a Clear removed)
   const [filterKey, setFilterKey] = useState(0);
   const bulk = useBulkSelect();
@@ -146,7 +148,8 @@ export default function TransactionsPage() {
       </div>
       {view === "calendar" ? <Fab label="Notes" icon={<StickyNote className="size-5" />} className="bottom-[calc(var(--tabbar-h)+6rem)] md:bottom-28 size-12 bg-card text-foreground border hover:bg-accent" onClick={() => nav(`/notes?month=${month}`)} /> : null}
       {/* beside an open entry (wide screens) the + would sit on the panel */}
-      {(bulk.active && view === "daily") || entryOpen ? null : <Fab title="New entry (N)" onClick={(e) => { primeKeyboard(e.currentTarget); openEntry("new", { date: addDate() }); }} />}
+      {(bulk.active && view === "daily") || entryOpen ? null : <Fab title="New entry (N) · hold for quick add (Q)" onHold={() => setQuickOpen(true)} onClick={(e) => { primeKeyboard(e.currentTarget); openEntry("new", { date: addDate() }); }} />}
+      <QuickAddSheet open={quickOpen} onOpenChange={setQuickOpen} onNew={() => openEntry("new", { date: addDate() })} />
       {view === "daily" ? <BulkBar bulk={bulk} txs={txs} /> : null}
       <FilterSheet key={filterKey} open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>
