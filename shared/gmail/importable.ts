@@ -38,7 +38,8 @@ export function fallbackCategory(ctx: Pick<Ctx, "categories">, type: "income" | 
  */
 export function importable(d: Pick<Doc<"drafts">, "proposal">, ctx: Ctx): Importable | null {
   const p = d.proposal;
-  if (!p.amount || p.amount <= 0) return null;
+  // only a refund (money back on an expense) is below zero
+  if (!p.amount || (p.amount < 0 && p.type !== "expense")) return null;
   const filled: Filled[] = [];
   const usable = (id?: Id<"accounts">) => !!id && ctx.accounts.some((a) => a._id === id && live(a));
   const usableCat = (id?: Id<"categories">) => !!id && ctx.categories.some((c) => c._id === id && live(c));
