@@ -22,6 +22,7 @@ import { clean } from "../shared/ops";
 import type { Mail } from "../shared/gmail/mail";
 import { triage } from "../shared/gmail/triage";
 import { parseMail } from "../shared/gmail/rules";
+import { latestRates } from "./lib/fxFeed";
 import { accountMapKey, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
 import { foldDrafts, laterMatches, matchEntry, type DraftCandidate } from "../shared/gmail/dedup";
 import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, matchesSender, normaliseSender, readsFromFor, spanMs, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
@@ -498,12 +499,24 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   // what the user taught about a merchant wins over the rules' and the model's guesses; the merchant as read is kept to learn under
   const remember = (mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai") =>
     candidateOf(mail, { ...resolved, proposal: applyMerchantMemory(resolved.proposal, resolved.proposal.note, c.merchantMap, prep.categories) }, how, resolved.proposal.note);
+  // a currency with no saved rate is converted at today's rate from the public feed, fetched once per check
+  const main = prep.settings.mainCurrency.toUpperCase();
+  const saved = new Set(prep.currencies.filter((x) => x.rate > 0).map((x) => x.code.toUpperCase()));
+  let fetchedRates = false;
+  const ratesFor = async (currencies: string[]) => {
+    if (fetchedRates || !currencies.some((x) => x.toUpperCase() !== main && !saved.has(x.toUpperCase()))) return;
+    fetchedRates = true;
+    rctx.liveRates = (await latestRates(main)) ?? undefined;
+  };
+  const read: { mail: Mail; parsed: NonNullable<ReturnType<typeof parseMail>> }[] = [];
   for (const mail of mails) {
     if (!triage(mail).keep || matchesSender(mail.from, muted)) { processed.push({ id: mail.id, receivedAt: mail.receivedAt }); continue; }
     const parsed = parseMail(mail);
-    if (parsed) candidates.push(remember(mail, resolveParsed(parsed, mail, rctx), "rule"));
+    if (parsed) read.push({ mail, parsed });
     else forAi.push(mail);
   }
+  await ratesFor(read.map((r) => r.parsed.currency));
+  for (const { mail, parsed } of read) candidates.push(remember(mail, resolveParsed(parsed, mail, rctx), "rule"));
 
   let aiCalls = 0, aiSkipped = 0, aiDropped = 0;
   if (forAi.length && !process.env.ANTHROPIC_API_KEY) {
@@ -521,8 +534,9 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
         aiDropped += dropped;
         const byId = new Map(batch.map((m) => [m.id, m]));
         // not a payment, or an answer that failed validation: asking again next hour would say the same
-        const read = new Set(reads.map((r) => r.mailId));
-        for (const m of batch) if (!read.has(m.id)) processed.push({ id: m.id, receivedAt: m.receivedAt });
+        const answered = new Set(reads.map((r) => r.mailId));
+        for (const m of batch) if (!answered.has(m.id)) processed.push({ id: m.id, receivedAt: m.receivedAt });
+        await ratesFor(reads.map((r) => r.parsed.currency));
         for (const r of reads) {
           const mail = byId.get(r.mailId)!;
           const resolved = resolveParsed(r.parsed, mail, rctx);
@@ -541,7 +555,10 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     if (aiSkipped && used + aiCalls >= AI_MONTHLY_CAP) notes.push(`monthly AI limit reached, ${aiSkipped} mails waiting`);
   }
 
-  const { inserts, updates } = foldDrafts(candidates, prep.openDrafts, prep.accounts.filter((a) => !a.deletedAt));
+  // no amount means a currency no rate could be found for: no ₹0 draft; the mail stays unread, so the next check tries again
+  const waitingRate = candidates.filter((d) => d.proposal.amount === 0);
+  if (waitingRate.length) notes.push(`${waitingRate.length} ${waitingRate.length === 1 ? "mail waits" : "mails wait"} for an exchange rate`);
+  const { inserts, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), prep.openDrafts, prep.accounts.filter((a) => !a.deletedAt));
   return {
     scanned: ids.length,
     inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, prep.transactions, prep.accounts) })),
@@ -577,6 +594,45 @@ export const syncUser = internalAction({
       await ctx.runMutation(internal.gmail.failSync, { userId, startedAt, error: message, reauth: e instanceof GmailAuthError });
       return { ran: true, error: message };
     }
+  },
+});
+
+/**
+ * One-off, after the folding rules change: let the next check read again the mails folded into a
+ * user's open drafts. Receipts fold straight back into their alert; alerts that were wrongly
+ * merged come back as drafts of their own. Open drafts with no amount (a currency with no rate)
+ * are removed, so their mail is read again and converted. Drafts the user saved or dismissed are left alone.
+ * `npx convex run gmail:releaseFolded '{"userId":"…"}'` (add --prod for production).
+ */
+export const releaseFolded = internalMutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }): Promise<{ drafts: number; mails: number; unpriced: number }> => {
+    const open = await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect();
+    let drafts = 0, mails = 0, unpriced = 0;
+    for (const d of open) {
+      if (d.proposal.amount === 0) { await ctx.db.delete(d._id); unpriced++; continue; }
+      // a paired transfer's other side is folded in on purpose, and pairs again the same way: leave it
+      if (!d.extraMessageIds.length || d.proposal.description?.includes(PAIRED_NOTE)) continue;
+      mails += d.extraMessageIds.length;
+      drafts++;
+      await ctx.db.patch(d._id, { extraMessageIds: [] });
+    }
+    return { drafts, mails, unpriced };
+  },
+});
+
+/**
+ * Dev: the text UnMoney reads from one of a user's mails and what the rules make of it, for
+ * fixing a rule. `npx convex run gmail:readMail '{"userId":"…","messageId":"…"}'`
+ */
+export const readMail = internalAction({
+  args: { userId: v.id("users"), messageId: v.string() },
+  handler: async (ctx, { userId, messageId }) => {
+    const prep = await ctx.runQuery(internal.gmail.prepareSync, { userId });
+    if (!prep) return { error: "not connected" };
+    const token = await gmailApi.accessToken(await decryptText(prep.connection.refreshTokenEnc, prep.connection.iv));
+    const mail = await gmailApi.getMail(token, messageId);
+    return { from: mail.from, subject: mail.subject, text: mail.text, triage: triage(mail), parsed: parseMail(mail) };
   },
 });
 

@@ -7,6 +7,7 @@ import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { diffDays } from "../dates";
 import { drawsFromLinked } from "../ledger";
 import { isShopMail } from "./rules";
+import { senderAddress } from "./mail";
 
 /** A draft about to be written: everything but what the database and the user add. */
 export type DraftCandidate = Omit<Doc<"drafts">, "_id" | "_creationTime" | "userId" | "status" | "transactionId" | "resolvedAt" | "keptNew">;
@@ -33,8 +34,9 @@ const hasAccount = (d: Draftish) => !!d.proposal.accountId || !!d.proposal.accou
 /**
  * Whether two mails describe the same movement of money: same amount and kind, dates within a
  * day, and either the same card or account digits or one of them a shop's receipt. Two bank
- * alerts with the same digits only pair when they name the same counterparty (two coffees on
- * the same card are two entries).
+ * alerts with the same digits only pair when they come from different senders and name the same
+ * counterparty: a bank sends one alert per payment, so three ₹598 alerts from it are three
+ * payments, even when none of them names who paid.
  */
 export function samePayment(a: Draftish, b: Draftish): boolean {
   const pa = a.proposal, pb = b.proposal;
@@ -44,6 +46,7 @@ export function samePayment(a: Draftish, b: Draftish): boolean {
   if (receipts === 2) return false;
   const l4a = pa.accountHint?.last4, l4b = pb.accountHint?.last4;
   if (!l4a || l4a !== l4b) return false;
+  if (senderAddress(a.from) === senderAddress(b.from)) return false;
   const na = pa.note.trim().toLowerCase(), nb = pb.note.trim().toLowerCase();
   return !na || !nb || na === nb;
 }

@@ -188,3 +188,13 @@ test("every kept fixture resolves to a proposal the drafts table accepts", () =>
     if (p.type === "transfer") expect(p.toAccountId, f.name).toBeTruthy();
   }
 });
+
+test("a currency with no saved rate is converted at today's rate, and waits with no amount when there is none", () => {
+  const u = user();
+  const parsed: Parsed = { rule: "hsbc", type: "debit", amount: 2.5, currency: "SGD", date: "2026-10-03", dateSource: "mail", last4: "2280", bankName: "HSBC", channel: "card", merchantRaw: "Ijooz Ai Pte" };
+  const mail = { from: "hsbc@hsbc.bank.in" };
+  const live = resolveParsed(parsed, mail, { ...u.rctx(), liveRates: { SGD: 0.0155 } }).proposal;
+  expect([live.amount, live.subAmount, live.subCurrency]).toEqual([16129, 250, "SGD"]);
+  expect(live.description).toContain("converted at today's SGD rate");
+  expect(resolveParsed(parsed, mail, u.rctx()).proposal.amount).toBe(0);
+});
