@@ -91,3 +91,11 @@ test("with both a debit and a credit verb, the first one says which way the mone
   expect(parseMail({ ...base, text: "ICICI Bank Acct XX778 debited for Rs 100.00 on 20-Oct-26; PRIYA MENON credited. UPI:529312345693." })?.type).toBe("debit");
   expect(parseMail({ ...base, text: "Your ICICI Bank Account XX778 has been credited with Rs 100.00 on 20-Oct-26, paid by PRIYA MENON." })?.type).toBe("credit");
 });
+
+test("an ACH mandate's payee is read without the rail, the collector and the reference codes", () => {
+  const base = { id: "1", threadId: "1", from: "alerts@axis.bank.in", subject: "Debit transaction alert for Axis Bank A/c", receivedAt: 0 };
+  const payee = (by: string) => parseMail({ ...base, text: `Your A/c no. XX4190 has been debited with INR 5000.00 on 15-10-2026 07:02:13 IST by ${by}. To check your available balance, please click here.` })?.merchantRaw;
+  expect(payee("ACH-DR-BD_HDFCMF-TJOK12832")).toBe("HDFCMF");
+  expect(payee("ACH-DR-PPFAS 22102026 CAM")).toBe("PPFAS CAM");
+  expect(payee("AUTOBPay/MiraeAsset/629410")).toBe("MiraeAsset");
+});
