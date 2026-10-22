@@ -49,7 +49,7 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
         <div key={id} className="relative size-20 rounded-md overflow-hidden bg-muted">
           {urlOf(id) ? (
             <button type="button" aria-label="View photo" className="size-full" onClick={() => setViewing(id)}><img src={urlOf(id)} alt="" className="size-full object-cover" /></button>
-          ) : <div className="size-full flex items-center justify-center text-[10px] text-muted-foreground">{status.connected ? "…" : "offline"}</div>}
+          ) : <div className="size-full flex items-center justify-center text-[10px] text-muted-foreground">{status.offline ? "offline" : "…"}</div>}
           <button type="button" aria-label="Remove photo" onClick={() => onChange(photoIds.filter((x) => x !== id))} className="absolute top-1 right-1 rounded-full bg-black/60 text-white p-0.5"><X className="size-3" /></button>
         </div>
       ))}

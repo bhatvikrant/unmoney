@@ -20,6 +20,11 @@ import type { Meta, Profile, QueuedOp } from "./db";
 export type SyncStatus = {
   /** The websocket to Convex is up. */
   connected: boolean;
+  /**
+   * Worth telling the user: the browser says there is no network, or the websocket has been down
+   * longer than a reconnect takes. False while the app is still connecting after it opens.
+   */
+  offline: boolean;
   /** Every table has streamed from the server in this session. */
   live: boolean;
   pending: number;
@@ -91,6 +96,28 @@ function useAllTransactions(): Doc<"transactions">[] | undefined {
 }
 
 /** The base snapshot with every queued op replayed on top. Ops that no longer apply are skipped. */
+/** How long the websocket may be down before it counts as offline: covers the connect on open and quick reconnects. */
+const OFFLINE_GRACE_MS = 4000;
+
+function useOffline(connected: boolean): boolean {
+  const [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
+  const [stale, setStale] = useState(false);
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => { window.removeEventListener("online", up); window.removeEventListener("offline", down); };
+  }, []);
+  useEffect(() => {
+    setStale(false);
+    if (connected) return;
+    const t = setTimeout(() => setStale(true), OFFLINE_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [connected]);
+  return !connected && (!online || stale);
+}
+
 function replay(base: Snapshot, ops: QueuedOp[], idMap: Record<string, string>, userId: string): Snapshot {
   let snap = base;
   for (const op of ops) {
@@ -107,6 +134,7 @@ function replay(base: Snapshot, ops: QueuedOp[], idMap: Record<string, string>, 
 export function OfflineProvider({ children }: { children: ReactNode }) {
   const convex = useConvex();
   const conn = useConvexConnectionState();
+  const offline = useOffline(conn.isWebSocketConnected);
   const live = useLiveTables();
   const me = useQuery(api.sync.me);
 
@@ -428,7 +456,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     userId: me?.userId ?? meta.userId,
     user: me?.user ?? meta.user,
     view,
-    status: { connected: conn.isWebSocketConnected, live: allLive, pending: ops.length, syncing, lastError },
+    status: { connected: conn.isWebSocketConnected, offline, live: allLive, pending: ops.length, syncing, lastError },
     dispatch,
     dispatchTracked,
     whenSynced,
@@ -437,7 +465,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     rememberPhotoUrls,
     resolveId: (id) => (meta.idMap[id] ?? id) as typeof id,
     clearLocal,
-  }), [ready, effectiveBase, me, meta, view, conn.isWebSocketConnected, allLive, ops.length, syncing, lastError, dispatch, dispatchTracked, whenSynced, enqueueUpload, blobUrls, rememberPhotoUrls, clearLocal]);
+  }), [ready, effectiveBase, me, meta, view, conn.isWebSocketConnected, offline, allLive, ops.length, syncing, lastError, dispatch, dispatchTracked, whenSynced, enqueueUpload, blobUrls, rememberPhotoUrls, clearLocal]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
