@@ -1,0 +1,13 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "axis",
+    "type": "debit",
+    "amount": 2500,
+    "currency": "INR",
+    "date": "2026-10-21",
+    "dateSource": "mail",
+    "bankName": "Axis",
+    "merchantRaw": "Mirae Asset Mutual Fund"
+  }
+}

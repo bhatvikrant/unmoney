@@ -1,0 +1,5 @@
+From: Axis Bank Alerts <alerts@axis.bank.in>
+Subject: Debit transaction alert for Axis Bank A/c
+Received: 2026-10-22T02:51:32Z
+
+22-10-2026 Dear Vikrant Bhat, Thank you for banking with us. We wish to inform you that your A/c no. XX4190 has been debited with INR 10000.00 on 22-10-2026 08:21:32 IST by ACH-DR-PPFAS 22102026 CAM. To check your available balance, please click here . Please SMS BLOCKALL <Space> <Cust ID> to +91 9951860002, if the transaction has not been initiated by you. Should you wish to reach us, please call 18001035577. Always open to help you. Regards, Axis Bank Ltd. Please do not share your Internet Banking details, such as user ID/password or your Credit/Debit Card number/CVV/OTP with anyone, either over phone or through email. RBI never deals with individuals for Savings Account, Current Account, Credit Card, Debit Card, etc. Don't be victim to such offers coming to you on phone or email in the name of RBI.

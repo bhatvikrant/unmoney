@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "axis",
+    "type": "debit",
+    "amount": 2500,
+    "currency": "INR",
+    "date": "2026-10-21",
+    "dateSource": "mail",
+    "time": "07:52",
+    "last4": "4190",
+    "bankName": "Axis",
+    "channel": "netbanking",
+    "merchantRaw": "MiraeAsset"
+  }
+}

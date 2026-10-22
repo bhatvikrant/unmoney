@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "hsbc",
+    "type": "credit",
+    "amount": 1529.8,
+    "currency": "INR",
+    "date": "2026-10-16",
+    "dateSource": "mail",
+    "last4": "2280",
+    "bankName": "HSBC",
+    "channel": "card",
+    "merchantRaw": "HSBC"
+  }
+}

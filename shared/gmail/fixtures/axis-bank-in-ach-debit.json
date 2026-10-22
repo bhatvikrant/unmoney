@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "axis",
+    "type": "debit",
+    "amount": 10000,
+    "currency": "INR",
+    "date": "2026-10-22",
+    "dateSource": "mail",
+    "time": "08:21",
+    "last4": "4190",
+    "bankName": "Axis",
+    "channel": "netbanking",
+    "merchantRaw": "PPFAS CAM"
+  }
+}

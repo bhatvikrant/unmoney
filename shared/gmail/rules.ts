@@ -104,6 +104,14 @@ export function findBankName(text: string): string | undefined {
   return BANK_NAMES.find(([re]) => re.test(text))?.[1];
 }
 
+/** Where a bank's sign-off and safety footer begin: "Please do not share your … Credit/Debit Card number/CVV/OTP". */
+const FOOTER = /\b(?:Please do not share|To check your available balance|Should you wish to reach|Feel free to connect|Always open to help|Regards,|Yours sincerely|Sincerely,|Looking forward to|This is a system generated|Issued by)\b/i;
+/** The alert without its footer, for what the footer's words would mislead: the channel, the direction and the counterparty. */
+function alertPart(text: string): string {
+  const at = text.search(FOOTER);
+  return at > 40 ? text.slice(0, at) : text;
+}
+
 function channelOf(text: string): Channel | undefined {
   if (/\b(UPI|VPA)\b/i.test(text) || VPA_RE.test(text)) return "upi";
   if (/\b(credit card|debit card|card ending|card no|card xx|card \*|visa|mastercard|rupay|amex)\b/i.test(text)) return "card";
@@ -145,8 +153,11 @@ const BANKS: Bank[] = [
     /\bby\s+(?<m>.+?)(?:\s+on\b|\.|$)/i, /\btowards\s+(?<m>.+?)(?:\s+on\b|\.|$)/i,
   ] },
   { name: "Axis", rule: "axis", domains: ["axisbank.com", "axisbank.co.in", "axis.bank.in"], merchant: [
-    // the axis.bank.in layout: "Transaction Info: UPI/P2A/529312345690/PRIYA MENON/…"
+    // the axis.bank.in layout: "Transaction Info: UPI/P2A/529312345690/PRIYA MENON/…"; a bill: "Biller name: Mirae Asset Mutual Fund Consumer no.: …"
     /\bTransaction Info(?:rmation)?\s*[:-]?\s*(?<m>[^\s].*?)(?=\s+(?:If|Please|Not you|Call|Available|Avl|Regards|Thank|Always|Never|Warm|Disclaimer|This is|Do not|Reach)\b|\s{2,}|$)/i,
+    /\bBiller name\s*:\s*(?<m>.+?)(?=\s+(?:Consumer|Payment|Bill|Amount|Customer)\b|$)/i,
+    // "debited with INR 10000.00 on 22-10-2026 08:21:32 IST by ACH-DR-PPFAS 22102026 CAM."
+    /\b(?:debited|credited)\b(?:[^.]|\.(?=\d))*?\bby\s+(?!you\b)(?<m>(?:[^.]|\.(?=\d)){2,60}?)\.(?:\s|$)/i,
     /\bUPI\/P2[MA]\/\d+\/(?<m>[^/.]+?)(?:\.\s|\/|$)/i, /\b(?:NEFT|IMPS|RTGS)\/[A-Z0-9]+\/(?<m>[^/.]+?)(?:\.\s|\/|\s+If\b|$)/i, /\bInfo-\s*(?<m>.+?)(?:\.\s|$)/i, /\bby\s+(?<m>.+?)\s+on\b/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
   ] },
   { name: "SBI", rule: "sbi", domains: ["sbi.co.in", "sbi.bank.in", "sbicard.com", "onlinesbi.sbi", "onlinesbi.com"], merchant: [
@@ -163,7 +174,7 @@ const BANKS: Bank[] = [
   ] },
 ];
 
-const CARD_PAYMENT = /\bpayment\b.{0,60}?\breceived\b.{0,60}?\bcard\b|\breceived\b.{0,40}?\btowards\b.{0,40}?\bcard\b/i;
+const CARD_PAYMENT = /\bpayment\b.{0,60}?\breceived\b.{0,60}?\bcard\b|\breceived\b.{0,40}?\btowards\b.{0,40}?\bcard\b|\breceived\s+(?:a\s+|your\s+)?payment\b.{0,80}?\bcard\b/i;
 const REFUND = /\b(refund|refunded|reversal|reversed|credited back)\b/i;
 const CREDIT = /\b(credited|received|deposited|credit (?:of|by))\b/i;
 /** Words that say money left the account. */
@@ -187,10 +198,16 @@ function kindOf(text: string): ParsedKind | null {
 }
 
 /** Rails and their codes in a "UPI/P2A/529312345690/PRIYA MENON/paid via app" line: never the name. */
-const RAIL = /^(?:UPI|P2[AM]|NEFT|IMPS|RTGS|MB|BIL|INB|ACH|NACH|ECS|INF|TRF|CMS|POS|ATM|NA)$/i;
+const RAIL = /^(?:UPI|P2[AM]|NEFT|IMPS|RTGS|MB|BIL|INB|ACH|NACH|ECS|INF|TRF|CMS|POS|ATM|NA|AUTOBPAY|BPAY|BBPS|SI)$/i;
+/** Text a bank's footer or call to action is made of: never a counterparty's name. */
+const NOT_A_NAME = /\b(?:click|clicking|password|cashback|OTP|CVV|call us|customer care|internet banking|available balance|SMS)\b/i;
 /** The counterparty's name in a slash-separated transaction line: the first part that is words, not a rail or a reference. */
 function nameInInfo(info: string): string {
-  if (!info.includes("/")) return info;
+  if (!info.includes("/")) {
+    // "ACH-DR-PPFAS 22102026 CAM": the rail and the mandate's date and codes around the name
+    const words = info.replace(/^(?:N?ACH|ECS)-(?:DR|CR)-/i, "").split(/\s+/).filter((w) => !/\d{4,}/.test(w));
+    return words.join(" ") || info;
+  }
   const part = info.split("/").map((x) => x.trim()).find((x) => /[a-z]{2}/i.test(x) && !RAIL.test(x) && !/\d{4,}/.test(x));
   return part ?? info;
 }
@@ -203,8 +220,8 @@ function merchantIn(text: string, patterns: RegExp[]): { merchantRaw: string; vp
     if (!m?.groups) continue;
     const gotVpa = tidy(m.groups.vpa ?? "");
     const got = tidy(nameInInfo(m.groups.m ?? ""));
-    // "credited to your account **1234": the user's own side, not who paid
-    if (!gotVpa && OWN_ACCOUNT.test(got)) continue;
+    // "credited to your account **1234": the user's own side, not who paid; a footer is no one
+    if (!gotVpa && (OWN_ACCOUNT.test(got) || NOT_A_NAME.test(got))) continue;
     if (gotVpa && isVpa(gotVpa)) vpa ??= gotVpa;
     if (got && isVpa(got)) vpa ??= got;
     else if (got) merchant ??= got;
@@ -217,12 +234,14 @@ function merchantIn(text: string, patterns: RegExp[]): { merchantRaw: string; vp
 
 function bankAlert(mail: Mail, text: string, bank: Bank, timeZone?: string): Parsed | null {
   const amt = amounts(text)[0];
-  const type = kindOf(text);
+  const head = alertPart(text);
+  const type = kindOf(head);
   if (!amt || !type) return null;
-  const { merchantRaw, vpa } = merchantIn(text, bank.merchant);
+  const { merchantRaw, vpa } = merchantIn(head, bank.merchant);
   return {
     rule: bank.rule, type, amount: amt.amount, currency: amt.currency, ...dated(text, mail, timeZone),
-    last4: findLast4(text), bankName: bank.name, channel: channelOf(text), merchantRaw: merchantRaw || (type === "cardPayment" ? `${bank.name} card payment` : bank.name), vpa,
+    // an alert about an account ("A/c no. XX4190") with no other sign of how is a bank transfer
+    last4: findLast4(text), bankName: bank.name, channel: channelOf(head) ?? (/\b(?:a\/c|account)\b/i.test(head) ? "netbanking" : undefined), merchantRaw: merchantRaw || (type === "cardPayment" ? `${bank.name} card payment` : bank.name), vpa,
   };
 }
 
