@@ -35,6 +35,12 @@ import { cn } from "@/lib/utils";
 
 type Draft = Doc<"drafts">;
 type Item = { draft: Draft; ready: Importable | null; matched?: Doc<"transactions"> };
+type Kind = "credit" | "debit" | "transfer";
+type Show = "all" | Kind;
+
+/** Which way a draft moves money: income and refunds (a negative expense) are credits. */
+const kindOf = (d: Draft): Kind => (d.proposal.type === "transfer" ? "transfer" : d.proposal.type === "income" || d.proposal.amount < 0 ? "credit" : "debit");
+const SHOW_LABEL: Record<Show, string> = { all: "All", credit: "Credits", debit: "Debits", transfer: "Transfers" };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -63,8 +69,18 @@ export default function GmailReviewPage() {
       return { draft, ready: importable(draft, ctx), matched: txId ? txById.get(txId) : undefined };
     });
   }, [view, matches, currencies, settings.decimals, settings.defaultAccountId]);
-  const fresh = useMemo(() => items.filter((i) => !i.matched), [items]);
-  const maybeAdded = useMemo(() => items.filter((i) => i.matched), [items]);
+  // the filter narrows everything below it: the list, select all, the totals and what Import takes
+  const [picked, setShow] = useState<Show>("all");
+  const counts = useMemo(() => {
+    const c: Record<Show, number> = { all: items.length, credit: 0, debit: 0, transfer: 0 };
+    for (const i of items) c[kindOf(i.draft)]++;
+    return c;
+  }, [items]);
+  // once the last credit (say) is imported or dismissed, the list goes back to all
+  const show: Show = picked !== "all" && !counts[picked] ? "all" : picked;
+  const shown = useMemo(() => (show === "all" ? items : items.filter((i) => kindOf(i.draft) === show)), [items, show]);
+  const fresh = useMemo(() => shown.filter((i) => !i.matched), [shown]);
+  const maybeAdded = useMemo(() => shown.filter((i) => i.matched), [shown]);
 
   // A guess by the AI from a sender the user never listed (Purchases, a money word in the subject) is
   // the likeliest to be wrong: it starts unticked, like an "already added?" one.
@@ -75,7 +91,7 @@ export default function GmailReviewPage() {
   const [flipped, setFlipped] = useState<Set<string>>(() => new Set());
   const isOn = (i: Item) => !!i.ready && (defaultOn(i) !== flipped.has(i.draft._id));
   const toggle = (i: Item) => setFlipped((s) => { const n = new Set(s); if (n.has(i.draft._id)) n.delete(i.draft._id); else n.add(i.draft._id); return n; });
-  const selected = items.filter(isOn);
+  const selected = shown.filter(isOn);
   // "Select all" is about the new entries: the "maybe already added" ones keep their own ticks
   const selectable = fresh.filter((i) => i.ready);
   const allOn = selectable.length > 0 && selectable.every(isOn);
@@ -85,9 +101,11 @@ export default function GmailReviewPage() {
     return n;
   });
   let out = 0, inn = 0;
+  // a refund (a negative expense) is money in, as the Credits filter has it
   for (const i of selected) {
-    if (i.draft.proposal.type === "expense") out += i.draft.proposal.amount;
-    else if (i.draft.proposal.type === "income") inn += i.draft.proposal.amount;
+    const k = kindOf(i.draft);
+    if (k === "debit") out += i.draft.proposal.amount;
+    else if (k === "credit") inn += Math.abs(i.draft.proposal.amount);
   }
 
   async function importSelected() {
@@ -157,7 +175,7 @@ export default function GmailReviewPage() {
       onDismiss={() => void dismissOne(i.draft)} onSame={i.matched ? () => void sameEntry(i.draft, i.matched!._id) : undefined}
       onMute={() => void mute(i.draft)} unknown={unknownSender(i.draft)} />
   );
-  const importLabel = busy ? "Importing…" : selected.length > 1 && selected.length === items.length ? `Import all ${selected.length}` : selected.length ? `Import ${selected.length}` : "Import";
+  const importLabel = busy ? "Importing…" : selected.length > 1 && selected.length === shown.length ? `Import all ${selected.length}` : selected.length ? `Import ${selected.length}` : "Import";
 
   return (
     <>
@@ -169,13 +187,22 @@ export default function GmailReviewPage() {
           <>
             <div className="px-4 pt-4 text-sm">
               <div className="font-medium">{plural(items.length, "entry", "entries")} found in your Gmail</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">{fresh.length ? "Untick any you don't want, then import the rest." : "Tick any you still want to import, or link them to the entries you have."} Tap a row to check or change it first.</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{items.some((i) => !i.matched) ? "Untick any you don't want, then import the rest." : "Tick any you still want to import, or link them to the entries you have."} Tap a row to check or change it first.</div>
+            </div>
+            <div role="radiogroup" aria-label="Show" className="flex gap-2 overflow-x-auto px-4 pt-3 [scrollbar-width:none]">
+              {(["all", "credit", "debit", "transfer"] as const).filter((k) => k !== "transfer" || counts.transfer).map((k) => (
+                <button key={k} type="button" role="radio" aria-checked={show === k} disabled={k !== "all" && !counts[k]} onClick={() => setShow(k)}
+                  className={cn("flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors disabled:opacity-50",
+                    show === k ? "border-primary bg-accent/40 font-medium text-foreground" : "text-muted-foreground hover:bg-accent/40")}>
+                  {SHOW_LABEL[k]}<span className={cn("tabular text-xs", k === "credit" ? "text-income" : k === "debit" ? "text-expense" : "text-muted-foreground")}>{counts[k]}</span>
+                </button>
+              ))}
             </div>
             {/* "Select all" only covers new entries, so with none left it would just sit there disabled */}
             {selectable.length ? <label className="mt-3 flex cursor-pointer items-center gap-3 border-y bg-muted/40 px-4 py-2 text-sm md:mx-4 md:rounded-lg md:border">
               <Checkbox checked={allOn} disabled={!selectable.length} onCheckedChange={(v) => setAll(!!v)} aria-label="Select all" />
               <span className="flex-1">{allOn ? "All selected" : "Select all"}</span>
-              <span className="tabular text-xs text-muted-foreground">{selected.length} of {items.length} to import</span>
+              <span className="tabular text-xs text-muted-foreground">{selected.length} of {shown.length} to import</span>
             </label> : <div className="mt-3" />}
 
             {fresh.length ? <Section title={`New · ${fresh.length}`}>{fresh.map(row)}</Section> : null}
