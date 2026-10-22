@@ -622,6 +622,30 @@ export const releaseFolded = internalMutation({
 });
 
 /**
+ * One-off, after the reading rules change: rebuild a user's waiting drafts under the current
+ * rules. Open drafts are removed (except ones the user said are new) and the list of mails read
+ * as "not money" is cleared, so the next check reads them all again. Saved and dismissed drafts,
+ * and the entries made from them, are left alone, so nothing is offered twice.
+ * `npx convex run gmail:rebuildOpenDrafts '{"userId":"…"}'` (add --prod for production).
+ */
+export const rebuildOpenDrafts = internalMutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }): Promise<{ removed: number; forgotten: number }> => {
+    const open = await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect();
+    let removed = 0;
+    for (const d of open) {
+      if (d.keptNew) continue;
+      await ctx.db.delete(d._id);
+      removed++;
+    }
+    const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    const forgotten = c?.processed?.length ?? 0;
+    if (c) await ctx.db.patch(c._id, { processed: [] });
+    return { removed, forgotten };
+  },
+});
+
+/**
  * Dev: the text UnMoney reads from one of a user's mails and what the rules make of it, for
  * fixing a rule. `npx convex run gmail:readMail '{"userId":"…","messageId":"…"}'`
  */

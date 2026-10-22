@@ -25,3 +25,11 @@ test("promotions and statements are judged by the subject, so a receipt's footer
   expect(triage({ subject: "Your Swiggy order was delivered", text: "Grand Total ₹485 paid via UPI. Offers: 50% off your next order!" })).toEqual({ keep: true });
   expect(triage({ subject: "Offers just for you", text: "Grand Total ₹485 paid via UPI." })).toEqual({ keep: false, reason: "promo" });
 });
+
+test("an OTP is dropped by its code or its subject, not by a footer that warns about OTPs", () => {
+  const footer = "Amount Credited: INR 598.00 Account Number: XX4190 Transaction Info: UPI/P2A/925606398105/AMIT DESH. Please do not share your Internet Banking details, such as user ID/password or your Credit/Debit Card number/CVV/OTP with anyone, either over phone or through email.";
+  expect(triage({ subject: "INR 598.00 was credited to your A/c.", text: footer })).toEqual({ keep: true });
+  expect(triage({ subject: "Transaction alert", text: "482913 is the OTP for a transaction of Rs 2,499.00 at AMAZON." })).toEqual({ keep: false, reason: "otp" });
+  expect(triage({ subject: "Transaction alert", text: "Your OTP for the payment of Rs 2,499.00 is 482913." })).toEqual({ keep: false, reason: "otp" });
+  expect(triage({ subject: "Your OTP", text: "Use it to pay Rs 2,499.00." })).toEqual({ keep: false, reason: "otp" });
+});

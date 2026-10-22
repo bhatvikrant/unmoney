@@ -343,3 +343,19 @@ test("releasing folded mail frees what open drafts absorbed, but not paired tran
   // the ₹0 draft is gone, so its mails are read again
   expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["a2", "a3", "b2", "c2", "z", "z2"] })).toEqual(["b2", "c2"]);
 });
+
+test("rebuilding removes waiting drafts and forgets \"not money\" mail, keeping handled drafts and \"it's new\" ones", async () => {
+  const { t, userId, connect, insert } = await setup();
+  await connect();
+  await t.mutation(internal.gmail.writeSync, {
+    userId, startedAt: 1, updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 4, processed: [{ id: "otp", receivedAt: 1 }],
+    inserts: [insert("a"), insert("b"), insert("c")],
+  });
+  const all = await t.run((ctx) => ctx.db.query("drafts").collect());
+  await t.run(async (ctx) => {
+    await ctx.db.patch(all.find((d) => d.messageId === "b")!._id, { status: "accepted" });
+    await ctx.db.patch(all.find((d) => d.messageId === "c")!._id, { keptNew: true });
+  });
+  expect(await t.mutation(internal.gmail.rebuildOpenDrafts, { userId })).toEqual({ removed: 1, forgotten: 1 });
+  expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["a", "b", "c", "otp"] })).toEqual(["b", "c"]);
+});
