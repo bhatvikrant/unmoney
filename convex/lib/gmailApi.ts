@@ -172,6 +172,14 @@ function trimQuoted(text: string): string {
   return body.split("\n").filter((l) => !l.startsWith(">")).join("\n");
 }
 
+/**
+ * Lines without their indentation, and at most one blank line in a row: some banks indent their
+ * mail with hundreds of spaces, which would use up MAX_TEXT before the transaction details.
+ */
+export function tidyBody(text: string): string {
+  return text.split("\n").map((l) => l.trim()).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 /** One mail, reduced to what the parsers need; the body is capped and never stored. */
 export async function getMail(token: string, id: string): Promise<Mail> {
   const { json } = await api<Message>(token, `/messages/${id}?format=full`);
@@ -184,6 +192,6 @@ export async function getMail(token: string, id: string): Promise<Mail> {
     from: header("from"),
     subject: header("subject"),
     receivedAt: Number(json.internalDate ?? Date.now()),
-    text: trimQuoted(raw).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_TEXT),
+    text: tidyBody(trimQuoted(raw.replace(/\r\n?/g, "\n"))).slice(0, MAX_TEXT),
   };
 }
