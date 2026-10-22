@@ -105,7 +105,7 @@ export function findBankName(text: string): string | undefined {
 }
 
 /** Where a bank's sign-off and safety footer begin: "Please do not share your … Credit/Debit Card number/CVV/OTP". */
-const FOOTER = /\b(?:Please do not share|To check your available balance|Should you wish to reach|Feel free to connect|Always open to help|Regards,|Yours sincerely|Sincerely,|Looking forward to|This is a system generated|Issued by)\b/i;
+const FOOTER = /\b(?:Please do not share|For any concerns|please contact us|To check your available balance|Should you wish to reach|Feel free to connect|Always open to help|Regards,|Yours sincerely|Sincerely,|Looking forward to|This is a system generated|Issued by)\b/i;
 /** The alert without its footer, for what the footer's words would mislead: the channel, the direction and the counterparty. */
 function alertPart(text: string): string {
   const at = text.search(FOOTER);
@@ -137,7 +137,7 @@ function dated(text: string, mail: Mail, timeZone?: string): Base {
 type Bank = { name: string; rule: string; domains: string[]; merchant: RegExp[] };
 
 /** The sentences every bank shares: a refund's shop, a card purchase's shop. */
-const ANY_BANK: RegExp[] = [/\brefund (?:from|for|by)\s+(?<m>.+?)(?:\s+on\b|\.|$)/i, /\bat\s+(?<m>.+?)\s+on\s+\d/i];
+const ANY_BANK: RegExp[] = [/\brefund (?:from|for|by)\s+(?<m>.+?)(?:\s+on\b|\.|$)/i, /\bat\s+(?!\d{1,2}:\d{2})(?<m>(?:[^.]|\.(?=\S)){1,60}?)\s+on\s+\d/i];
 /**
  * Where the counterparty sits in each bank's sentences, tried in order after ANY_BANK. The `m`
  * group is the merchant, `vpa` the UPI id; a match may carry either or both. Banks are moving
@@ -155,6 +155,7 @@ const BANKS: Bank[] = [
   { name: "Axis", rule: "axis", domains: ["axisbank.com", "axisbank.co.in", "axis.bank.in"], merchant: [
     // the axis.bank.in layout: "Transaction Info: UPI/P2A/529312345690/PRIYA MENON/…"; a bill: "Biller name: Mirae Asset Mutual Fund Consumer no.: …"
     /\bTransaction Info(?:rmation)?\s*[:-]?\s*(?<m>[^\s].*?)(?=\s+(?:If|Please|Not you|Call|Available|Avl|Regards|Thank|Always|Never|Warm|Disclaimer|This is|Do not|Reach)\b|\s{2,}|$)/i,
+    /\bReference no\.?\s*-?\s*(?<m>(?:UPI|IMPS|NEFT|RTGS)\/\S+)/i,
     /\bBiller name\s*:\s*(?<m>.+?)(?=\s+(?:Consumer|Payment|Bill|Amount|Customer)\b|$)/i,
     // "debited with INR 10000.00 on 22-10-2026 08:21:32 IST by ACH-DR-PPFAS 22102026 CAM."
     /\b(?:debited|credited)\b(?:[^.]|\.(?=\d))*?\bby\s+(?!you\b)(?<m>(?:[^.]|\.(?=\d)){2,60}?)\.(?:\s|$)/i,
