@@ -688,10 +688,12 @@ function validateTx(w: Work, t: TxFields, was?: Pick<Doc<"transactions">, "accou
 }
 
 const isCardKind = (k: string) => k === "card" || k === "debitCard";
-/** The card-only fields, tidied, or all unset for a method that is not a card. */
+/** Kinds that may carry the last 4 digits of their number: cards, and bank accounts. */
+const hasLast4 = (k: string) => isCardKind(k) || k === "bank";
+/** The card fields, tidied: all of them on a card, only the last 4 digits on a bank account, none on the rest. */
 const cardFields = (kind: string, a: Pick<AccountFields, "bankName" | "last4" | "color">) => (isCardKind(kind)
   ? { bankName: a.bankName?.trim() || undefined, last4: a.last4 || undefined, color: a.color?.toLowerCase() || undefined }
-  : { bankName: undefined, last4: undefined, color: undefined });
+  : { bankName: undefined, last4: kind === "bank" ? a.last4 || undefined : undefined, color: undefined });
 
 /** Checks a payment method and returns its kind (an op from an older app may only name a group). */
 function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): AccountKind {
@@ -709,8 +711,8 @@ function validateAccount(w: Work, a: AccountFields, selfId?: Id<"accounts">): Ac
   }
   if (kind === "debitCard" && !a.linkedAccountId) throw new Error("A debit card needs a linked bank account");
   if (a.creditLimit !== undefined && a.creditLimit !== null && (!Number.isInteger(a.creditLimit) || a.creditLimit < 0 || a.creditLimit > MAX_AMOUNT)) throw new Error("Credit limit must be a positive amount");
+  if (hasLast4(kind) && a.last4 && !/^\d{4}$/.test(a.last4)) throw new Error("The last 4 digits must be 4 numbers");
   if (isCardKind(kind)) {
-    if (a.last4 && !/^\d{4}$/.test(a.last4)) throw new Error("The last 4 digits must be 4 numbers");
     if (a.bankName && a.bankName.trim().length > MAX_NAME) throw new Error("Bank name must be at most 40 characters");
     if (a.color && !/^#[0-9a-f]{6}$/i.test(a.color)) throw new Error("Pick a card colour");
   }

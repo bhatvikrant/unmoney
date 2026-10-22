@@ -98,7 +98,7 @@ export default function AccountDetail() {
         ) : (
         <div className="flex items-center justify-between px-4 py-2">
           <div>
-            <div className="text-xs text-muted-foreground">{data.kind === "card" ? "Card balance today" : "Balance today"}</div>
+            <div className="text-xs text-muted-foreground">{data.kind === "card" ? "Card balance today" : "Balance today"}{data.kind === "bank" && a.last4 ? ` · A/c •• ${a.last4}` : ""}</div>
             <Money amount={data.balance} kind={data.balance < 0 ? "expense" : "income"} className="text-xl font-semibold" />
             {data.upcoming ? <div className="text-xs text-muted-foreground">Upcoming <Money amount={data.upcoming} sign muted /> · then <Money amount={data.balance + data.upcoming} muted /></div> : null}
             {/* a debit card or linked UPI has no balance of its own: its bank is the one to check */}

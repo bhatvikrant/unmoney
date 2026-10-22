@@ -79,7 +79,7 @@ export default function AccountEditor() {
         noDueTracking: kind === "card" ? !f.trackDue : undefined,
         linkedAccountId: (kind === "debitCard" || kind === "upi") && f.linkedAccountId && f.linkedAccountId !== NONE ? (f.linkedAccountId as Id<"accounts">) : undefined,
         bankName: isCard ? f.bankName.trim() || undefined : undefined,
-        last4: isCard ? f.last4 || undefined : undefined,
+        last4: isCard || kind === "bank" ? f.last4 || undefined : undefined,
         color: isCard ? f.color || undefined : undefined,
       };
       if (args.last4 && args.last4.length !== 4) throw new Error("Enter all 4 last digits, or leave them empty");
@@ -112,6 +112,12 @@ export default function AccountEditor() {
         ) : (
           <div className="space-y-1.5"><Label htmlFor="pm-name">Name</Label><Input id="pm-name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus={!id} /></div>
         )}
+        {kind === "bank" ? (
+          <div className="space-y-1.5"><Label htmlFor="pm-last4">Account number, last 4 digits (optional)</Label>
+            <Input id="pm-last4" inputMode="numeric" autoComplete="off" maxLength={4} placeholder="1234" value={f.last4} onChange={(e) => setF({ ...f, last4: e.target.value.replace(/\D/g, "").slice(0, 4) })} className="w-28 tabular" />
+            <p className="text-xs text-muted-foreground">Tells your accounts apart, and lets Gmail match alerts like "A/c XX1234" to this account.</p>
+          </div>
+        ) : null}
         {/* a debit card or linked UPI spends from its bank: no balance of its own */}
         {linked ? null : (
           <div className="space-y-1.5"><Label htmlFor="pm-balance">Opening balance ({settings.mainCurrency})</Label><Input id="pm-balance" inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /><p className="text-xs text-muted-foreground">The balance before your first entry here. A negative amount records a liability (loan, overdraft, card debt).</p></div>

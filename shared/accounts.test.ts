@@ -42,3 +42,14 @@ test("a card is paid only from a live method that is not a credit card", () => {
   s = run(s, "accounts.remove", { id: acc(s, "Cash")._id });
   expect(() => pay(acc(s, "Cash")._id)).toThrow(/Cash has been deleted/);
 });
+
+test("a bank account keeps the last 4 digits of its number; other non-card methods do not", () => {
+  let s = run(emptySnapshot(), "settings.completeOnboarding", { currency: "USD" });
+  s = run(s, "accounts.create", { ...method, name: "Axis Savings", kind: "bank", last4: "9900", bankName: "Axis", color: "#123456" });
+  const axis = acc(s, "Axis Savings");
+  // only the digits: bank name and colour belong to cards
+  expect([axis.last4, axis.bankName, axis.color]).toEqual(["9900", undefined, undefined]);
+  expect(() => run(s, "accounts.create", { ...method, name: "Bad", kind: "bank", last4: "99" })).toThrow(/4 numbers/);
+  s = run(s, "accounts.create", { ...method, name: "Wallet", kind: "cash", last4: "1111" });
+  expect(acc(s, "Wallet").last4).toBeUndefined();
+});
