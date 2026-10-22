@@ -41,13 +41,20 @@ export function startPwa() {
     emit();
   });
 
-  const reload = registerSW({
-    onNeedRefresh() {
-      // queued changes live in IndexedDB, so reloading never loses them
-      toast("A new version of UnMoney is ready", { duration: Infinity, action: { label: "Reload", onClick: () => void reload() } });
-    },
+  registerSW({
+    onNeedRefresh: offerUpdate,
+    onNeedReload: reloadOnce,
     onRegisteredSW(_url, reg) {
       if (!reg) return;
+      // Workbox only reports one update found after the page has been open a minute (it stops
+      // listening once it decides an update came from elsewhere), so an app left open through
+      // several deploys never heard about the second one. Watch the registration directly.
+      reg.addEventListener("updatefound", () => {
+        const sw = reg.installing;
+        sw?.addEventListener("statechange", () => {
+          if (sw.state === "installed" && navigator.serviceWorker.controller) offerUpdate();
+        });
+      });
       // an installed app can stay open for days: look for a new version hourly and when it comes back to the front
       const check = () => {
         if (navigator.onLine) void reg.update().catch(() => {});
@@ -56,6 +63,31 @@ export function startPwa() {
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") check();
       });
+    },
+  });
+}
+
+let reloading = false;
+function reloadOnce() {
+  if (reloading) return;
+  reloading = true;
+  window.location.reload();
+}
+
+/** One toast however many versions arrive while it's up; Reload switches to the newest waiting one. */
+function offerUpdate() {
+  toast("A new version of UnMoney is ready", {
+    id: "new-version",
+    duration: Infinity,
+    action: {
+      label: "Reload",
+      onClick: async () => {
+        // queued changes live in IndexedDB, so reloading never loses them
+        const waiting = (await navigator.serviceWorker.getRegistration())?.waiting;
+        if (!waiting) return reloadOnce();
+        navigator.serviceWorker.addEventListener("controllerchange", reloadOnce, { once: true });
+        waiting.postMessage({ type: "SKIP_WAITING" });
+      },
     },
   });
 }
