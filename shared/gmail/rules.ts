@@ -204,8 +204,11 @@ const NOT_A_NAME = /\b(?:click|clicking|password|cashback|OTP|CVV|call us|custom
 /** The counterparty's name in a slash-separated transaction line: the first part that is words, not a rail or a reference. */
 function nameInInfo(info: string): string {
   if (!info.includes("/")) {
-    // "ACH-DR-PPFAS 22102026 CAM": the rail and the mandate's date and codes around the name
-    const words = info.replace(/^(?:N?ACH|ECS)-(?:DR|CR)-/i, "").split(/\s+/).filter((w) => !/\d{4,}/.test(w));
+    // "ACH-DR-PPFAS 22102026 CAM", "ACH-DR-BD_HDFCMF-TJOK12832": the rail, the collector (BD is
+    // BillDesk), and the mandate's dates and reference codes around the name
+    const words = info.replace(/^(?:N?ACH|ECS)-(?:DR|CR)-/i, "").split(/[\s_]+/)
+      .map((w) => w.split("-").filter((p) => p && !/\d/.test(p)).join("-"))
+      .filter((w) => w && !/^(?:BD|BDSK|RZP|CF|PAYU)$/i.test(w));
     return words.join(" ") || info;
   }
   const part = info.split("/").map((x) => x.trim()).find((x) => /[a-z]{2}/i.test(x) && !RAIL.test(x) && !/\d{4,}/.test(x));

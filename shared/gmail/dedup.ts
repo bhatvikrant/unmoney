@@ -45,15 +45,22 @@ export function samePayment(a: Draftish, b: Draftish): boolean {
   if (receipts === 1) return true;
   if (receipts === 2) return false;
   const l4a = pa.accountHint?.last4, l4b = pb.accountHint?.last4;
+  const sameSender = senderAddress(a.from) === senderAddress(b.from);
+  // the bank's alert and its own summary of the payment ("INR 2500.00 payment successful"), which names no account
+  if (sameSender && !!l4a !== !!l4b) return true;
   if (!l4a || l4a !== l4b) return false;
-  if (senderAddress(a.from) === senderAddress(b.from)) return false;
+  if (sameSender) return false;
   const na = pa.note.trim().toLowerCase(), nb = pb.note.trim().toLowerCase();
   return !na || !nb || na === nb;
 }
 
-/** The side whose note and category are worth keeping: the shop's. */
+/** A bank's summary of a payment it also alerted about: its biller name reads better than the alert's code. */
+const isSummaryOf = (other: Draftish, keep: Draftish) =>
+  !other.proposal.accountHint?.last4 && !!keep.proposal.accountHint?.last4 && senderAddress(other.from) === senderAddress(keep.from);
+
+/** The side whose note and category are worth keeping: the shop's receipt, or the bank's summary. */
 function better(keep: Draftish, other: Draftish): Omit<Fold, "extraMessageIds"> {
-  if (!isShopMail(other) || isShopMail(keep)) return {};
+  if (!isSummaryOf(other, keep) && (!isShopMail(other) || isShopMail(keep))) return {};
   const p = other.proposal;
   return { note: p.note, categoryId: p.categoryId ?? keep.proposal.categoryId, subcategoryId: p.categoryId ? p.subcategoryId : keep.proposal.subcategoryId };
 }

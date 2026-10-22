@@ -170,3 +170,15 @@ test("the other side arriving after the first was already a draft turns that dra
   const credit = open({ id: "c", from: ICICI_ALERT, type: "income", accountId: ICICI, amount: 2500000 });
   expect(foldDrafts([alert("d", { accountId: HDFC, amount: 2500000 })], [credit], accounts).updates[0].transfer).toEqual({ accountId: HDFC, toAccountId: ICICI });
 });
+
+test("a bank's alert and its own summary of the same payment are one draft, named as the summary names it", () => {
+  const from = "Axis Bank Alerts <alerts@axis.bank.in>";
+  const debit = cand({ id: "alert", from, subject: "Debit transaction alert", note: "MiraeAsset", last4: "4190", amount: 250000, date: "2026-10-21", at: 1 });
+  const summary = cand({ id: "summary", from, subject: "INR 2500.00 payment successful", note: "Mirae Asset Mutual Fund", amount: 250000, date: "2026-10-21", at: 2 });
+  for (const order of [[debit, summary], [summary, debit]]) {
+    expect(foldDrafts(order, []).inserts.map((d) => [d.messageId, d.extraMessageIds, d.proposal.note])).toEqual([["alert", ["summary"], "Mirae Asset Mutual Fund"]]);
+  }
+  // the summary arriving after the alert's draft folds into it
+  const existing = { ...debit, _id: "d-alert" as Id<"drafts">, _creationTime: 0, userId: "u" as Id<"users">, status: "open" as const };
+  expect(foldDrafts([summary], [existing]).updates).toEqual([{ id: existing._id, extraMessageIds: ["summary"], note: "Mirae Asset Mutual Fund", categoryId: undefined, subcategoryId: undefined }]);
+});
