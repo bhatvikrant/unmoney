@@ -61,3 +61,7 @@ test("muted senders are left out of the search", () => {
   expect(q).toBe(`after:100 (from:(hdfcbank.net) OR subject:(${MONEY_SUBJECT_WORDS.join(" OR ")})) -from:(offers@swiggy.in)`);
   expect(buildQuery({ senders: [], scanPurchases: false, afterSeconds: 100, muted: [] })).not.toContain("-from");
 });
+
+test("the banks' new .bank.in domains are default senders", () => {
+  for (const d of ["axis.bank.in", "hdfc.bank.in", "icici.bank.in", "sbi.bank.in", "kotak.bank.in"]) expect(matchesSender(`alerts@${d}`, DEFAULT_SENDERS), d).toBe(true);
+});

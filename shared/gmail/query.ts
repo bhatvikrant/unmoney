@@ -8,6 +8,7 @@ import { senderAddress, senderDomain } from "./mail";
 export const DEFAULT_SENDERS: string[] = [
   "hdfcbank.net", "hdfcbank.com", "icicibank.com", "axisbank.com", "sbi.co.in", "sbicard.com", "kotak.com", "kotakbank.com",
   "idfcfirstbank.com", "yesbank.in", "indusind.com", "federalbank.co.in", "hsbc.bank.in", "hsbc.co.in",
+  "hdfc.bank.in", "icici.bank.in", "axis.bank.in", "sbi.bank.in", "kotak.bank.in",
   "phonepe.com", "paytm.com", "paytmmail.com", "payments-noreply@google.com", "npci.org.in",
   "amazon.in", "flipkart.com", "swiggy.in", "zomato.com", "uber.com", "olacabs.com",
   "apple.com", "netflix.com", "spotify.com", "googleplay-noreply@google.com",

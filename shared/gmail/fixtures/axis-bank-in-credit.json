@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "axis",
+    "type": "credit",
+    "amount": 8452,
+    "currency": "INR",
+    "date": "2026-10-22",
+    "dateSource": "mail",
+    "time": "11:44",
+    "last4": "9900",
+    "bankName": "Axis",
+    "channel": "netbanking",
+    "merchantRaw": "ACME TECH PVT LTD"
+  }
+}
