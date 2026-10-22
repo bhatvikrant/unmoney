@@ -24,14 +24,13 @@ import { triage } from "../shared/gmail/triage";
 import { parseMail } from "../shared/gmail/rules";
 import { accountMapKey, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
 import { foldDrafts, laterMatches, matchEntry, type DraftCandidate } from "../shared/gmail/dedup";
-import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, matchesSender, normaliseSender, OVERLAP_MS, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
+import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, matchesSender, normaliseSender, readsFromFor, spanMs, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
 import { applyMerchantMemory, learnMerchants, mergeMerchants, type MerchantMemory } from "../shared/gmail/learn";
 import { PAIRED_NOTE } from "../shared/gmail/dedup";
 import { senderAddress } from "../shared/gmail/mail";
 import { AI_BATCH, AI_MODEL, AI_MONTHLY_CAP, buildAiInput, lowerConfidence, OUTPUT_SCHEMA, SYSTEM_PROMPT, validateAiResults, type AiRead } from "../shared/gmail/ai";
 
 type Connection = Doc<"gmailConnections">;
-const DAY = 24 * 60 * 60 * 1000;
 /** Mails listed on the first check and on later ones; later ones cover 30 days too, and fetch only what is new. */
 const FIRST_SYNC_MAX = 300;
 const SYNC_MAX = 300;
@@ -72,6 +71,8 @@ export const status = query({
       lastSyncAt: c?.lastSyncAt ?? null,
       lastError: c?.lastError ?? null,
       lookbackDays: (c?.lookbackDays ?? 30) as Lookback,
+      readsFrom: c?.readsFrom ?? null,
+      syncedUpTo: c?.syncedUpTo ?? null,
       senders: c?.senders ?? DEFAULT_SENDERS,
       muted: c?.muted ?? [],
       scanPurchases: c?.scanPurchases ?? true,
@@ -200,7 +201,7 @@ export const saveConnection = internalMutation({
 
 async function saveConnectionFor(ctx: MutationCtx, { userId, email, refreshTokenEnc, iv, lookbackDays }: { userId: Id<"users">; email: string; refreshTokenEnc: string; iv: string; lookbackDays: number }) {
   if (!(await ctx.db.get(userId))) return;
-  const readsFrom = Date.now() - lookbackDays * DAY;
+  const readsFrom = readsFromFor(lookbackDays, Date.now());
   const old = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
   if (old) {
     // a different mailbox is a fresh start; the same one picks up where it left off
@@ -232,7 +233,8 @@ export const updateSettings = mutation({
     const patch: Partial<Connection> = {};
     if (args.senders) patch.senders = [...new Set(args.senders.map(normaliseSender).filter(Boolean))].slice(0, MAX_SENDERS);
     if (args.scanPurchases !== undefined) patch.scanPurchases = args.scanPurchases;
-    if (args.lookbackDays !== undefined) patch.lookbackDays = args.lookbackDays;
+    // a new look-back counts from now: a longer one reaches older mail, "from now on" stops reading it
+    if (args.lookbackDays !== undefined) Object.assign(patch, { lookbackDays: args.lookbackDays, readsFrom: readsFromFor(args.lookbackDays, Date.now()) });
     if (args.paused === true && c.status === "ok") patch.status = "paused";
     if (args.paused === false && c.status === "paused") { patch.status = "ok"; patch.lastError = undefined; }
     await ctx.db.patch(c._id, patch);
@@ -548,8 +550,8 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     learned: learnAccounts(prep),
     learnedMerchants: learnMerchants(prep.accepted, c.merchantMap ?? {}, prep.categories),
     aiCalls, aiSkipped, aiDropped, notes, processed,
-    // a check starts OVERLAP_MS before syncedUpTo: hold it back so the mail skipped this time is in the next window
-    syncedUpTo: Math.min(startedAt, ...retry.map((m) => m.receivedAt + OVERLAP_MS)),
+    // a check starts the look-back before syncedUpTo: hold it back so the mail skipped this time is in the next window
+    syncedUpTo: Math.min(startedAt, ...retry.map((m) => m.receivedAt + spanMs(c.lookbackDays))),
   };
 }
 
@@ -648,7 +650,7 @@ export const writeSync = internalMutation({
     const month = monthOf(startedAt);
     const entry = { at: startedAt, scanned, found, ...(note ? { note } : {}) };
     // what the next window can no longer reach is forgotten
-    const reach = syncedUpTo - OVERLAP_MS;
+    const reach = syncedUpTo - spanMs(c.lookbackDays);
     const known = new Set(processed.map((p) => p.id));
     await ctx.db.patch(c._id, {
       lastSyncAt: startedAt, lastError: undefined, syncedUpTo,

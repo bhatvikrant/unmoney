@@ -3,13 +3,13 @@
  * tune which senders are read, and disconnect. The consent screen is Google's own page; this
  * screen sends the browser there and reads the outcome from ?gmail= when it comes back.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { Mail, RefreshCw, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Mail, Pause, Play, RefreshCw, Unplug, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
-import { LOOKBACKS, normaliseSender, type Lookback } from "../../../shared/gmail/query";
+import { LOOKBACKS, normaliseSender, SENDER_PRESETS, windowStart, type Lookback } from "../../../shared/gmail/query";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,10 @@ export function ago(ms: number, now = Date.now()): string {
   const d = Math.round(h / 24);
   return d === 1 ? "yesterday" : `${d} days ago`;
 }
+
+const DAY = 24 * 60 * 60 * 1000;
+/** "23 Sep". */
+const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
 /** How long before this page loads the first check may have started. */
 const FIRST_CHECK_SLACK_MS = 2 * 60 * 1000;
@@ -152,6 +156,27 @@ export default function GmailSettings() {
     }
   }
 
+  async function changeLookback(d: Lookback) {
+    if (!s || d === s.lookbackDays) return;
+    try {
+      await update({ lookbackDays: d });
+      const back = day(windowStart({ lookbackDays: d, readsFrom: Date.now() - d * DAY }, Date.now()));
+      toast(d === 0 ? "Only new mail is read from now on." : `The next check reads back to ${back}.`, d ? { action: { label: "Check now", onClick: () => void check() } } : undefined);
+    } catch (e) {
+      toast.error(errorText(e));
+    }
+  }
+
+  async function clearSenders() {
+    if (!s) return;
+    const ok = await confirm({
+      title: "Clear all senders?",
+      description: `All ${s.senders.length} are removed. Only mail with a payment in its subject${s.scanPurchases ? " or filed under Purchases" : ""} will be read until you add some back; presets bring them back in one tap.`,
+      action: "Clear all",
+    });
+    if (ok) void patch({ senders: [] });
+  }
+
   function addSender() {
     const entry = normaliseSender(newSender);
     if (!entry || !s) return;
@@ -188,12 +213,8 @@ export default function GmailSettings() {
             </Section>
             <Section title="Look back">
               <div className="px-4 py-3">
-                <div className="grid grid-cols-4 gap-2">
-                  {LOOKBACKS.map((d) => (
-                    <button key={d} type="button" onClick={() => setLookback(d)} className={cn("h-9 rounded-md border text-sm transition-colors", lookback === d ? "border-primary text-foreground font-medium bg-accent/40" : "text-muted-foreground")}>{d === 0 ? "From now" : `${d} days`}</button>
-                  ))}
-                </div>
-                <div className="mt-2 text-xs text-muted-foreground">{lookback === 0 ? "Only mail that arrives after you connect. Nothing already in your inbox is read." : "How far back the first check reads. After that, every hour picks up what is new."}</div>
+                <LookbackPicker value={lookback} onChange={setLookback} />
+                <div className="mt-2 text-xs text-muted-foreground">{lookback === 0 ? "Only mail that arrives after you connect. Nothing already in your inbox is read." : `Every hourly check reads money mail from the last ${lookback} days. You can change this later.`}</div>
               </div>
             </Section>
             <div className="px-4 pt-4">
@@ -224,74 +245,166 @@ export default function GmailSettings() {
                 <Button size="sm" className="mt-2" disabled={busy !== null} onClick={() => void connect()}>Reconnect</Button>
               </div>
             ) : null}
+
             <Section>
-              <Row label={`Connected as ${s.email}`} hint={s.lastSyncAt ? `Last checked ${ago(s.lastSyncAt)}` : "Not checked yet"}
-                right={<Button variant="outline" size="sm" disabled={busy !== null} onClick={() => void onDisconnect()}>Disconnect</Button>} />
-              <Row label={s.open ? `${s.open} ${s.open === 1 ? "draft" : "drafts"} waiting` : "Nothing waiting"} hint={s.open ? "Faded rows in the ledger, or review them all" : "New mail is checked every hour"}
-                right={
-                  <div className="flex items-center gap-2">
-                    {s.open ? <Button size="sm" onClick={() => nav("/gmail")}>Pick what to import</Button> : null}
-                    <Button variant="outline" size="sm" disabled={busy !== null || s.status !== "ok"} onClick={() => void check()}>
-                      <RefreshCw className={cn("size-3.5", busy === "check" && "animate-spin")} />{busy === "check" ? "Checking" : "Check now"}
-                    </Button>
+              <div className="flex items-start gap-3 px-4 pt-4">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"><Mail className="size-4" /></span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm">Connected to <span className="font-medium break-all">{s.email}</span></div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                    <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", s.status === "ok" ? "bg-income" : s.status === "paused" ? "bg-muted-foreground" : "bg-amber-500")} />
+                    <span>
+                      {s.status === "ok" ? "Checks every hour" : s.status === "paused" ? "Paused" : "Needs reconnecting"}
+                      {" · "}{s.lastSyncAt ? `last checked ${ago(s.lastSyncAt)}` : "not checked yet"}
+                    </span>
                   </div>
-                } />
-              <Row label="Paused" hint={s.status === "paused" && s.lastError ? `Paused after repeated failures: ${s.lastError}` : "Stop checking without disconnecting"}
-                right={<Switch checked={s.status === "paused"} disabled={s.status === "reauth"} onCheckedChange={(v) => void patch({ paused: v })} />} />
+                  {s.status === "paused" && s.lastError ? <div className="mt-1 text-xs text-destructive">Paused after repeated failures: {s.lastError}</div> : null}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 px-4 pt-3 pb-4">
+                <Button variant="outline" disabled={busy !== null || s.status !== "ok"} onClick={() => void check()}>
+                  <RefreshCw className={cn("size-4", busy === "check" && "animate-spin")} />{busy === "check" ? "Checking…" : "Check now"}
+                </Button>
+                {s.status === "paused" ? (
+                  <Button variant="outline" onClick={() => void patch({ paused: false })}><Play className="size-4" />Resume</Button>
+                ) : (
+                  <Button variant="outline" disabled={s.status === "reauth"} onClick={() => void patch({ paused: true })}><Pause className="size-4" />Pause</Button>
+                )}
+              </div>
+              <Row
+                label={s.open ? `${s.open} ${s.open === 1 ? "draft" : "drafts"} waiting` : "Nothing waiting"}
+                hint={s.open ? "Faded rows in the ledger, or review them all" : "New money mail shows up here to pick from"}
+                className="border-t"
+                onClick={s.open ? () => nav("/gmail") : undefined}
+                right={s.open ? <span className="flex items-center gap-1 text-sm font-medium">Review<ChevronRight className="size-4 text-muted-foreground" /></span> : null}
+              />
+            </Section>
+
+            <Section title="Look back">
+              <div className="px-4 py-3">
+                <LookbackPicker value={s.lookbackDays} onChange={(d) => void changeLookback(d)} />
+                <div className="mt-2 text-xs text-muted-foreground">
+                  {s.lookbackDays === 0
+                    ? <>Only mail that arrives from {day(s.readsFrom ?? Date.now())} on is read. Nothing older in your inbox.</>
+                    : <>Every hourly check reads money mail from the last {s.lookbackDays} days, now back to <span className="text-foreground">{day(windowStart({ lookbackDays: s.lookbackDays, readsFrom: s.readsFrom ?? undefined, syncedUpTo: s.syncedUpTo ?? undefined }, Date.now()))}</span>. Mail that already became a draft is skipped.</>}
+                </div>
+              </div>
             </Section>
 
             <Section title="What is read">
-              <Row label="Mail Gmail files under Purchases" hint="Receipts from shops the sender list doesn't name" right={<Switch checked={s.scanPurchases} onCheckedChange={(v) => void patch({ scanPurchases: v })} />} />
-              <div className="px-4 py-3">
-                <div className="text-sm">Senders</div>
-                <div className="mt-0.5 text-xs text-muted-foreground">Mail from these addresses and domains is always read. Mail from anyone else only when its subject mentions a payment.</div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {s.senders.map((x) => (
-                    <span key={x} className="inline-flex items-center gap-1 rounded-full border bg-muted/40 pl-2.5 pr-1 py-0.5 text-xs">
-                      {x}
-                      <button type="button" aria-label={`Remove ${x}`} className="rounded-full p-0.5 text-muted-foreground hover:text-foreground" onClick={() => void patch({ senders: s.senders.filter((y) => y !== x) })}><X className="size-3" /></button>
-                    </span>
-                  ))}
+              <Row label="Mail Gmail files under Purchases" hint="Receipts from shops the sender list doesn't name" right={<Switch aria-label="Read mail Gmail files under Purchases" checked={s.scanPurchases} onCheckedChange={(v) => void patch({ scanPurchases: v })} />} />
+              <Collapsible label="Senders" hint={s.senders.length ? `${s.senders.length} addresses and domains always read` : "None: only mail with a payment in its subject"} count={s.senders.length}>
+                <div className="text-xs text-muted-foreground">Mail from these is always read. Mail from anyone else only when its subject mentions a payment.</div>
+                <div className="mt-3 text-xs uppercase tracking-wide text-muted-foreground">Presets</div>
+                <div className="mt-1 -mx-4 divide-y border-y">
+                  {SENDER_PRESETS.map((p) => {
+                    const have = p.senders.filter((x) => s.senders.includes(x)).length;
+                    const all = have === p.senders.length;
+                    return (
+                      <label key={p.id} className="flex cursor-pointer items-center gap-3 px-4 py-2.5">
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm">{p.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{have && !all ? `${have} of ${p.senders.length} on your list · ` : ""}{p.senders.join(", ")}</span>
+                        </span>
+                        <Switch aria-label={p.name} checked={all} onCheckedChange={(on) => void patch({ senders: on ? [...s.senders, ...p.senders.filter((x) => !s.senders.includes(x))] : s.senders.filter((x) => !p.senders.includes(x)) })} />
+                      </label>
+                    );
+                  })}
                 </div>
-                <div className="mt-2 flex gap-2">
-                  <Input value={newSender} onChange={(e) => setNewSender(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSender(); } }} placeholder="alerts@bank.com or bank.com" className="h-8 text-sm" aria-label="Add a sender" />
-                  <Button size="sm" variant="outline" onClick={addSender} disabled={!newSender.trim()}>Add</Button>
+                <div className="mt-4 flex items-center justify-between">
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground">Your list · {s.senders.length}</span>
+                  {s.senders.length ? <Button variant="ghost" size="sm" className="h-7 -mr-2 text-destructive hover:text-destructive" onClick={() => void clearSenders()}>Clear all</Button> : null}
                 </div>
-              </div>
-              {s.muted.length ? (
-                <div className="border-t px-4 py-3">
-                  <div className="text-sm">Never read</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">Senders you said send no money mail. Remove one to read its mail again.</div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {s.muted.map((x) => (
-                      <span key={x} className="inline-flex items-center gap-1 rounded-full border bg-muted/40 pl-2.5 pr-1 py-0.5 text-xs">
-                        {x}
-                        <button type="button" aria-label={`Read mail from ${x} again`} className="rounded-full p-0.5 text-muted-foreground hover:text-foreground" onClick={() => void muteSender({ from: x, muted: false }).catch(() => toast.error("Could not change it"))}><X className="size-3" /></button>
-                      </span>
-                    ))}
+                {s.senders.length ? (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {s.senders.map((x) => <Chip key={x} label={x} remove={`Remove ${x}`} onRemove={() => void patch({ senders: s.senders.filter((y) => y !== x) })} />)}
                   </div>
+                ) : <div className="mt-1.5 text-xs text-muted-foreground">No senders. Turn on a preset or add one below.</div>}
+                <div className="mt-3 flex gap-2">
+                  <Input value={newSender} onChange={(e) => setNewSender(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSender(); } }} placeholder="alerts@bank.com or bank.com" className="h-9 text-sm" aria-label="Add a sender" />
+                  <Button variant="outline" className="h-9" onClick={addSender} disabled={!newSender.trim()}>Add</Button>
                 </div>
+              </Collapsible>
+              {s.muted.length ? (
+                <Collapsible label="Never read" hint="Senders you said send no money mail" count={s.muted.length}>
+                  <div className="text-xs text-muted-foreground">Remove one to read its mail again.</div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {s.muted.map((x) => <Chip key={x} label={x} remove={`Read mail from ${x} again`} onRemove={() => void muteSender({ from: x, muted: false }).catch(() => toast.error("Could not change it"))} />)}
+                  </div>
+                </Collapsible>
               ) : null}
             </Section>
 
-            <Section title="Recent checks">
-              {s.log.length === 0 ? <div className="px-4 py-3 text-sm text-muted-foreground">No checks yet.</div> : null}
-              {s.log.map((l) => (
-                <div key={l.at} className="flex items-start gap-3 px-4 py-2 border-b last:border-b-0 text-sm">
-                  <span className="w-24 shrink-0 text-xs text-muted-foreground pt-0.5">{new Date(l.at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-                  <span className="min-w-0 flex-1">
-                    {l.error ? <span className="text-destructive">{l.error}</span> : <>Scanned {l.scanned}, found {l.found}</>}
-                    {l.note ? <span className="block text-xs text-muted-foreground">{l.note}</span> : null}
-                  </span>
+            <Section>
+              <Collapsible label="Recent checks" count={s.log.length}
+                hint={s.log[0] ? `${s.log[0].error ? "Failed" : `Scanned ${s.log[0].scanned}, found ${s.log[0].found}`} · ${ago(s.log[0].at)}` : "No checks yet"}>
+                {s.log.length === 0 ? <div className="text-sm text-muted-foreground">No checks yet.</div> : null}
+                <div className="-mx-4 divide-y border-y">
+                  {s.log.map((l) => (
+                    <div key={l.at} className="flex items-start gap-3 px-4 py-2 text-sm">
+                      <span className="w-24 shrink-0 pt-0.5 text-xs text-muted-foreground">{new Date(l.at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                      <span className="min-w-0 flex-1">
+                        {l.error ? <span className="text-destructive">{l.error}</span> : <>Scanned {l.scanned}, found {l.found}</>}
+                        {l.note ? <span className="block text-xs text-muted-foreground">{l.note}</span> : null}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-              <div className="px-4 py-2 text-xs text-muted-foreground border-t">Mail no rule can read is read by AI: {s.aiCalls} of {s.aiCap} AI reads used this month.</div>
+                <div className="mt-2 text-xs text-muted-foreground">Mail no rule can read is read by AI: {s.aiCalls} of {s.aiCap} AI reads used this month.</div>
+              </Collapsible>
             </Section>
 
             <p className="px-4 pt-6 text-xs text-muted-foreground">UnMoney keeps only what it read from each mail (amount, date, merchant, card digits) and the mail's id, so a saved entry can link back to it in Gmail. The mail itself is never stored.</p>
+
+            <Section>
+              <Row label={<span className="text-destructive">{busy === "disconnect" ? "Disconnecting…" : "Disconnect Gmail"}</span>} hint="Saved entries stay; drafts still waiting are removed"
+                icon={<Unplug />} iconClassName="text-destructive" onClick={busy === null ? () => void onDisconnect() : undefined} />
+            </Section>
           </>
         ) : null}
       </Page>
     </>
+  );
+}
+
+function LookbackPicker({ value, onChange }: { value: Lookback; onChange: (d: Lookback) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Look back" className="grid grid-cols-4 gap-2">
+      {LOOKBACKS.map((d) => (
+        <button key={d} type="button" role="radio" aria-checked={value === d} onClick={() => onChange(d)}
+          className={cn("h-9 rounded-md border text-sm transition-colors", value === d ? "border-primary text-foreground font-medium bg-accent/40" : "text-muted-foreground hover:bg-accent/40")}>
+          {d === 0 ? "From now" : `${d} days`}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A row that opens to show more below it, for the long parts of this page. */
+function Collapsible({ label, hint, count, children }: { label: string; hint?: ReactNode; count?: number; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <div className="border-b last:border-b-0">
+      <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-accent/50 active:bg-accent">
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm">{label}</span>
+          {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
+        </span>
+        {count !== undefined ? <span className="text-sm tabular text-muted-foreground">{count}</span> : null}
+        <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {open ? <div id={id} className="px-4 pb-4">{children}</div> : null}
+    </div>
+  );
+}
+
+function Chip({ label, remove, onRemove }: { label: string; remove: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border bg-muted/40 py-0.5 pl-2.5 pr-1 text-xs">
+      {label}
+      <button type="button" aria-label={remove} className="rounded-full p-0.5 text-muted-foreground hover:text-foreground" onClick={onRemove}><X className="size-3" /></button>
+    </span>
   );
 }
