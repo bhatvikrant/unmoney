@@ -151,6 +151,21 @@ test("settings are normalised and pausing is reversible", async () => {
   expect((await t.run((ctx) => ctx.db.get(cid)))!.status).toBe("reauth");
 });
 
+test("a new look-back counts from when it was chosen, and senders can be cleared", async () => {
+  const { t, as, connect } = await setup();
+  const cid = await connect();
+  const before = Date.now();
+  await as.mutation(api.gmail.updateSettings, { lookbackDays: 90, senders: [] });
+  let c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect(c.lookbackDays).toBe(90);
+  expect(c.readsFrom! - (before - 90 * 24 * 60 * 60 * 1000)).toBeGreaterThanOrEqual(0);
+  expect(c.senders).toEqual([]);
+  // "from now on" stops reading what is already in the inbox
+  await as.mutation(api.gmail.updateSettings, { lookbackDays: 0 });
+  c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect(c.readsFrom!).toBeGreaterThanOrEqual(before);
+});
+
 test("status shows the app a safe projection, and disconnecting removes the connection and the waiting drafts only", async () => {
   const { t, as, userId, accounts, connect, insert } = await setup();
   expect((await as.query(api.gmail.status))?.connected).toBe(false);

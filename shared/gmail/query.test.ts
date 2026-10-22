@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { buildQuery, DEFAULT_SENDERS, matchesSender, MONEY_SUBJECT_WORDS, normaliseSender, windowStart, withNewDefaults } from "./query";
+import { buildQuery, DEFAULT_SENDERS, matchesSender, MONEY_SUBJECT_WORDS, normaliseSender, readsFromFor, SENDER_PRESETS, windowStart, withNewDefaults } from "./query";
 
 test("the query narrows to the window, the senders, Purchases and money subjects", () => {
   const q = buildQuery({ senders: ["hdfcbank.net", "Alerts@AxisBank.com"], scanPurchases: true, afterSeconds: 1_700_000_000.9 });
@@ -45,6 +45,21 @@ test("a check's window: the look-back first, then 30 days of overlap, never befo
   expect(windowStart({ lookbackDays: 0, readsFrom: connectedAt }, connectedAt)).toBe(connectedAt);
   expect(windowStart({ lookbackDays: 0, readsFrom: connectedAt, syncedUpTo: connectedAt }, now)).toBe(connectedAt);
   expect(windowStart({ lookbackDays: 0, readsFrom: connectedAt, syncedUpTo: now + 40 * day }, now + 41 * day)).toBe(now + 10 * day);
+});
+
+test("each check reads the look-back the user chose; \"from now on\" reads 30 days but never before it was chosen", () => {
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.parse("2026-10-20T10:00:00Z");
+  expect(windowStart({ lookbackDays: 7, syncedUpTo: now - day }, now)).toBe(now - 8 * day);
+  expect(windowStart({ lookbackDays: 90, syncedUpTo: now - day, readsFrom: readsFromFor(90, now) }, now)).toBe(now - 90 * day);
+  expect(windowStart({ lookbackDays: 0, syncedUpTo: now, readsFrom: readsFromFor(0, now - 40 * day) }, now)).toBe(now - 30 * day);
+});
+
+test("every preset sender is a default and no sender is in two presets", () => {
+  const all = SENDER_PRESETS.flatMap((p) => p.senders);
+  expect(new Set(all).size).toBe(all.length);
+  expect(DEFAULT_SENDERS).toEqual(all);
+  for (const x of all) expect(normaliseSender(x)).toBe(x);
 });
 
 test("an existing connection gains the defaults it lacks, after its own entries, without doubles", () => {
