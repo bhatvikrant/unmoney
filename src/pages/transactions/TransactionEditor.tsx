@@ -530,6 +530,19 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             <>
               <Field label="Method" onClick={() => setSheet("account")} value={f.accountId ? accountName(f.accountId) : "Select"} />
               <Field label="Category" onClick={() => setSheet("category")} value={f.categoryId ? categoryLabel({ categoryId: f.categoryId, subcategoryId: f.subcategoryId }) : "Select"} />
+              {recent.length ? (
+                <div className="flex items-center gap-2 px-4 py-2">
+                  <div className="w-20 shrink-0 text-sm text-muted-foreground">Recent</div>
+                  <div className="flex-1 min-w-0 flex gap-1.5 overflow-x-auto [scrollbar-width:none]">
+                    {recent.map((c) => (
+                      <QuickPick key={`${c.categoryId}|${c.subcategoryId ?? ""}`} active={f.categoryId === c.categoryId && f.subcategoryId === c.subcategoryId}
+                        onClick={() => { chosen.current.category = true; setF((p) => ({ ...p, categoryId: c.categoryId, subcategoryId: c.subcategoryId })); }}>
+                        {categoryLabel(c)}
+                      </QuickPick>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </>
           )}
 
@@ -548,19 +561,6 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
               {currencies.length ? <Button variant="ghost" size="icon" className={cn("size-8", sub && "text-primary")} aria-label="Currency" onClick={() => { setSheet("currency"); if (usesFeed) void refreshRates(); }}><Globe className="size-4" /></Button> : null}
             </div>
           </Field>
-          {recent.length ? (
-            <div className="flex items-center gap-2 px-4 py-2">
-              <div className="w-20 shrink-0 text-sm text-muted-foreground">Recent</div>
-              <div className="flex-1 min-w-0 flex gap-1.5 overflow-x-auto [scrollbar-width:none]">
-                {recent.map((c) => (
-                  <QuickPick key={`${c.categoryId}|${c.subcategoryId ?? ""}`} active={f.categoryId === c.categoryId && f.subcategoryId === c.subcategoryId}
-                    onClick={() => { chosen.current.category = true; setF((p) => ({ ...p, categoryId: c.categoryId, subcategoryId: c.subcategoryId })); }}>
-                    {categoryLabel(c)}
-                  </QuickPick>
-                ))}
-              </div>
-            </div>
-          ) : null}
           {sub ? (
             <Field label="Converted">
               <div className="flex-1 flex items-center gap-2 text-sm">
