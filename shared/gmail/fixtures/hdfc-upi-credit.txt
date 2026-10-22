@@ -1,0 +1,5 @@
+From: HDFC Bank InstaAlerts <alerts@hdfcbank.net>
+Subject: You have done a UPI txn. Check details!
+Received: 2026-10-21T08:00:00Z
+
+Dear Customer, Rs.500.00 is successfully credited to your account **1234 by VPA rahul.v@okicici RAHUL VERMA on 21-10-26. Your UPI transaction reference number is 529312345692. Thank You, HDFC Bank

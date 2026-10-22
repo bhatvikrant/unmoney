@@ -85,3 +85,9 @@ test("provenance labels", () => {
   expect(sourceLabel({ rule: "google-pay", merchantRaw: "Swiggy" })).toBe("Google Pay");
   expect(sourceLabel({ rule: "swiggy", merchantRaw: "Swiggy" })).toBe("Swiggy receipt");
 });
+
+test("with both a debit and a credit verb, the first one says which way the money went", () => {
+  const base = { id: "1", threadId: "1", from: "alerts@icicibank.com", subject: "Transaction alert", receivedAt: 0 };
+  expect(parseMail({ ...base, text: "ICICI Bank Acct XX778 debited for Rs 100.00 on 20-Oct-26; PRIYA MENON credited. UPI:529312345693." })?.type).toBe("debit");
+  expect(parseMail({ ...base, text: "Your ICICI Bank Account XX778 has been credited with Rs 100.00 on 20-Oct-26, paid by PRIYA MENON." })?.type).toBe("credit");
+});

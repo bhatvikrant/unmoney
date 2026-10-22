@@ -23,7 +23,7 @@ export function withNewDefaults(senders: string[]): string[] {
 }
 
 /** Subject words that mark money mail from a sender not on the list. */
-export const MONEY_SUBJECT_WORDS = ["debited", "credited", "transaction", "payment", "receipt", "invoice", "order", "spent", "UPI", "txn", "\"payment received\""];
+export const MONEY_SUBJECT_WORDS = ["debited", "credited", "deposited", "received", "salary", "refund", "transaction", "payment", "receipt", "invoice", "order", "spent", "UPI", "txn"];
 
 /** How far back the first check reads, in days; 0 is "from now on": only mail that arrives after connecting. */
 export const LOOKBACKS = [0, 7, 30, 90] as const;

@@ -1,0 +1,5 @@
+From: State Bank of India <alerts@sbi.co.in>
+Subject: Credit alert
+Received: 2026-10-18T06:00:00Z
+
+Dear Customer, Your A/C XXXXX112233 has a credit by Transfer of Rs 3,000.00 on 18/10/26 by A/c linked to mobile 9XXXXXX123. -SBI

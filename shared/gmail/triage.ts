@@ -14,7 +14,7 @@ const NUM = String.raw`(?:\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)`
 export const AMOUNT_RE = new RegExp(String.raw`(${CUR})\s?(${NUM})\b|\b(${NUM})\s?(${CUR})(?![A-Za-z])`, "gu");
 
 /** A word that says money moved. Found near an amount, the mail is about a transaction. */
-const MONEY_VERB = /\b(debited|credited|spent|paid|payment|received|charged|purchase[d]?|order(?:ed)?|transaction|txn|sent|withdrawn|deposited|refund(?:ed)?|receipt|invoice|billed|fare|total|transferred)\b/i;
+const MONEY_VERB = /\b(debited|credited|spent|paid|payment|received|charged|purchase[d]?|order(?:ed)?|transaction|txn|sent|withdrawn|deposited|credit (?:of|by)|refund(?:ed)?|receipt|invoice|billed|fare|total|transferred)\b/i;
 /** How far from an amount a money verb may sit, in characters of the collapsed text. */
 const NEAR = 160;
 
