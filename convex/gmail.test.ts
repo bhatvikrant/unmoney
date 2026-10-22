@@ -88,17 +88,17 @@ test("mail that made no draft is not read again, and mail the AI skipped holds t
   const hour = 60 * 60 * 1000;
   const write = (startedAt: number, processed: { id: string; receivedAt: number }[], syncedUpTo?: number) =>
     t.mutation(internal.gmail.writeSync, { userId, startedAt, inserts: [], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 0, processed, syncedUpTo });
-  // "shipped" was not a payment; a mail the AI could not get to (the cap) arrived 5 days ago, so the
-  // check holds syncedUpTo where the next window (it starts two days before) still reaches it
-  const held = at - 5 * 24 * hour + 2 * 24 * hour;
+  // "shipped" was not a payment; a mail the AI could not get to (the cap) arrived 35 days ago, so the
+  // check holds syncedUpTo where the next window (it starts 30 days before) still reaches it
+  const held = at - 35 * 24 * hour + 30 * 24 * hour;
   await write(at, [{ id: "shipped", receivedAt: at - hour }], held);
   let c = (await t.run((ctx) => ctx.db.get(cid)))!;
   expect(c.syncedUpTo).toBe(held);
   expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["shipped", "other"] })).toEqual(["shipped"]);
-  // three days on, no window reaches it: forgotten
-  await write(at + 3 * 24 * hour, []);
+  // 31 days on, no window reaches it: forgotten
+  await write(at + 31 * 24 * hour, []);
   c = (await t.run((ctx) => ctx.db.get(cid)))!;
-  expect([c.syncedUpTo, c.processed]).toEqual([at + 3 * 24 * hour, []]);
+  expect([c.syncedUpTo, c.processed]).toEqual([at + 31 * 24 * hour, []]);
 });
 
 test("a check matches open drafts to entries typed in since, but never undoes \"no, it's new\"", async () => {

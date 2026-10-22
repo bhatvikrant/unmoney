@@ -32,9 +32,9 @@ import { AI_BATCH, AI_MODEL, AI_MONTHLY_CAP, buildAiInput, lowerConfidence, OUTP
 
 type Connection = Doc<"gmailConnections">;
 const DAY = 24 * 60 * 60 * 1000;
-/** Mails fetched on the first check and on later ones. */
+/** Mails listed on the first check and on later ones; later ones cover 30 days too, and fetch only what is new. */
 const FIRST_SYNC_MAX = 300;
-const SYNC_MAX = 100;
+const SYNC_MAX = 300;
 /** How many checks the log keeps, and after how many failures in a row a connection pauses itself. */
 const LOG_KEEP = 10;
 const PAUSE_AFTER_FAILURES = 3;

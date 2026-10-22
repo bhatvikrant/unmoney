@@ -31,12 +31,15 @@ export const LOOKBACKS = [0, 7, 30, 90] as const;
 export type Lookback = (typeof LOOKBACKS)[number];
 
 const DAY = 24 * 60 * 60 * 1000;
-/** Later checks start this long before the last one ended, so mail that arrived late is not missed. */
-export const OVERLAP_MS = 2 * DAY;
+/**
+ * Later checks start this long before the last one ended: mail that arrived late is not missed, and
+ * mail no rule could read yet is read once a rule learns it. What already has a draft is skipped.
+ */
+export const OVERLAP_MS = 30 * DAY;
 
 /**
  * Where a check's search starts, in ms. The first covers the look-back; later ones overlap the last
- * by two days. Neither goes before `readsFrom` (connect time minus the look-back), so "from now on"
+ * by 30 days. Neither goes before `readsFrom` (connect time minus the look-back), so "from now on"
  * never reads mail from before the user connected.
  */
 export function windowStart(c: { lookbackDays: number; syncedUpTo?: number; readsFrom?: number }, now: number): number {

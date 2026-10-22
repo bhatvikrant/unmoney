@@ -335,7 +335,7 @@ export default defineSchema({
     email: v.string(),
     refreshTokenEnc: v.string(),
     iv: v.string(),
-    /** The last check covered mail received up to this instant; the next one starts two days before it. Unset until the first check. */
+    /** The last check covered mail received up to this instant; the next one starts 30 days before it (shared/gmail/query.ts OVERLAP_MS). Unset until the first check. */
     syncedUpTo: v.optional(v.number()),
     lastSyncAt: v.optional(v.number()),
     lastError: v.optional(v.string()),
