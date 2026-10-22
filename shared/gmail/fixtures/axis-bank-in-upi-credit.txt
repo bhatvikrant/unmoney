@@ -1,0 +1,12 @@
+From: Axis Bank Alerts <alerts@axis.bank.in>
+Subject: INR 598.00 was credited to your A/c.
+Received: 2026-10-13T07:15:00Z
+
+Dear Customer,
+
+Amount Credited: INR 598.00
+Account Number: XX4190
+Date & Time: 13-10-26, 12:44:10 IST
+Transaction Info: UPI/P2A/529312345690/PRIYA MENON/paid via app
+
+If this transaction was not initiated by you, please call 18001035577.

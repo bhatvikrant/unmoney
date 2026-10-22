@@ -31,13 +31,22 @@ test("the alert stays whichever mail came first, and a day's difference is allow
   expect(r.inserts.map((d) => [d.messageId, d.extraMessageIds, d.proposal.date])).toEqual([["a", ["b"], "2026-10-18"]]);
 });
 
-test("two alerts on the same card for the same amount fold only when they name the same shop", () => {
+test("two alerts on the same card for the same amount fold only from different senders naming the same shop", () => {
   const twoCoffees = foldDrafts([alert("a", { note: "Starbucks" }), alert("b", { note: "Third Wave" })], []);
   expect(twoCoffees.inserts.length).toBe(2);
-  const twice = foldDrafts([alert("a"), alert("b")], []);
+  // the bank and another sender (a second address of the bank, an app) telling of the same payment
+  const twice = foldDrafts([alert("a"), alert("b", { from: "HDFC Bank <cardalerts@hdfcbank.net>" })], []);
   expect(twice.inserts.map((d) => [d.messageId, d.extraMessageIds])).toEqual([["a", ["b"]]]);
   const otherCard = foldDrafts([alert("a"), alert("b", { last4: "9999" })], []);
   expect(otherCard.inserts.length).toBe(2);
+});
+
+test("a bank sends one alert per payment: three of the same amount on a day are three drafts, named or not", () => {
+  const axis = (id: string, note = "Axis") => alert(id, { from: "Axis Bank Alerts <alerts@axis.bank.in>", type: "income", amount: 59800, date: "2026-10-13", note, last4: "4190" });
+  expect(foldDrafts([axis("a"), axis("b"), axis("c")], []).inserts.map((d) => d.messageId)).toEqual(["a", "b", "c"]);
+  expect(foldDrafts([axis("a", ""), axis("b", "")], []).inserts.length).toBe(2);
+  // nor does a new one fold into an open draft from the same sender
+  expect(foldDrafts([axis("b")], [{ ...open({ id: "a" }), ...axis("a"), _id: "d-a" as Id<"drafts"> }]).inserts.length).toBe(1);
 });
 
 test("two receipts, a different amount, a different kind or two days apart stay apart", () => {

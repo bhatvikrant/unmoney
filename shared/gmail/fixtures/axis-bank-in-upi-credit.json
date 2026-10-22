@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "axis",
+    "type": "credit",
+    "amount": 598,
+    "currency": "INR",
+    "date": "2026-10-13",
+    "dateSource": "mail",
+    "time": "12:44",
+    "last4": "4190",
+    "bankName": "Axis",
+    "channel": "upi",
+    "merchantRaw": "PRIYA MENON"
+  }
+}

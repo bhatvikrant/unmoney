@@ -324,3 +324,22 @@ test("muting a sender takes it off the allowlist and shows in status; unmuting b
   expect([c.muted, c.senders]).toEqual([[], ["hdfcbank.net"]]);
   await expect(as.mutation(api.gmail.muteSender, { from: "swiggy.in", muted: true })).rejects.toThrow(/mail address/);
 });
+
+test("releasing folded mail frees what open drafts absorbed, but not paired transfers or handled drafts", async () => {
+  const { t, userId, connect, insert } = await setup();
+  await connect();
+  await t.mutation(internal.gmail.writeSync, {
+    userId, startedAt: 1, updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 3,
+    inserts: [
+      insert("a", { extraMessageIds: ["a2", "a3"] }),
+      insert("b", { extraMessageIds: ["b2"], proposal: { type: "transfer" as const, date: "2026-10-18", amount: 100, note: "", description: "paired with the other side's mail" } }),
+      insert("c", { extraMessageIds: ["c2"] }),
+      insert("z", { extraMessageIds: ["z2"], proposal: { type: "expense" as const, date: "2026-10-03", amount: 0, note: "Ijooz", subAmount: 250, subCurrency: "SGD" } }),
+    ],
+  });
+  const c = (await t.run((ctx) => ctx.db.query("drafts").collect())).find((d) => d.messageId === "c")!;
+  await t.run((ctx) => ctx.db.patch(c._id, { status: "accepted" }));
+  expect(await t.mutation(internal.gmail.releaseFolded, { userId })).toEqual({ drafts: 1, mails: 2, unpriced: 1 });
+  // the ₹0 draft is gone, so its mails are read again
+  expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["a2", "a3", "b2", "c2", "z", "z2"] })).toEqual(["b2", "c2"]);
+});

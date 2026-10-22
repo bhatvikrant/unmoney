@@ -23,6 +23,8 @@ export type ResolveCtx = {
   settings: Pick<Doc<"settings">, "mainCurrency" | "decimals">;
   currencies: Pick<Doc<"currencies">, "code" | "rate" | "decimals">[];
   accountMap: Record<string, Id<"accounts">>;
+  /** Today's rates from the public feed, units per 1 main currency: for a currency with no saved rate. */
+  liveRates?: Record<string, number>;
 };
 
 const usable = (a: Doc<"accounts">) => !a.deletedAt && !a.archivedAt;
@@ -152,7 +154,7 @@ export function cleanMerchant(raw: string): string {
 /** The provenance line under the amount: "HDFC alert · card ending 4521", "Swiggy receipt · UPI". */
 function describe(parsed: Parsed): string {
   const what = sourceLabel(parsed);
-  const via = parsed.last4 ? `${parsed.channel === "card" || !parsed.channel ? "card" : "a/c"} ending ${parsed.last4}` : parsed.channel === "upi" ? "UPI" : parsed.channel === "netbanking" ? "bank transfer" : parsed.channel === "wallet" ? "wallet" : "";
+  const via = parsed.last4 ? `${parsed.channel === "card" || (!parsed.channel && parsed.type !== "credit") ? "card" : "a/c"} ending ${parsed.last4}` : parsed.channel === "upi" ? "UPI" : parsed.channel === "netbanking" ? "bank transfer" : parsed.channel === "wallet" ? "wallet" : "";
   const bits = [what, via, parsed.item].filter(Boolean);
   return bits.join(" · ");
 }
@@ -183,6 +185,12 @@ export function resolveParsed(parsed: Parsed, mail: { from: string }, ctx: Resol
       amount = toMinor(parsed.amount / cur.rate, ctx.settings.decimals);
       sub = { subAmount: toMinor(parsed.amount, cur.decimals), subCurrency: cur.code };
       descriptionBits.push(`converted at the saved ${cur.code} rate`);
+      confidence = "medium";
+    } else if ((ctx.liveRates?.[parsed.currency.toUpperCase()] ?? 0) > 0) {
+      const code = parsed.currency.toUpperCase();
+      amount = toMinor(parsed.amount / ctx.liveRates![code], ctx.settings.decimals);
+      sub = { subAmount: toMinor(parsed.amount, 2), subCurrency: code };
+      descriptionBits.push(`converted at today's ${code} rate`);
       confidence = "medium";
     } else {
       amount = 0;

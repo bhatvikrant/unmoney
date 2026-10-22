@@ -145,6 +145,8 @@ const BANKS: Bank[] = [
     /\bby\s+(?<m>.+?)(?:\s+on\b|\.|$)/i, /\btowards\s+(?<m>.+?)(?:\s+on\b|\.|$)/i,
   ] },
   { name: "Axis", rule: "axis", domains: ["axisbank.com", "axisbank.co.in", "axis.bank.in"], merchant: [
+    // the axis.bank.in layout: "Transaction Info: UPI/P2A/529312345690/PRIYA MENON/…"
+    /\bTransaction Info(?:rmation)?\s*[:-]?\s*(?<m>[^\s].*?)(?=\s+(?:If|Please|Not you|Call|Available|Avl|Regards|Thank|Always|Never|Warm|Disclaimer|This is|Do not|Reach)\b|\s{2,}|$)/i,
     /\bUPI\/P2[MA]\/\d+\/(?<m>[^/.]+?)(?:\.\s|\/|$)/i, /\b(?:NEFT|IMPS|RTGS)\/[A-Z0-9]+\/(?<m>[^/.]+?)(?:\.\s|\/|\s+If\b|$)/i, /\bInfo-\s*(?<m>.+?)(?:\.\s|$)/i, /\bby\s+(?<m>.+?)\s+on\b/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
   ] },
   { name: "SBI", rule: "sbi", domains: ["sbi.co.in", "sbi.bank.in", "sbicard.com", "onlinesbi.sbi", "onlinesbi.com"], merchant: [
@@ -184,6 +186,15 @@ function kindOf(text: string): ParsedKind | null {
   return null;
 }
 
+/** Rails and their codes in a "UPI/P2A/529312345690/PRIYA MENON/paid via app" line: never the name. */
+const RAIL = /^(?:UPI|P2[AM]|NEFT|IMPS|RTGS|MB|BIL|INB|ACH|NACH|ECS|INF|TRF|CMS|POS|ATM|NA)$/i;
+/** The counterparty's name in a slash-separated transaction line: the first part that is words, not a rail or a reference. */
+function nameInInfo(info: string): string {
+  if (!info.includes("/")) return info;
+  const part = info.split("/").map((x) => x.trim()).find((x) => /[a-z]{2}/i.test(x) && !RAIL.test(x) && !/\d{4,}/.test(x));
+  return part ?? info;
+}
+
 function merchantIn(text: string, patterns: RegExp[]): { merchantRaw: string; vpa?: string } {
   let vpa: string | undefined;
   let merchant: string | undefined;
@@ -191,7 +202,7 @@ function merchantIn(text: string, patterns: RegExp[]): { merchantRaw: string; vp
     const m = text.match(re);
     if (!m?.groups) continue;
     const gotVpa = tidy(m.groups.vpa ?? "");
-    const got = tidy(m.groups.m ?? "");
+    const got = tidy(nameInInfo(m.groups.m ?? ""));
     // "credited to your account **1234": the user's own side, not who paid
     if (!gotVpa && OWN_ACCOUNT.test(got)) continue;
     if (gotVpa && isVpa(gotVpa)) vpa ??= gotVpa;
