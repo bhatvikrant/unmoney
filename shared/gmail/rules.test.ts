@@ -99,3 +99,9 @@ test("an ACH mandate's payee is read without the rail, the collector and the ref
   expect(payee("ACH-DR-PPFAS 22102026 CAM")).toBe("PPFAS CAM");
   expect(payee("AUTOBPay/MiraeAsset/629410")).toBe("MiraeAsset");
 });
+
+test("an IMPS credit names the sender from its reference, not the time or the helpline", () => {
+  const p = parseMail({ id: "1", threadId: "1", from: "alerts@axis.bank.in", subject: "Credit notification from Axis Bank", receivedAt: 0,
+    text: "Dear Customer, Thank you for banking with us. INR 100000.00 has been credited to A/c no. XX4190 on 13-10-26 at 12:21:38 IST. Reference no. - IMPS/P2A/628606858621/VIKRANTB For any concerns regarding this transaction, please contact us on 18001035577 / 18604195555." });
+  expect([p?.type, p?.amount, p?.merchantRaw, p?.time]).toEqual(["credit", 100000, "VIKRANTB", "12:21"]);
+});
