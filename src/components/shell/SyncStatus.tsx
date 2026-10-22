@@ -4,8 +4,9 @@ import { useStore } from "@/lib/store";
 import { InfoHint } from "./misc";
 import { cn } from "@/lib/utils";
 
-function describe(s: { connected: boolean; pending: number; syncing: boolean; lastError: string | null }) {
-  if (!s.connected) return { icon: CloudOff, text: s.pending ? `Offline · ${s.pending} change${s.pending === 1 ? "" : "s"} waiting` : "Offline · saved on this device", tone: "text-muted-foreground" };
+function describe(s: { connected: boolean; offline: boolean; pending: number; syncing: boolean; lastError: string | null }) {
+  if (s.offline) return { icon: CloudOff, text: s.pending ? `Offline · ${s.pending} change${s.pending === 1 ? "" : "s"} waiting` : "Offline · saved on this device", tone: "text-muted-foreground" };
+  if (!s.connected) return { icon: RefreshCw, text: "Connecting…", tone: "text-muted-foreground" };
   if (s.syncing || s.pending) return { icon: RefreshCw, text: `Syncing ${s.pending} change${s.pending === 1 ? "" : "s"}…`, tone: "text-primary" };
   if (s.lastError) return { icon: AlertTriangle, text: "Last sync had a problem", tone: "text-destructive" };
   return { icon: Check, text: "Synced", tone: "text-muted-foreground" };
@@ -17,7 +18,7 @@ export function SyncLine({ className }: { className?: string }) {
   const d = describe(status);
   return (
     <div className={cn("flex items-center gap-2 px-3 py-1.5 text-[11px]", d.tone, className)} aria-live="polite">
-      <d.icon className={cn("size-3.5 shrink-0", status.syncing && "animate-spin")} />
+      <d.icon className={cn("size-3.5 shrink-0", (status.syncing || !status.connected && !status.offline) && "animate-spin")} />
       <span className="truncate">{d.text}</span>
     </div>
   );
@@ -31,7 +32,7 @@ export function SyncStrip() {
   const { status } = useStore();
   const nav = useNavigate();
   const problem = status.connected && !!status.lastError && !status.pending;
-  if (status.connected && !problem) return null;
+  if (!status.offline && !problem) return null;
   const d = describe(status);
   return (
     <button type="button" onClick={() => nav("/settings")} aria-live="polite"
@@ -49,7 +50,7 @@ export function SyncBadge({ className }: { className?: string }) {
   const problem = status.lastError && status.connected && !status.pending;
   return (
     <div className={cn("flex items-center gap-1.5 text-xs", d.tone, className)} aria-live="polite">
-      <d.icon className={cn("size-3.5 shrink-0", status.syncing && "animate-spin")} />
+      <d.icon className={cn("size-3.5 shrink-0", (status.syncing || !status.connected && !status.offline) && "animate-spin")} />
       <span className="min-w-0 truncate">{d.text}</span>
       <InfoHint
         label="About sync"
