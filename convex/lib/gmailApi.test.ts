@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { listMessageIds } from "./gmailApi";
+import { listMessageIds, tidyBody } from "./gmailApi";
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -32,4 +32,12 @@ test("a 403 that is not a rate limit is not retried", async () => {
   vi.stubGlobal("fetch", fetch);
   await expect(listMessageIds("tok", "q", 10)).rejects.toThrow(/not enabled/);
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test("a mail's indentation and CRLFs are stripped, so the details fit within the cap", () => {
+  const pad = " ".repeat(40);
+  const raw = `13-10-2026 \r\n${`${pad}\r\n`.repeat(80)}${pad}Amount Credited: \r\n${pad}\r\n${pad}INR 598.00 \r\n${`${pad}\r\n`.repeat(60)}${pad}Transaction Info: \r\n${pad}UPI/P2A/529312345690/PRIYA MENON \r\n`;
+  const text = tidyBody(raw.replace(/\r\n?/g, "\n"));
+  expect(text.length).toBeLessThan(200);
+  expect(text).toContain("Transaction Info:\nUPI/P2A/529312345690/PRIYA MENON");
 });
