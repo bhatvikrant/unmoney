@@ -113,6 +113,7 @@ function channelOf(text: string): Channel | undefined {
 }
 
 const tidy = (s: string) => s.replace(/\s+/g, " ").replace(/[\s.,:;-]+$/, "").trim();
+const OWN_ACCOUNT = /^(?:your\b|(?:savings |current )?(?:account|a\/c)\b)/i;
 const isVpa = (s: string) => /^[a-z0-9.\-_]+@[a-z]+$/i.test(s);
 const vpaIn = (text: string) => text.match(VPA_RE)?.[0];
 
@@ -135,7 +136,7 @@ const ANY_BANK: RegExp[] = [/\brefund (?:from|for|by)\s+(?<m>.+?)(?:\s+on\b|\.|$
  */
 const BANKS: Bank[] = [
   { name: "HDFC", rule: "hdfc", domains: ["hdfcbank.net", "hdfcbank.com"], merchant: [
-    /\bto VPA\s+(?<vpa>\S+@\S+)\s+(?<m>.+?)\s+on\b/i, /\bto VPA\s+(?<vpa>\S+@\S+)/i, /\bby\s+(?<m>[^()]{1,60}?)\s*\((?:NEFT|IMPS|RTGS)/i, /\bto\s+(?<m>[^()]{1,60}?)\s*\((?:NEFT|IMPS|RTGS)/i,
+    /\b(?:to|by) VPA\s+(?<vpa>\S+@\S+)\s+(?<m>.+?)\s+on\b/i, /\b(?:to|by) VPA\s+(?<vpa>\S+@\S+)/i, /\bby\s+(?<m>[^()]{1,60}?)\s*\((?:NEFT|IMPS|RTGS)/i, /\bto\s+(?<m>[^()]{1,60}?)\s*\((?:NEFT|IMPS|RTGS)/i,
     /\bby\s+(?<m>.+?)\s+on\b/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
   ] },
   { name: "ICICI", rule: "icici", domains: ["icicibank.com", "icicibank.net"], merchant: [
@@ -161,15 +162,24 @@ const BANKS: Bank[] = [
 
 const CARD_PAYMENT = /\bpayment\b.{0,60}?\breceived\b.{0,60}?\bcard\b|\breceived\b.{0,40}?\btowards\b.{0,40}?\bcard\b/i;
 const REFUND = /\b(refund|refunded|reversal|reversed|credited back)\b/i;
-const CREDIT = /\b(credited|received|deposited|credit of)\b/i;
-const DEBIT = /\b(debited|spent|sent|used for|using|paid|withdrawn|transaction of|purchase of|charged)\b/i;
+const CREDIT = /\b(credited|received|deposited|credit (?:of|by))\b/i;
+/** Words that say money left the account. */
+const DEBIT = /\b(debited|spent|sent|paid|withdrawn|charged)\b/i;
+/** Words a debit alert uses without saying which way money went; a credit verb anywhere outranks them. */
+const DEBIT_HINT = /\b(used for|using|transaction of|purchase of)\b/i;
 
+/**
+ * Which way the money went. When the mail has both a credit and a debit verb, the first one
+ * says it: "credited to your A/c … paid via app" is money in, "A/c debited for Rs 100; PRIYA
+ * credited" is money out.
+ */
 function kindOf(text: string): ParsedKind | null {
   if (CARD_PAYMENT.test(text)) return "cardPayment";
   if (REFUND.test(text)) return "refund";
-  if (CREDIT.test(text) && !DEBIT.test(text)) return "credit";
-  if (DEBIT.test(text)) return "debit";
-  if (CREDIT.test(text)) return "credit";
+  const credit = text.search(CREDIT);
+  const debit = text.search(DEBIT);
+  if (credit >= 0 && (debit < 0 || credit < debit)) return "credit";
+  if (debit >= 0 || DEBIT_HINT.test(text)) return "debit";
   return null;
 }
 
@@ -181,6 +191,8 @@ function merchantIn(text: string, patterns: RegExp[]): { merchantRaw: string; vp
     if (!m?.groups) continue;
     const gotVpa = tidy(m.groups.vpa ?? "");
     const got = tidy(m.groups.m ?? "");
+    // "credited to your account **1234": the user's own side, not who paid
+    if (!gotVpa && OWN_ACCOUNT.test(got)) continue;
     if (gotVpa && isVpa(gotVpa)) vpa ??= gotVpa;
     if (got && isVpa(got)) vpa ??= got;
     else if (got) merchant ??= got;

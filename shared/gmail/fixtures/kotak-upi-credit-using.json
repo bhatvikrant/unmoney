@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "kotak",
+    "type": "credit",
+    "amount": 450,
+    "currency": "INR",
+    "date": "2026-10-17",
+    "dateSource": "mail",
+    "last4": "7788",
+    "bankName": "Kotak",
+    "channel": "upi",
+    "merchantRaw": "rahul.v",
+    "vpa": "rahul.v@okicici"
+  }
+}

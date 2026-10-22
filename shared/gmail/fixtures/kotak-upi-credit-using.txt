@@ -1,0 +1,5 @@
+From: Kotak Mahindra Bank <noreply@kotak.com>
+Subject: Kotak Bank: Amount credited
+Received: 2026-10-17T09:00:00Z
+
+Rs. 450.00 is credited in your Kotak Bank account xx7788 from rahul.v@okicici on 17-10-26 using UPI. UPI Ref 529312345691.
