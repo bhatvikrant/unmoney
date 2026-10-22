@@ -1,0 +1,12 @@
+From: Axis Bank Alerts <alerts@axis.bank.in>
+Subject: INR 8452.00 was credited to your A/c
+Received: 2026-10-22T06:15:00Z
+
+Dear Customer,
+
+Amount Credited: INR 8452.00
+Account Number: XX9900
+Date & Time: 22-10-26, 11:44:10 IST
+Transaction Info: NEFT/AXOIC12345678/ACME TECH PVT LTD
+
+If this transaction was not initiated by you, please call 18001035577.

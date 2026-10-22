@@ -132,24 +132,25 @@ type Bank = { name: string; rule: string; domains: string[]; merchant: RegExp[] 
 const ANY_BANK: RegExp[] = [/\brefund (?:from|for|by)\s+(?<m>.+?)(?:\s+on\b|\.|$)/i, /\bat\s+(?<m>.+?)\s+on\s+\d/i];
 /**
  * Where the counterparty sits in each bank's sentences, tried in order after ANY_BANK. The `m`
- * group is the merchant, `vpa` the UPI id; a match may carry either or both.
+ * group is the merchant, `vpa` the UPI id; a match may carry either or both. Banks are moving
+ * their mail to RBI's .bank.in domains, so each lists the old and the new.
  */
 const BANKS: Bank[] = [
-  { name: "HDFC", rule: "hdfc", domains: ["hdfcbank.net", "hdfcbank.com"], merchant: [
+  { name: "HDFC", rule: "hdfc", domains: ["hdfcbank.net", "hdfcbank.com", "hdfc.bank.in"], merchant: [
     /\b(?:to|by) VPA\s+(?<vpa>\S+@\S+)\s+(?<m>.+?)\s+on\b/i, /\b(?:to|by) VPA\s+(?<vpa>\S+@\S+)/i, /\bby\s+(?<m>[^()]{1,60}?)\s*\((?:NEFT|IMPS|RTGS)/i, /\bto\s+(?<m>[^()]{1,60}?)\s*\((?:NEFT|IMPS|RTGS)/i,
     /\bby\s+(?<m>.+?)\s+on\b/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
   ] },
-  { name: "ICICI", rule: "icici", domains: ["icicibank.com", "icicibank.net"], merchant: [
+  { name: "ICICI", rule: "icici", domains: ["icicibank.com", "icicibank.net", "icici.bank.in"], merchant: [
     /\bInfo:\s*(?:IMPS|NEFT|UPI|RTGS)\/[A-Z0-9]+\/\d+\/(?<m>.+?)\.(?:\s|$)/i, /\bInfo:\s*(?<m>.+?)\.(?:\s|$)/i, /\bcredited to\s+(?<vpa>\S+@\S+)/i, /\bdebited from\s+(?<vpa>\S+@\S+)/i,
     /\bby\s+(?<m>.+?)(?:\s+on\b|\.|$)/i, /\btowards\s+(?<m>.+?)(?:\s+on\b|\.|$)/i,
   ] },
-  { name: "Axis", rule: "axis", domains: ["axisbank.com", "axisbank.co.in"], merchant: [
-    /\bUPI\/P2[MA]\/\d+\/(?<m>[^/.]+?)(?:\.\s|\/|$)/i, /\bInfo-\s*(?<m>.+?)(?:\.\s|$)/i, /\bby\s+(?<m>.+?)\s+on\b/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
+  { name: "Axis", rule: "axis", domains: ["axisbank.com", "axisbank.co.in", "axis.bank.in"], merchant: [
+    /\bUPI\/P2[MA]\/\d+\/(?<m>[^/.]+?)(?:\.\s|\/|$)/i, /\b(?:NEFT|IMPS|RTGS)\/[A-Z0-9]+\/(?<m>[^/.]+?)(?:\.\s|\/|\s+If\b|$)/i, /\bInfo-\s*(?<m>.+?)(?:\.\s|$)/i, /\bby\s+(?<m>.+?)\s+on\b/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
   ] },
-  { name: "SBI", rule: "sbi", domains: ["sbi.co.in", "sbicard.com", "onlinesbi.sbi", "onlinesbi.com"], merchant: [
+  { name: "SBI", rule: "sbi", domains: ["sbi.co.in", "sbi.bank.in", "sbicard.com", "onlinesbi.sbi", "onlinesbi.com"], merchant: [
     /-\s*(?:transfer|trf)\s+(?:to|from)\s+(?<m>.+?)\s+Ref\b/i, /\bby\s+(?:transfer\s+)?from\s+(?<m>.+?)\s+Ref\b/i, /\bto\s+(?<vpa>\S+@\S+)/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
   ] },
-  { name: "Kotak", rule: "kotak", domains: ["kotak.com", "kotakbank.com"], merchant: [
+  { name: "Kotak", rule: "kotak", domains: ["kotak.com", "kotakbank.com", "kotak.bank.in"], merchant: [
     /\bto\s+(?<vpa>\S+@\S+)\s+on\b/i, /\bfrom\s+(?<vpa>\S+@\S+)\s+on\b/i, /\bto\s+(?<m>.+?)\s+on\b/i, /\bfrom\s+(?<m>.+?)\s+on\b/i,
   ] },
   // HSBC India writes from hsbc@hsbc.bank.in (older mail from hsbc.co.in);
