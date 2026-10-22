@@ -57,6 +57,23 @@ test("a payment method is found by learned map, then card digits, then bank name
   expect(resolveAccount({ last4: "4521" }, from, u.rctx({ "hdfcbank.net|4521": "gone" as Id<"accounts"> }))).toBe(u.regalia);
 });
 
+test("a bank account with the mail's last 4 digits is the method, through its UPI method for UPI; a card mail still finds the card", () => {
+  const u = user();
+  const from = "alerts@axis.bank.in";
+  const s0 = u.s();
+  let s = run(s0, "accounts.update", { ...s0.accounts.find((a) => a._id === u.sbi)!, id: u.sbi, last4: "9900" }).snap;
+  const r = run(s, "accounts.create", { name: "Ace twin", kind: "card", last4: "9900", billingAccountId: u.hdfc, settlementDay: 1, paymentDay: 20, initialBalance: 0, includeInTotals: true, hidden: false, transferAsExpense: false });
+  s = r.snap;
+  u.set(s);
+  expect(resolveAccount({ last4: "9900", channel: "netbanking" }, from, u.rctx())).toBe(u.sbi);
+  expect(resolveAccount({ last4: "9900" }, from, u.rctx())).toBe(u.sbi);
+  expect(resolveAccount({ last4: "9900", channel: "card" }, from, u.rctx())).toBe(r.result);
+  // UPI on a bank with a linked UPI method goes to that method
+  s = run(s, "accounts.update", { ...s.accounts.find((a) => a._id === u.hdfc)!, id: u.hdfc, last4: "1234" }).snap;
+  u.set(s);
+  expect(resolveAccount({ last4: "1234", channel: "upi" }, from, u.rctx())).toBe(u.gpay);
+});
+
 test("an archived or deleted method is never proposed", () => {
   const u = user();
   u.set(run(u.s(), "accounts.setArchived", { ids: [u.regalia], archived: true }).snap);

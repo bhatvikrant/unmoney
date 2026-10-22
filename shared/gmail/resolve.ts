@@ -36,8 +36,8 @@ export function accountMapKey(from: string, last4: string | undefined): string |
 }
 
 /**
- * The payment method a mail is about, by the first of: the learned map · a card with those last
- * 4 digits · a bank account named like the bank (through the UPI method linked to it when the
+ * The payment method a mail is about, by the first of: the learned map · a card or bank account
+ * with those last 4 digits (the card first when the mail is about a card) · a bank account named like the bank (through the UPI method linked to it when the
  * payment went over UPI) · nothing, and the row asks the user to pick.
  */
 export function resolveAccount(hint: AccountHint, from: string, ctx: Pick<ResolveCtx, "accounts" | "accountMap">): Id<"accounts"> | undefined {
@@ -47,7 +47,13 @@ export function resolveAccount(hint: AccountHint, from: string, ctx: Pick<Resolv
   if (learned && live.some((a) => a._id === learned)) return learned;
   if (hint.last4) {
     const card = live.find((a) => (a.kind === "card" || a.kind === "debitCard") && a.last4 === hint.last4);
-    if (card) return card._id;
+    const bank = live.find((a) => a.kind === "bank" && a.last4 === hint.last4);
+    const first = hint.channel === "card" || !bank ? card ?? bank : bank;
+    if (first?.kind === "bank" && hint.channel === "upi") {
+      const upi = live.find((a) => a.kind === "upi" && a.linkedAccountId === first._id);
+      if (upi) return upi._id;
+    }
+    if (first) return first._id;
   }
   if (hint.bankName) {
     const bank = live.find((a) => a.kind === "bank" && (sameName(a.bankName, hint.bankName) || nameHas(a.name, hint.bankName!)))
@@ -66,7 +72,7 @@ export function resolveAccount(hint: AccountHint, from: string, ctx: Pick<Resolv
 /** The credit card a mail names: by the learned map or the digits, else the only card of that bank. */
 function resolveCard(hint: AccountHint, from: string, ctx: Pick<ResolveCtx, "accounts" | "accountMap">): Doc<"accounts"> | undefined {
   const cards = ctx.accounts.filter((a) => usable(a) && a.kind === "card");
-  const byDigits = resolveAccount({ last4: hint.last4 }, from, ctx);
+  const byDigits = resolveAccount({ last4: hint.last4, channel: "card" }, from, ctx);
   const card = cards.find((a) => a._id === byDigits);
   if (card) return card;
   const ofBank = hint.bankName ? cards.filter((a) => sameName(a.bankName, hint.bankName) || nameHas(a.name, hint.bankName!)) : [];
