@@ -1,0 +1,5 @@
+From: Axis Bank Alerts <alerts@axis.bank.in>
+Subject: INR 2500.00 payment successful
+Received: 2026-10-21T02:23:00Z
+
+21-10-2026 Dear Customer, Please find below the summary of your payment: Bill amount: INR 2500.00 Amount paid: INR 2500.00 Biller name: Mirae Asset Mutual Fund Consumer no.: XXMAEB2667-A14190 Payment ref. no.: HGAMP01F090503666885 To make your future payments hassle-free, you can activate auto-pay on our Mobile Banking App, open by clicking here and earn cashback* on upcoming payments. Feel free to connect with us for any clarification. Regards, Axis Bank Ltd.

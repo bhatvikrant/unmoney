@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "icici",
+    "type": "cardPayment",
+    "amount": 7413.2,
+    "currency": "INR",
+    "date": "2026-10-14",
+    "dateSource": "mail",
+    "last4": "9001",
+    "bankName": "ICICI",
+    "channel": "card",
+    "merchantRaw": "ICICI card payment"
+  }
+}
