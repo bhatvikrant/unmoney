@@ -10,29 +10,30 @@ import { normNote } from "../../../shared/categoryLint";
 import { parseNumber, toMinor } from "../../../shared/money";
 import { useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
-import { guessMapping, headerNames, mappingReady, toImportRows, type BankMapping, type Grid } from "@/lib/bankImport";
+import { guessKind } from "@/lib/csv";
+import { guessMapping, guessSign, headerNames, layoutKey, mappingReady, recallMapping, toImportRows, type BankMapping, type Grid } from "@/lib/bankImport";
 import { Section } from "@/components/shell/misc";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const MEMORY_KEY = "unmoney.bankMapping";
 type Remembered = { mapping: BankMapping; accountId: string };
-const layoutKey = (grid: Grid, headerRow: number) => (grid[headerRow] ?? []).map((c) => c.trim().toLowerCase()).join("|").slice(0, 300);
-function recall(key: string): Remembered | undefined {
-  try { return (JSON.parse(localStorage.getItem(MEMORY_KEY) ?? "{}") as Record<string, Remembered>)[key]; } catch { return undefined; }
+function stored(): Record<string, Remembered> {
+  try { return JSON.parse(localStorage.getItem(MEMORY_KEY) ?? "{}") as Record<string, Remembered>; } catch { return {}; }
 }
 function remember(key: string, value: Remembered) {
   try {
-    const all = JSON.parse(localStorage.getItem(MEMORY_KEY) ?? "{}") as Record<string, Remembered>;
-    all[key] = value;
-    localStorage.setItem(MEMORY_KEY, JSON.stringify(Object.fromEntries(Object.entries(all).slice(-10))));
+    localStorage.setItem(MEMORY_KEY, JSON.stringify(Object.fromEntries(Object.entries({ ...stored(), [key]: value }).slice(-10))));
   } catch { /* storage blocked: the guess runs again next time */ }
 }
 
 const NONE = "-1";
+/** The payment-method choice that makes a new one from a typed name; the review lists and creates it. */
+const NEW = "new";
 
 export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onContinue }: {
   name: string; grid: Grid; headerRow: number;
@@ -45,15 +46,25 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
   // a method whose name (or card's bank) is in the file name, else the default one
   const fromName = methods.find((a) => [a.name, a.bankName].some((n) => n && n.length > 2 && name.toLowerCase().includes(n.toLowerCase())));
   const initial = useMemo(() => {
-    const saved = recall(layoutKey(grid, foundRow));
-    const accountId = saved && methods.some((a) => a._id === saved.accountId) ? saved.accountId : (fromName ?? methods.find((a) => a._id === settings.defaultAccountId) ?? methods[0])?._id ?? "";
+    const saved = recallMapping(grid, stored());
+    const accountId = saved && methods.some((a) => a._id === saved.accountId) ? saved.accountId : (fromName ?? methods.find((a) => a._id === settings.defaultAccountId) ?? methods[0])?._id ?? NEW;
     const kind = methods.find((a) => a._id === accountId)?.kind;
-    return { mapping: saved?.mapping.headerRow === foundRow ? saved.mapping : guessMapping(grid, foundRow, kind), accountId, saved: !!saved };
+    return { mapping: saved?.mapping ?? guessMapping(grid, foundRow, kind), accountId, saved: !!saved };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grid, foundRow]);
   const [m, setM] = useState<BankMapping>(initial.mapping);
+  const set = (patch: Partial<BankMapping>) => setM((x) => ({ ...x, ...patch }));
   const [accountId, setAccountId] = useState(initial.accountId);
-  const account = methods.find((a) => a._id === accountId);
+  const [newName, setNewName] = useState("");
+  // once the user has set the sign rule by hand, a change of payment method leaves it alone
+  const [signTouched, setSignTouched] = useState(false);
+  const accountName = accountId === NEW ? newName.trim() : methods.find((a) => a._id === accountId)?.name;
+  const kindOf = (id: string, name: string) => (id === NEW ? guessKind(name) : methods.find((a) => a._id === id)?.kind);
+  function changeMethod(id: string, name: string) {
+    setAccountId(id);
+    setNewName(name);
+    if (!signTouched) set({ sign: guessSign(m.drcr, kindOf(id, name)) });
+  }
   const headers = headerNames(grid[m.headerRow] ?? []);
 
   // what the user's history files a note under, for rows without a category column
@@ -72,16 +83,15 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
 
   // money in that says refund or reversal becomes a refund (less spending), unless turned off here
   const [refunds, setRefunds] = useState(true);
-  const ready = mappingReady(m) && !!account;
-  const result = useMemo(() => (ready ? toImportRows(grid, m, { account: account!.name, categoryFor, refunds, spent }) : { rows: [], noAmount: 0, refunds: 0 }),
+  const ready = mappingReady(m) && !!accountName;
+  const result = useMemo(() => (ready ? toImportRows(grid, m, { account: accountName!, categoryFor, refunds, spent }) : { rows: [], noAmount: 0, refunds: 0 }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ready, grid, m, account, history, refunds, spent]);
+    [ready, grid, m, accountName, history, refunds, spent]);
   // how many rows read as refunds with the switch on, so the switch shows only when there are some
-  const refundRows = useMemo(() => (ready && !refunds ? toImportRows(grid, m, { account: account!.name, refunds: true }).refunds : result.refunds),
+  const refundRows = useMemo(() => (ready && !refunds ? toImportRows(grid, m, { account: accountName!, refunds: true }).refunds : result.refunds),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ready, refunds, result, grid, m, account]);
+    [ready, refunds, result, grid, m, accountName]);
 
-  const set = (patch: Partial<BankMapping>) => setM((x) => ({ ...x, ...patch }));
   const colSelect = (label: string, value: number, onChange: (c: number) => void, optional = false) => (
     <MapRow label={label}>
       <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
@@ -96,7 +106,7 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
   const headerChoices = grid.slice(0, 30).map((r, i) => ({ i, cells: r.filter((c) => c.trim()) })).filter((x) => x.cells.length >= 2);
 
   function cont() {
-    remember(layoutKey(grid, m.headerRow), { mapping: m, accountId });
+    remember(layoutKey(grid[m.headerRow] ?? []), { mapping: m, accountId });
     onContinue(result.rows, result.noAmount);
   }
 
@@ -111,7 +121,7 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
           </div>
         </div>
         <MapRow label="Header row">
-          <Select value={String(m.headerRow)} onValueChange={(v) => { const row = Number(v); setM(guessMapping(grid, row, account?.kind)); }}>
+          <Select value={String(m.headerRow)} onValueChange={(v) => { setM(guessMapping(grid, Number(v), kindOf(accountId, newName))); setSignTouched(false); }}>
             <SelectTrigger className="w-full" aria-label="Header row"><SelectValue /></SelectTrigger>
             <SelectContent>{headerChoices.map((x) => <SelectItem key={x.i} value={String(x.i)}>{`Row ${x.i + 1} · ${x.cells.slice(0, 3).join(", ")}`.slice(0, 60)}</SelectItem>)}</SelectContent>
           </Select>
@@ -133,7 +143,7 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
           <>
             {colSelect("Amount", m.amount, (c) => set({ amount: c }))}
             <MapRow label="Money out is">
-              <Select value={m.sign} onValueChange={(v) => set({ sign: v as BankMapping["sign"] })}>
+              <Select value={m.sign} onValueChange={(v) => { setSignTouched(true); set({ sign: v as BankMapping["sign"] }); }}>
                 <SelectTrigger className="w-full" aria-label="Money out is"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="negativeOut">A negative amount (−500)</SelectItem>
@@ -150,11 +160,20 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
 
       <Section title="Payment method">
         <MapRow label="All rows go to">
-          <Select value={accountId} onValueChange={setAccountId}>
+          <Select value={accountId} onValueChange={(v) => changeMethod(v, newName)}>
             <SelectTrigger className="w-full" aria-label="Payment method"><SelectValue placeholder="Pick a payment method" /></SelectTrigger>
-            <SelectContent>{methods.map((a) => <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>)}</SelectContent>
+            <SelectContent>
+              {methods.map((a) => <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>)}
+              <SelectItem value={NEW}>New payment method…</SelectItem>
+            </SelectContent>
           </Select>
         </MapRow>
+        {accountId === NEW ? (
+          <MapRow label="Its name">
+            <Input value={newName} onChange={(e) => changeMethod(NEW, e.target.value)} placeholder="HDFC Bank, Amex card…" aria-label="Name of the new payment method" />
+          </MapRow>
+        ) : null}
+        {accountId === NEW ? <p className="px-4 py-2 text-xs text-muted-foreground">It is made with the import; you pick its type (bank, credit card…) in the review.</p> : null}
       </Section>
 
       <Section title={`Preview${result.rows.length ? ` · ${result.rows.length} rows` : ""}`}>
