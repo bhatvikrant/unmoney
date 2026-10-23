@@ -68,11 +68,12 @@ Route `/recap/:month`, full screen, outside `AppShell`. Phone: the card fills th
 
 Chrome:
 
-- **Progress segments** across the top, one per card, in `foreground` at 15% with the done ones solid, exactly as story UIs do.
+- **Progress segments** across the top, one per card, in `foreground` at 15% with the done ones solid, exactly as story UIs do. The current one fills over 5 s.
+- **Pause / play** beside × (or `Space`); hidden on the last card.
 - **×** top right closes: back to where it was opened from, falling back to `/stats?month=<key>` (`useGoBack`).
 - **Navigation:** tap the right 65% of the card for next, left 35% for back; horizontal swipe; `←` `→`; `Esc` closes. The last card's "Done" closes too.
 - **Transitions:** a 220 ms fade with a 16 px slide, via Framer Motion's `AnimatePresence`, off under `prefers-reduced-motion`.
-- No autoplay. People read numbers at their own pace.
+- **Autoplay:** each card moves on by itself after 5 s; the last card waits for Done. Holding the card down (finger or mouse) pauses it, and letting go carries on from where it was; a release after a hold of 300 ms or more does not count as a tap. It also waits while a drawer is open (§4.4), while the tab is in the background, and while paused with the button.
 
 ### 4.1 Card layout
 
@@ -130,7 +131,28 @@ Kept 30% of income · 5 no-spend days · "Coffee" ×22
 
 Sharing an image of the poster is a later step (needs an html-to-image dependency); the text copy is enough for v1.
 
-### 4.4 Edge cases
+### 4.4 Tapping into a card
+
+Parts of a card open the entries behind them in a drawer over the card, so the user never leaves the story. The drawer's total is always the figure on the card (`recapDrill` in `shared/recap.ts` filters the same `statsEntries`), and the drawer is in the URL (`?drill=`) so Back from an entry opened in it reopens it.
+
+| Card | Tap | Drawer |
+|---|---|---|
+| Where it went | a category block or legend row | its entries, with Open in Stats |
+| | "N other categories" / Everything else | those categories, each opening its entries (with a way back) |
+| Biggest spend | a row | opens that entry |
+| | Top ten (year: See all ten) | the ten largest, largest first |
+| Your days / Year day by day | a bar or a calendar cell | that day; ‹ › (or ← →) step through the days |
+| On repeat / Top five | a note | every entry with that note |
+| | Most used method, Scheduled | that method's entries; the scheduled ones |
+| What changed | a mover | that category's entries in this period |
+| In vs out | Income | what came in |
+| Month by month | a bar, Quietest, Best month | that month, stepping ‹ ›, with Open its recap |
+| On the clock | an hour's bar, Earliest | that hour across the year, stepping ‹ ›; that day |
+| Paid with / New this year | a method or category | its entries |
+
+A tap on one of these never steps to the next card (a swipe still does); footnotes on the chart cards say what a tap does.
+
+### 4.5 Edge cases
 
 - **Few entries.** The thresholds above keep thin months out. A month with 5 entries and one category still produces cards 1, 2, 4, 5, 9.
 - **Month start day ≠ 1.** Cover subtitle shows the real range ("25 Sep – 24 Oct"); the 30-bar strip has as many bars as the range has days.
