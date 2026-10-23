@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, typ
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { type Ctx as LedgerCtx } from "../../shared/ledger";
 import { formatMoney } from "../../shared/money";
-import { dueRepeats } from "../../shared/ops";
+import { currencyInfo } from "../../shared/currencies";
+import { dueRepeats, emptySnapshot } from "../../shared/ops";
 import { todayISO } from "../../shared/dates";
 import { accountsList, categoriesList, currenciesList, groupsList, ledgerOf, type AccountRow, type AccountGroupRow } from "../../shared/views";
 import { useOp, useStore, useView } from "./store";
@@ -41,10 +42,16 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
   const view = useView();
   // balances count entries up to today, so they move on at midnight as well as on every change
   const today = useToday();
-  const acc = useMemo(() => accountsList(view, today), [view, today]);
-  const groups = useMemo(() => groupsList(view, true), [view]);
-  const categories = useMemo(() => categoriesList(view, true), [view]);
-  const currencies = useMemo(() => currenciesList(view), [view]);
+  // Only the tables the models below read: an op copies just the tables it touches, so a note, a
+  // bookmark, a draft or a history line leaves these as they were and nothing below re-renders for it.
+  const { transactions, accounts: accountRows, accountGroups, settings: settingsRows, categories: categoryRows, currencies: currencyRows } = view;
+  const core = useMemo(() => ({ ...emptySnapshot(), transactions, accounts: accountRows, accountGroups, settings: settingsRows, categories: categoryRows, currencies: currencyRows }),
+    [transactions, accountRows, accountGroups, settingsRows, categoryRows, currencyRows]);
+  const acc = useMemo(() => accountsList(core, today), [core, today]);
+  const groups = useMemo(() => groupsList(core, true), [core]);
+  const categories = useMemo(() => categoriesList(core, true), [core]);
+  const currencies = useMemo(() => currenciesList(core), [core]);
+  const ledger = useMemo(() => ledgerOf(core), [core]);
 
   useEffect(() => {
     applyTheme(settings.theme, settings.accent, settings.colorSet);
@@ -59,7 +66,6 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
     const accountById = new Map([...acc.accounts, ...acc.system].map((a) => [a._id as string, a]));
     const categoryById = new Map(categories.map((c) => [c._id as string, c]));
     const groupById = new Map(groups.map((g) => [g._id as string, g]));
-    const ledger = ledgerOf(view);
     const fmtBase = { symbol: settings.symbol, symbolPosition: settings.symbolPosition, decimals: settings.decimals };
     return {
       settings,
@@ -79,7 +85,10 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
       fmt: (minor, opts) => formatMoney(minor, fmtBase, opts),
       fmtSub: (minor, code) => {
         const c = currencies.find((x) => x.code === code);
-        return c ? formatMoney(minor, { symbol: c.symbol, symbolPosition: c.symbolPosition, decimals: c.decimals }) : `${minor} ${code}`;
+        if (c) return formatMoney(minor, { symbol: c.symbol, symbolPosition: c.symbolPosition, decimals: c.decimals });
+        // a sub currency removed since: entries in it still read as money, not "1250 USD"
+        const i = currencyInfo(code);
+        return i ? formatMoney(minor, { symbol: i.symbol, symbolPosition: i.position ?? "before", decimals: i.decimals }) : `${minor} ${code}`;
       },
       accountName: (id) => (id ? accountById.get(id)?.name ?? "(deleted account)" : ""),
       categoryLabel: (tx) => {
@@ -89,7 +98,7 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
         return s ? `${c.name} / ${s.name}` : c.name;
       },
     };
-  }, [acc, groups, categories, currencies, settings, user, view]);
+  }, [acc, groups, categories, currencies, settings, user, ledger]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

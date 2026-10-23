@@ -153,3 +153,21 @@ test("a remembered layout is found by its header text wherever the row sits, not
   // a header row with the same text but different spacing or case is the same layout
   expect(layoutKey(["Date ", "NARRATION", "Chq./Ref.No.", "Value Dt", "Withdrawal Amt.", "Deposit Amt.", "Closing Balance"])).toBe(layoutKey(HDFC[3]));
 });
+
+test("Deposit and Withdrawal words, and a Dr/Cr after the amount, decide the direction", () => {
+  const typed: Grid = [
+    ["Date", "Narration", "Type", "Amount"],
+    ["01/10/2026", "SALARY", "Deposit", "1,20,000.00"],
+    ["02/10/2026", "SWIGGY", "Withdrawal", "485.00"],
+  ];
+  const m = guessMapping(typed, 0);
+  expect(m.sign).toBe("drcr");
+  expect(toImportRows(typed, m, { account: "Bank" }).rows.map((r) => r.type)).toEqual(["Income", "Expenses"]);
+  const suffixed: Grid = [
+    ["Date", "Narration", "Amount"],
+    ["01/10/2026", "SALARY", "1,20,000.00 Cr"],
+    ["02/10/2026", "SWIGGY", "485.00 Dr"],
+  ];
+  const rows = toImportRows(suffixed, guessMapping(suffixed, 0), { account: "Bank" }).rows;
+  expect(rows.map((r) => [r.type, r.amount])).toEqual([["Income", "1,20,000.00"], ["Expenses", "485.00"]]);
+});

@@ -4,7 +4,7 @@ import { ArrowLeftRight, Calculator, ChevronRight, ExternalLink, Globe, Mail, Re
 import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
-import { bookmarksList, draftGet, draftsOpen, noteSuggestions, recentCategories, txGet, txTags, type TxDetail } from "../../../shared/views";
+import { bookmarksList, draftGet, draftMatches, draftsOpen, noteSuggestions, recentCategories, txGet, txTags, type TxDetail } from "../../../shared/views";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { senderAddress } from "../../../shared/gmail/mail";
@@ -274,8 +274,11 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   // reviewing drafts one by one: the next one still waiting, to go straight on to after saving this one
   const nextDraft = useMemo(() => {
     if (!draft) return undefined;
-    const open = draftsOpen(view).filter((d) => d._id !== draft._id);
-    const at = draftsOpen(view).findIndex((d) => d._id === draft._id);
+    // not the "maybe already added" ones: served up as plain forms they would be saved as duplicates
+    const matched = draftMatches(view);
+    const all = draftsOpen(view).filter((d) => d._id === draft._id || !matched.has(d._id));
+    const open = all.filter((d) => d._id !== draft._id);
+    const at = all.findIndex((d) => d._id === draft._id);
     return open[Math.max(0, at)] ?? open[0];
   }, [view, draft]);
   // the saved entry, for the split: only an expense that is saved can be shared, and the link lives on it
@@ -657,7 +660,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
 
       </Page>
 
-      <div className={cn("z-30 bg-background/95 backdrop-blur border-t", panel ? "sticky bottom-0" : "fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 md:safe-bottom")}>
+      <div className={cn("z-30 bg-background border-t", panel ? "sticky bottom-0" : "fixed bottom-[var(--tabbar-h)] md:bottom-0 inset-x-0 md:left-56 md:safe-bottom")}>
         <div className="mx-auto max-w-3xl space-y-2 p-3">
           {isEdit ? (
             <div className="grid grid-cols-3 gap-2">

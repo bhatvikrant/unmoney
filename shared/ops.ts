@@ -237,6 +237,8 @@ export interface Ops {
 
   /** Save a draft read from mail as a real entry (with `source` pointing at the mail); the draft becomes accepted. */
   "drafts.accept": { args: TxFields & { id: Id<"drafts"> }; result: Id<"transactions"> };
+  /** Save several drafts in one go (the review page's Import): one op, one replay, one re-render. A draft that cannot be saved is skipped and counted. */
+  "drafts.acceptMany": { args: { items: (TxFields & { id: Id<"drafts"> })[] }; result: { ids: Id<"transactions">[]; accepted: Id<"drafts">[]; failed: number } };
   /** "Not an entry": the drafts are dismissed. Ones gone or already handled are left out. */
   "drafts.dismiss": { args: { ids: Id<"drafts">[] }; result: void };
   /** "Yes, that's the one I typed in": the existing entry gets the draft's `source`, the draft becomes accepted. */
@@ -367,6 +369,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.rescale": ["transactions"],
   "transactions.restoreRows": ["accounts", "categories", "repeats", "transactions", "bookmarks"],
   "drafts.accept": ["drafts", "transactions", "accounts", "categories"],
+  "drafts.acceptMany": ["drafts", "transactions", "accounts", "categories"],
   "drafts.dismiss": ["drafts"],
   "drafts.link": ["drafts", "transactions"],
   "drafts.unmatch": ["drafts"],
@@ -590,6 +593,11 @@ class Work {
     const arr = this.t(table);
     const i = arr.findIndex((d) => d._id === id);
     if (i >= 0) arr.splice(i, 1);
+    this.idx.delete(table);
+  }
+  /** Drops every document `pred` matches in one pass: deleting them one by one scans the table once per document. */
+  removeWhere<T extends Table>(table: T, pred: (d: Doc<T>) => boolean): void {
+    this.snap[table] = this.t(table).filter((d) => !pred(d)) as Snapshot[T];
     this.idx.delete(table);
   }
   clear(table: Table): void {
@@ -1249,7 +1257,7 @@ const handlers: Handlers = {
   },
   "accounts.permanentlyDelete": (w, { id }) => {
     w.must("accounts", id);
-    for (const t of [...w.snap.transactions]) if (t.accountId === id || t.toAccountId === id) w.delete("transactions", t._id);
+    w.removeWhere("transactions", (t) => t.accountId === id || t.toAccountId === id);
     w.delete("accounts", id);
   },
   "accounts.reorder": (w, { items }) => {
@@ -1542,11 +1550,13 @@ const handlers: Handlers = {
   },
 
   "transactions.bulkRemove": (w, { ids, ifPresent }) => {
+    const have = new Set<string>(w.snap.transactions.map((t) => t._id));
+    const gone = new Set<string>();
     for (const id of ids) {
-      if (ifPresent && !w.get("transactions", id)) continue;
-      w.must("transactions", id);
-      w.delete("transactions", id);
+      if (!have.has(id)) { if (ifPresent) continue; throw new Error("Not found"); }
+      gone.add(id);
     }
+    w.removeWhere("transactions", (t) => gone.has(t._id));
   },
 
   "transactions.setSplit": (w, { ids, split }) => {
@@ -1784,6 +1794,16 @@ const handlers: Handlers = {
     w.patch("drafts", id, { status: "accepted", transactionId, matchedTransactionId: undefined, resolvedAt: w.at });
     return transactionId;
   },
+  "drafts.acceptMany": (w, { items }) => {
+    const ids: Id<"transactions">[] = [];
+    const accepted: Id<"drafts">[] = [];
+    let failed = 0;
+    for (const item of items) {
+      // accept validates before it writes, so one that throws leaves nothing behind
+      try { ids.push(run(w, "drafts.accept", item)); accepted.push(item.id); } catch { failed++; }
+    }
+    return { ids, accepted, failed };
+  },
   "drafts.dismiss": (w, { ids }) => {
     for (const id of ids) {
       const draft = w.get("drafts", id);
@@ -1808,7 +1828,9 @@ const handlers: Handlers = {
   "drafts.link": (w, { id, transactionId }) => {
     const draft = w.must("drafts", id, "That draft is gone");
     if (draft.status !== "open") throw new Error("That draft was already handled");
-    w.must("transactions", transactionId, "That entry is gone");
+    const tx = w.must("transactions", transactionId, "That entry is gone");
+    // one entry is one payment: a second mail that looks like it is another payment, not this one again
+    if (tx.source && tx.source.messageId !== draft.messageId) throw new Error("That entry already came from another mail");
     w.patch("transactions", transactionId, { source: { app: "gmail", messageId: draft.messageId } });
     w.patch("drafts", id, { status: "accepted", transactionId, matchedTransactionId: undefined, resolvedAt: w.at });
   },
@@ -1852,8 +1874,11 @@ const handlers: Handlers = {
           stopped = true;
           break;
         }
-        w.insert("transactions", { ...rep.template, date: next, photoIds: [], repeatId: rep._id });
-        created++;
+        // a date the schedule already has an entry for (its next date moved back by hand, or the server's job got here first): not again
+        if (!w.snap.transactions.some((t) => t.repeatId === rep._id && t.date === next)) {
+          w.insert("transactions", { ...rep.template, date: next, photoIds: [], repeatId: rep._id });
+          created++;
+        }
         next = nextOccurrence(next, rep.startDate, rep.frequency);
       }
       if (!stopped) w.patch("repeats", rep._id, { nextDate: next });

@@ -13,7 +13,9 @@ import App from "./App";
 
 startPwa();
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+// Every change is queued in IndexedDB and sent again after a reload, so closing the tab mid-send loses
+// nothing: Convex's own "changes may not be saved" prompt would only be wrong here.
+const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string, { unsavedChangesWarning: false });
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
