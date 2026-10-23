@@ -7,6 +7,7 @@ import { BottomSheet } from "@/components/shell/BottomSheet";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useOverText, useShortMoney } from "@/lib/budgetText";
 
 export function AccountPicker({ open, onOpenChange, onPick, title = "Payment method", exclude }: {
   open: boolean; onOpenChange: (o: boolean) => void; onPick: (id: Id<"accounts">) => void; title?: string; exclude?: string;
@@ -54,7 +55,9 @@ export function CategoryPicker({ open, onOpenChange, type, onPick, budgets }: {
   /** Each main category's budget in the entry's period, to show what it has left under its name. */
   budgets?: Map<string, { limit: number; spent: number }>;
 }) {
-  const { categories, settings, fmt } = useApp();
+  const { categories, settings } = useApp();
+  const short = useShortMoney();
+  const overText = useOverText();
   const nav = useNavigate();
   const [main, setMain] = useState<Id<"categories"> | null>(null);
   const [query, setQuery] = useState("");
@@ -90,7 +93,7 @@ export function CategoryPicker({ open, onOpenChange, type, onPick, budgets }: {
     return (
       <button key={c._id} type="button" onClick={() => pickMain(c._id)} className={tile}>
         <span className="flex gap-1"><span className="flex-1 truncate">{c.name}</span>{hasSubs(c._id) ? <span className="text-muted-foreground">›</span> : null}</span>
-        {b ? <span className={cn("block truncate text-[11px] leading-tight tabular", left < 0 ? "text-expense" : "text-budget-left")}>{left < 0 ? `${fmt(-left)} over` : `${fmt(left)} left`}</span> : null}
+        {b ? <span className={cn("block truncate text-[11px] leading-tight tabular", left < 0 ? "text-expense" : "text-budget-left")}>{left < 0 ? overText(b) : `${short(left)} left`}</span> : null}
       </button>
     );
   };

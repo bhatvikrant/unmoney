@@ -23,6 +23,7 @@ import type { Tx } from "../../../shared/views";
 import { useDrill, useHints } from "./drill";
 import { MARK, posterImage, posterRows, type Poster, type PosterRow } from "./poster";
 import { Logo } from "@/components/shell/Logo";
+import { useOverText } from "@/lib/budgetText";
 
 /** The chart hue each card is tinted with, in the order the cards run. */
 const TINT: Record<RecapCard["kind"], string> = {
@@ -510,11 +511,12 @@ export function InOutCard({ card }: Props<"inout">) {
  */
 function BudgetRow({ row, hint, unit = "month" }: { row: RecapBudgetRow; hint?: boolean; unit?: "month" | "year" }) {
   const { fmt } = useApp();
+  const overText = useOverText();
   const over = row.spent > row.limit;
   const used = row.limit > 0 ? row.spent / row.limit : 1;
   const line = over ? row.limit / row.spent : undefined;
   const notes = [
-    `${Math.round(used * 100)}% of ${fmt(row.limit)}`,
+    over ? `${Math.round(used * 100)}%` : `${Math.round(used * 100)}% of ${fmt(row.limit)}`,
     row.overOn ? `over on ${shortDay(row.overOn)}` : null,
     row.streak >= 2 ? `${over ? "over" : "held"} ${row.streak} ${unit}s running` : null,
   ].filter(Boolean).join(" · ");
@@ -522,7 +524,7 @@ function BudgetRow({ row, hint, unit = "month" }: { row: RecapBudgetRow; hint?: 
     <>
       <div className="flex items-baseline justify-between gap-3 text-[13px]">
         <span className="truncate font-medium">{row.name}</span>
-        <span className={cn("shrink-0 font-medium tabular", over ? "text-expense" : "text-budget-left")}>{over ? `${fmt(row.spent - row.limit)} over` : `${fmt(row.limit - row.spent)} left`}</span>
+        <span className={cn("shrink-0 font-medium tabular", over ? "text-expense" : "text-budget-left")}>{over ? overText(row) : `${fmt(row.limit - row.spent)} left`}</span>
       </div>
       <div className="relative mt-1 flex h-2.5 overflow-hidden rounded-full bg-foreground/10">
         {line !== undefined
