@@ -15,7 +15,7 @@ import { markRecapSeen, markRecapYearSeen, recapUnseen, recapYearUnseen } from "
 import { Button } from "@/components/ui/button";
 import { monthKey, monthKeyForDate, type MonthKey } from "../../../shared/period";
 import { recapNudge, yearRecapNudge } from "../../../shared/recap";
-import { longMonth } from "./cards";
+import { longMonth } from "@/lib/format";
 
 /** Shown only while the ledger shows the current month (`month`). */
 export function RecapNudge({ month }: { month: MonthKey }) {
@@ -25,10 +25,12 @@ export function RecapNudge({ month }: { month: MonthKey }) {
   const { settings } = useApp();
   const today = useToday();
   const [dismissed, setDismissed] = useState<string | null>(null);
-  const ready = useMemo(() => recapNudge(view, today), [view, today]);
-  const readyYear = useMemo(() => yearRecapNudge(view, today), [view, today]);
   const current = monthKeyForDate(today, settings.monthStartDay);
-  if (month !== current) return null;
+  // only on the current month: browsing an old one costs no scan of the entries
+  const shown = month === current;
+  const ready = useMemo(() => (shown ? recapNudge(view, today) : null), [shown, view, today]);
+  const readyYear = useMemo(() => (shown ? yearRecapNudge(view, today) : null), [shown, view, today]);
+  if (!shown) return null;
   // the year wins the card; December rides along as the second button
   if (readyYear !== null && dismissed !== String(readyYear) && recapYearUnseen(userId, readyYear)) {
     const december = monthKey(readyYear, 12);

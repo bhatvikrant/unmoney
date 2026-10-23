@@ -3,19 +3,9 @@ import type { PieSectorDataItem } from "recharts/types/polar/Pie";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { useApp } from "@/lib/app";
 import { toMajor } from "../../../shared/money";
+import { colorAt, colouredCount } from "@/lib/theme";
 
-/** Eight categorical slots in a fixed order (see --chart-N in index.css); anything past them is the neutral "rest" tone. */
-export const SERIES_SLOTS = 8;
-
-/** How many of `count` ranked items get their own colour: all of them up to eight, otherwise seven and the rest fold into one neutral slice. */
-export function colouredCount(count: number) {
-  return count <= SERIES_SLOTS ? count : SERIES_SLOTS - 1;
-}
-
-/** The colour of the item ranked `i` in a list of `count`; past the coloured ones, the neutral "rest" tone. */
-export function colorAt(i: number, count = SERIES_SLOTS) {
-  return i < colouredCount(count) ? `var(--chart-${i + 1})` : "var(--chart-rest)";
-}
+export { colorAt, colouredCount, SERIES_SLOTS } from "@/lib/theme";
 
 const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
 const axisTick = (v: number) => (v === 0 ? "0" : compact.format(v));

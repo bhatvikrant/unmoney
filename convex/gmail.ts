@@ -24,7 +24,7 @@ import { triage } from "../shared/gmail/triage";
 import { parseMail } from "../shared/gmail/rules";
 import { latestRates } from "./lib/fxFeed";
 import { accountMapKey, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
-import { foldDrafts, laterMatches, matchEntry, type DraftCandidate } from "../shared/gmail/dedup";
+import { foldDrafts, laterMatches, matchEntry, samePayment, type DraftCandidate } from "../shared/gmail/dedup";
 import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, matchesSender, normaliseSender, readsFromFor, spanMs, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
 import { applyMerchantMemory, learnMerchants, mergeMerchants, type MerchantMemory } from "../shared/gmail/learn";
 import { PAIRED_NOTE } from "../shared/gmail/dedup";
@@ -558,7 +558,14 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   // no amount means a currency no rate could be found for: no ₹0 draft; the mail stays unread, so the next check tries again
   const waitingRate = candidates.filter((d) => d.proposal.amount === 0);
   if (waitingRate.length) notes.push(`${waitingRate.length} ${waitingRate.length === 1 ? "mail waits" : "mails wait"} for an exchange rate`);
-  const { inserts, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), prep.openDrafts, prep.accounts.filter((a) => !a.deletedAt));
+  const { inserts: folded, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), prep.openDrafts, prep.accounts.filter((a) => !a.deletedAt));
+  // The other mail of a purchase whose first mail was already saved (the shop's receipt arriving after
+  // the bank's alert was accepted): the entry exists, so this is nothing new. Remembered as read.
+  const inserts = folded.filter((d) => {
+    if (!prep.accepted.some(({ draft }) => samePayment(draft, d))) return true;
+    for (const id of [d.messageId, ...d.extraMessageIds]) processed.push({ id, receivedAt: d.receivedAt });
+    return false;
+  });
   return {
     scanned: ids.length,
     inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, prep.transactions, prep.accounts) })),
