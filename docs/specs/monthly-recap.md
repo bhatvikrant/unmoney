@@ -109,7 +109,7 @@ In order. "Skip when" lists the condition under which a card is left out.
 | 6 | On repeat | `ON REPEAT` | the most frequent note in quotes, 44 px | count, total, average; **count bars** for the top four notes in the card's tint (top one solid, others at 35%); two tiles: most used payment method with its share, scheduled (repeat) entries' total and count | "Notes matched ignoring case" | no note appears 3+ times and no repeats |
 | 7 | What changed | `WHAT CHANGED SINCE AUGUST` | the biggest mover, e.g. "Shopping doubled" | one line naming the fallers; up to four **tornado rows**: name with before → after, a centred axis with a bar to the right (expense colour) for a rise or to the left (income colour) for a fall, bar length by the move's size relative to the biggest, and the delta | "Only moves above 5% of the month's total" | no previous month with entries, or no category moved by more than 5% of the month's total |
 | 8 | In vs out | `IN VS OUT` | "30%" at 60 px, "of what came in, kept" | a **48 px bar** split Spent (expense colour, labelled with the amount) / Kept (income colour); legend rows for income, spent, kept; a budgets tile ("4 of 5 held · Food went over by ₹1,140") when budgets exist | "August: 24% kept" | no income that month (then budgets, if any, become their own small card) |
-| 9 | Closer | `KEEP THIS ONE` | a **poster**: a `bg-card` card with the app's shadow and a 14 px radius, carrying "September / 2026" at 30 px, the UnMoney wordmark top right, the category strip, then seven hairline rows (Spent, vs August, Top category, Biggest spend, Kept, No-spend days, On repeat) and a small footer line (range · entry count · unmoney.vercel.app) | under the poster, two buttons side by side: **Open in Stats** (primary) and **Copy summary** (outline) | "Every month's recap stays on Stats" · "Done" | never |
+| 9 | Closer | `KEEP THIS ONE` | a **poster**: a `bg-card` card with the app's shadow and a 14 px radius, carrying "September / 2026" at 30 px with the range and entry count under it, the category strip, then seven hairline rows (Spent, vs August, Top category, Biggest spend, Kept, No-spend days, On repeat), and a signature row under a rule: the mark and "UnMoney" left, unmoney.vercel.app right | under the poster: **Open in Stats** (primary), **Share** and a **Download** icon (outline); without a share sheet that takes files, **Download** takes Share's place | "Every month's recap stays on Stats" · "Done" | never |
 
 The closer is the only card whose content sits in an inset card rather than on the tint: the poster is the thing to keep (and, later, to share as an image), and the actions stay outside it so a screenshot of the poster is clean. Its tint is the neutral `--chart-rest`.
 
@@ -121,7 +121,9 @@ Wording rules:
 - Percentages are rounded to whole numbers; amounts use `fmt()` like everywhere else.
 - Previous-month comparisons compare logical months of the same `monthStartDay`.
 
-"Copy summary" writes plain text to the clipboard, e.g.
+**Share** and **Download** send the poster as a 1080 px PNG (`unmoney-recap-2026-09.png`) in the current theme. `src/pages/recap/poster.ts` draws it on a canvas from the same rows as the card (`posterRows`), rather than capturing the HTML, which loses web fonts on iOS. The image is made when the card opens, because iOS only opens the share sheet straight from the tap.
+
+`recapText` still builds the plain-text summary, e.g.
 
 ```
 September 2026 · UnMoney
@@ -129,7 +131,7 @@ Spent ₹84,310 (8% less than Aug) · Top: Food 31% · Biggest: Flight to Goa �
 Kept 30% of income · 5 no-spend days · "Coffee" ×22
 ```
 
-Sharing an image of the poster is a later step (needs an html-to-image dependency); the text copy is enough for v1.
+but the card no longer has a Copy button for it.
 
 ### 4.4 Tapping into a card
 
@@ -197,7 +199,6 @@ Phases 1 and 2 can be built in parallel against the `RecapCard` types; 3 depends
 
 ## 7. Later, not now
 
-- Share as image (closer card → PNG).
 - `recapSeenMonth` on settings so the nudge is dismissed on every device at once.
 - A yearly recap in January, built from the same cards with 12 months in place of 30 days.
 - A PWA push notification on the 1st (needs a push subscription flow the app doesn't have).
