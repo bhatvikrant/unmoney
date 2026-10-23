@@ -5,7 +5,7 @@ import { statsByCategory } from "./views";
 import { diffDays } from "./dates";
 import { monthRange, yearRange } from "./period";
 import {
-  monthRecap, recapIndex, recapNudge, recapText, yearQualifies, yearRecap, yearRecapNudge,
+  monthRecap, recapDrill, recapIndex, recapNudge, recapText, yearQualifies, yearRecap, yearRecapNudge,
   PERSONALITY, RECAP_MIN_ENTRIES, RECAP_NUDGE_DAYS, RECAP_YEAR_MIN_MONTHS, RECAP_YEAR_NUDGE_DAYS, type RecapCard,
 } from "./recap";
 
@@ -140,7 +140,7 @@ test("notes are grouped case-insensitively and trimmed; empty notes are skipped"
   for (const n of ["Lunch", "Uber", "Uber", "Gym", "Gym", "Tea"]) g.expense("2026-09-15", 100, "Food", n);
   expect(card(monthRecap(g.snap, "2026-09")!.cards, "repeat")!.nextNotes).toEqual([{ text: "Uber", count: 3 }, { text: "Lunch", count: 2 }, { text: "Gym", count: 2 }]);
   expect(rep.scheduled).toBeUndefined();
-  expect(rep.account).toEqual({ name: f.cash.name, share: 1 });
+  expect(rep.account).toEqual({ id: f.cash._id, name: f.cash.name, share: 1 });
   expect(card(monthRecap(f.snap, "2026-09")!.cards, "closer")!.summary.repeat).toEqual({ text: "coffee", count: 3 });
 });
 
@@ -540,7 +540,7 @@ test("New this year ignores categories and methods used the year before", () => 
   // one never used before does, from its first entry
   for (let m = 1; m <= 6; m++) f.expense(`2026-0${m}-21`, 500, "Health", "Gym");
   const items = yearCard(yearRecap(f.snap, 2026)!.cards, "new").items;
-  expect(items.find((i) => i.name === "Health")).toEqual({ kind: "category", name: "Health", first: "2026-01-21", count: 6, amount: 3000 });
+  expect(items.find((i) => i.name === "Health")).toEqual({ kind: "category", id: f.cat("Health"), name: "Health", first: "2026-01-21", count: 6, amount: 3000 });
 });
 
 test("the calendar's rows follow monthStartDay 25", () => {
@@ -612,4 +612,47 @@ test("recapText writes the four-line year summary", () => {
     spent: 98431000, change: 0.06, prevLabel: "2025", top: { name: "Food", pct: 0.27 }, biggest: { note: "Flights to Lisbon", amount: 4800000 },
     keptPct: 34, noSpend: 58, repeat: { text: "Coffee", count: 226 }, personality: "The Planner",
   }, "2026", fmt, "year")).toBe("2026 · UnMoney\nSpent ₹9,84,310 (6% more than 2025)\nTop: Food 27% · Biggest: Flights to Lisbon ₹48,000 · Most logged: \"Coffee\" ×226\nKept 34% of income · 58 no-spend days · The Planner");
+});
+
+test("a drill's entries add up to the figure on the card they were tapped on", () => {
+  const f = fresh();
+  september(f);
+  f.expense("2026-09-14", 700, "Food", "coffee", { time: "08:15" });
+  const r = monthRecap(f.snap, "2026-09")!;
+  const cats = card(r.cards, "categories")!;
+  // every category block, and the rest, add up to its amount
+  for (const t of cats.top) expect(recapDrill(f.snap, r.range, { kind: "category", id: t.id }).amount).toBe(t.amount);
+  const rest = recapDrill(f.snap, r.range, { kind: "rest", exclude: cats.top.map((t) => t.id) });
+  expect(rest.amount).toBe(cats.rest.amount);
+  expect(rest.txs.map((t) => t.note)).toEqual([""]);
+  // a day is its bar
+  const days = card(r.cards, "days")!;
+  const busy = recapDrill(f.snap, r.range, { kind: "day", date: days.busiest });
+  expect(busy.amount).toBe(days.perDay.find((d) => d.date === days.busiest)!.amount);
+  expect(recapDrill(f.snap, r.range, { kind: "day", date: "2026-09-03" })).toEqual({ txs: [], amount: 0 });
+  // a day outside the recap is nothing, not the next month's entries
+  f.expense("2026-10-02", 999, "Food", "later");
+  expect(recapDrill(f.snap, r.range, { kind: "day", date: "2026-10-02" }).txs).toEqual([]);
+  // a note matches ignoring case and spaces, newest first
+  const coffee = recapDrill(f.snap, r.range, { kind: "note", text: "Coffee" });
+  expect(coffee.txs.map((t) => t.date)).toEqual(["2026-09-14", "2026-09-12", "2026-09-05", "2026-09-02"]);
+  expect(coffee.amount).toBe(card(r.cards, "repeat")!.note!.amount);
+  // the payment method, the hour and the largest
+  expect(recapDrill(f.snap, r.range, { kind: "account", id: f.cash._id }).amount).toBe(card(r.cards, "total")!.amount);
+  expect(recapDrill(f.snap, r.range, { kind: "hour", hour: 8 }).txs.map((t) => t.note)).toEqual(["coffee"]);
+  const top = recapDrill(f.snap, r.range, { kind: "largest", count: 2 });
+  expect(top.txs.map((t) => t.note)).toEqual(["Flight to Goa", "Rent"]);
+  expect(top.amount).toBe(184000 + 62000);
+});
+
+test("a month drilled from the year is that logical month", () => {
+  const f = fresh(25);
+  f.expense("2026-02-24", 100, "Food", "jan");
+  f.expense("2026-02-25", 200, "Food", "feb");
+  f.expense("2026-03-24", 300, "Food", "feb too");
+  const range = yearRange(2026, 25);
+  expect(recapDrill(f.snap, range, { kind: "month", month: "2026-02" }).txs.map((t) => t.note)).toEqual(["feb too", "feb"]);
+  // income is what came in, counted as Stats counts it
+  f.income("2026-03-01", 50000);
+  expect(recapDrill(f.snap, range, { kind: "income" }).amount).toBe(50000);
 });

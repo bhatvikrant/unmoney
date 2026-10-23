@@ -163,6 +163,11 @@
 @media (prefers-reduced-motion: reduce) {
   @keyframes shake { 0%, 100% { transform: none; } }
 }
+/* the recap's current card filling its progress segment; the card moves on when it ends (RecapPage) */
+@keyframes recap-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
 /* ---- UnMoney tokens ---- */
 @theme inline {
   --color-income: var(--income);
