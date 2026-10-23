@@ -130,19 +130,20 @@ export async function profile(token: string): Promise<{ email: string }> {
   return { email: json.emailAddress };
 }
 
-/** Ids of the messages matching a Gmail search, newest first, up to `max`. */
-export async function listMessageIds(token: string, q: string, max: number): Promise<string[]> {
-  const ids: string[] = [];
+/** The most ids Gmail lists per call. */
+const LIST_PAGE = 500;
+
+/** Ids of the messages matching a Gmail search, newest first, a page at a time until the search is exhausted. */
+export async function* listMessageIds(token: string, q: string): AsyncGenerator<string[]> {
   let pageToken: string | undefined;
-  while (ids.length < max) {
-    const p = new URLSearchParams({ q, maxResults: String(Math.min(100, max - ids.length)) });
+  do {
+    const p = new URLSearchParams({ q, maxResults: String(LIST_PAGE) });
     if (pageToken) p.set("pageToken", pageToken);
     const { json } = await api<{ messages?: { id: string }[]; nextPageToken?: string }>(token, `/messages?${p}`);
-    for (const m of json.messages ?? []) ids.push(m.id);
-    pageToken = json.nextPageToken;
-    if (!pageToken || !(json.messages ?? []).length) break;
-  }
-  return ids.slice(0, max);
+    const ids = (json.messages ?? []).map((m) => m.id);
+    if (ids.length) yield ids;
+    pageToken = ids.length ? json.nextPageToken : undefined;
+  } while (pageToken);
 }
 
 type Part = { mimeType?: string; body?: { data?: string; size?: number }; parts?: Part[] };

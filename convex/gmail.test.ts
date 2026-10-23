@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { beforeAll, expect, test } from "vitest";
+import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -14,6 +14,27 @@ beforeAll(() => {
   process.env.SITE_URL = "https://app.test";
   process.env.CONVEX_SITE_URL = "https://deployment.convex.site";
 });
+
+afterEach(() => { vi.useRealTimers(); });
+
+type Listing = { messages?: { id: string }[]; nextPageToken?: string };
+/**
+ * Google as a check sees it: a token for the stored grant, then the mailbox's pages and its mails
+ * (each a one-line note that is not about money). `calls` records every request's host and path.
+ */
+function fakeGoogle(list: (url: URL) => Listing | Promise<Listing>, receivedAt = 1) {
+  const real = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const u = new URL(String(input instanceof Request ? input.url : input));
+    calls.push(u.host + u.pathname + u.search);
+    if (u.host === "oauth2.googleapis.com") return Response.json({ access_token: "at" });
+    if (u.pathname.endsWith("/messages")) return Response.json(await list(u));
+    const id = u.pathname.split("/").pop()!;
+    return Response.json({ id, threadId: "t", internalDate: String(receivedAt), payload: { mimeType: "text/plain", headers: [{ name: "From", value: "Someone <hi@example.com>" }, { name: "Subject", value: "Hello" }], body: { data: btoa("See you tomorrow") } } });
+  }) as typeof fetch;
+  return { calls, restore: () => { globalThis.fetch = real; } };
+}
 
 async function setup() {
   const t = convexTest({ schema, modules });
@@ -193,6 +214,95 @@ test("the callback refuses a forged or stale state and sends a refusal back to S
   expect(denied.headers.get("Location")).toBe("https://app.test/settings/gmail?gmail=denied");
   const stale = `${userId}.30.${Date.now() - 11 * 60 * 1000}`;
   expect((await t.fetch(`/gmail/callback?code=x&state=${stale}.${await sign(stale)}`)).status).toBe(400);
+});
+
+test("one check at a time: a run while another holds the connection is a no-op, and a failed or dead run frees it", async () => {
+  const { t, as, userId, connect } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const { enc, iv } = await encryptText("1//refresh-token");
+  const cid = await connect({ refreshTokenEnc: enc, iv });
+  const connection = () => t.run((ctx) => ctx.db.get(cid)).then((c) => c!);
+  const run = () => t.action(internal.gmail.syncUser, { userId });
+
+  // the first run is at Gmail's door when a second one (the cron, say) comes along
+  let atGmail!: () => void, release!: () => void;
+  const reached = new Promise<void>((r) => { atGmail = r; });
+  const gate = new Promise<void>((r) => { release = r; });
+  const g = fakeGoogle(async () => { atGmail(); await gate; return { messages: [] }; });
+  try {
+    const first = run();
+    await reached;
+    expect((await connection()).syncingSince).toBeDefined();
+    expect((await as.query(api.gmail.status))!.syncing).toBe(true);
+    const before = g.calls.length;
+    expect(await run()).toEqual({ ran: false });
+    expect(g.calls.length).toBe(before);
+    release();
+    expect(await first).toEqual({ ran: true, found: 0 });
+  } finally { g.restore(); }
+  let c = await connection();
+  expect([c.syncingSince, c.log.length]).toEqual([undefined, 1]);
+  expect((await as.query(api.gmail.status))!.syncing).toBe(false);
+
+  // a claim older than the longest a run can live is a run that died: the next one takes over
+  await t.run((ctx) => ctx.db.patch(cid, { syncingSince: Date.now() - 9 * 60 * 1000 }));
+  expect(await run()).toEqual({ ran: false });
+  await t.run((ctx) => ctx.db.patch(cid, { syncingSince: Date.now() - 11 * 60 * 1000 }));
+  const g2 = fakeGoogle(() => { throw new Error("boom"); });
+  try {
+    // and a run that fails lets go as well
+    expect(await run()).toEqual({ ran: true, error: "boom" });
+  } finally { g2.restore(); }
+  c = await connection();
+  expect([c.syncingSince, c.status, c.lastError]).toEqual([undefined, "ok", "boom"]);
+  const g3 = fakeGoogle(() => ({ messages: [] }));
+  try {
+    expect(await run()).toEqual({ ran: true, found: 0 });
+  } finally { g3.restore(); }
+  // paused connections are never claimed
+  await t.run((ctx) => ctx.db.patch(cid, { status: "paused" }));
+  expect(await run()).toEqual({ ran: false });
+  expect((await connection()).syncingSince).toBeUndefined();
+});
+
+test("a check pages past the mail it has seen, reads the newest 300 of the rest, and holds the window for the others", async () => {
+  const { t, userId, connect, insert } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const { enc, iv } = await encryptText("1//refresh-token");
+  const hour = 60 * 60 * 1000;
+  const now = Date.now();
+  const cid = await connect({ refreshTokenEnc: enc, iv, syncedUpTo: now - 2 * hour });
+  // seen already: two drafts (one with a receipt folded in) and a mail read as not money
+  await t.mutation(internal.gmail.writeSync, {
+    userId, startedAt: now - 2 * hour, inserts: [insert("d1", { extraMessageIds: ["x1"] }), insert("d2")], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 3,
+    processed: [{ id: "p1", receivedAt: now - 3 * hour }], syncedUpTo: now - 2 * hour,
+  });
+  const fresh = Array.from({ length: 305 }, (_, i) => `f${i + 1}`);
+  const pages: Record<string, Listing> = {
+    "": { messages: ["d1", "x1", "p1", ...fresh.slice(0, 150)].map((id) => ({ id })), nextPageToken: "pg2" },
+    pg2: { messages: ["d2", ...fresh.slice(150)].map((id) => ({ id })) },
+  };
+  const g = fakeGoogle((u) => pages[u.searchParams.get("pageToken") ?? ""], now - hour);
+  // the fetches are paced with real waits; fake time runs them in an instant
+  vi.useFakeTimers({ now });
+  try {
+    let settled = false;
+    const run = t.action(internal.gmail.syncUser, { userId }).finally(() => { settled = true; });
+    while (!settled) await vi.advanceTimersByTimeAsync(1000);
+    expect(await run).toEqual({ ran: true, found: 0 });
+  } finally { vi.useRealTimers(); g.restore(); }
+  expect(g.calls.filter((c) => c.includes("/messages?")).map((c) => new URL(`https://${c}`).searchParams.get("pageToken"))).toEqual([null, "pg2"]);
+  // the seen ones on either page were not fetched; the 5 oldest unread wait for the next check
+  expect(g.calls.flatMap((c) => c.match(/\/messages\/([^?]+)/)?.[1] ?? [])).toEqual(fresh.slice(0, 300));
+  const c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect(c.log[0]).toMatchObject({ scanned: 309, found: 0, note: "5 older mails waiting" });
+  // the window stays where this check's started (not moved up to now), so the next one reaches them
+  expect(c.syncedUpTo).toBe(now - 2 * hour);
+  expect(c.syncingSince).toBeUndefined();
+  // what was read and made no draft is not read again
+  expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["f1", "f300", "f301", "p1"] })).toEqual(["f1", "f300", "p1"]);
 });
 
 test("the hourly check schedules one run per live connection", async () => {
