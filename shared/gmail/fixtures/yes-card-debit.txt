@@ -1,0 +1,12 @@
+From: YES BANK <alerts@yes.bank.in>
+Subject: YES BANK - Transaction Alert
+Received: 2026-10-21T19:35:00Z
+
+Dear Cardmember,
+
+We wish to inform you that INR 60.00 has been spent on your YES BANK Credit Card ending with 4321 at ZOMATO LTD on 22-10-2026 at 01:02:03 am.
+
+Available Credit Limit is INR 1,20,000.00.
+
+Regards,
+YES BANK

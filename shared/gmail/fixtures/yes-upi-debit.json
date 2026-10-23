@@ -1,0 +1,17 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "yes",
+    "type": "debit",
+    "amount": 60,
+    "currency": "INR",
+    "date": "2026-10-22",
+    "dateSource": "mail",
+    "time": "18:49",
+    "last4": "1234",
+    "bankName": "Yes Bank",
+    "channel": "upi",
+    "merchantRaw": "chai.point",
+    "vpa": "chai.point@ybl"
+  }
+}
