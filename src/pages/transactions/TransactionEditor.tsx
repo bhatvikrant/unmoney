@@ -38,7 +38,7 @@ import type { TxFields } from "../../../shared/ops";
 import { useQuickSave } from "@/components/tx/QuickAdd";
 import { useToday } from "@/lib/today";
 import { useEntryBudgets } from "@/components/tx/entryBudgets";
-import { EntryBudgetHint } from "@/components/BudgetBars";
+import { BudgetPill } from "@/components/BudgetBars";
 
 /** Links already acted on (by history entry), so a re-render or React's double effect never saves twice. */
 const savedLinks = new Set<string>();
@@ -290,7 +290,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   const wantSuggestions = settings.autocompleteEnabled && noteFocus && !notePicked && f.type !== "transfer";
   const suggestions = useMemo(() => (wantSuggestions ? noteSuggestions(view, f.note, f.type) : undefined), [view, wantSuggestions, f.note, f.type]);
   const recent = useMemo(() => (!id && f.type !== "transfer" ? recentCategories(view, f.type) : []), [view, id, f.type]);
-  // what the budget this expense counts against has left, before and after it
+  // what the category's budget will have left with this expense in it
   const budgets = useEntryBudgets(f, id);
 
   const sub = f.subCurrency ? currencies.find((c) => c.code === f.subCurrency) : undefined;
@@ -537,7 +537,8 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             <>
               <Field label="Method" onClick={() => setSheet("account")} value={f.accountId ? accountName(f.accountId) : "Select"} />
               <div>
-              <Field label="Category" onClick={() => setSheet("category")} value={f.categoryId ? categoryLabel({ categoryId: f.categoryId, subcategoryId: f.subcategoryId }) : "Select"} />
+              <Field label="Category" onClick={() => setSheet("category")} value={f.categoryId ? categoryLabel({ categoryId: f.categoryId, subcategoryId: f.subcategoryId }) : "Select"}
+                right={budgets.pill ? <BudgetPill item={budgets.pill.item} amount={budgets.pill.amount} label={`${budgets.pill.name} ${budgets.pill.when}`} className="mr-2" /> : undefined} />
               {recent.length ? (
                 <div className="flex items-center gap-2 px-4 pb-2.5">
                   <div className="w-20 shrink-0 text-xs text-muted-foreground">Recent</div>
@@ -582,11 +583,6 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             </Field>
           ) : null}
 
-          {budgets.hints.length ? (
-            <Field label="Budget">
-              <div className="flex-1 min-w-0 space-y-2">{budgets.hints.map((h) => <EntryBudgetHint key={h.key} name={h.name} when={h.when} item={h.item} amount={h.amount} />)}</div>
-            </Field>
-          ) : null}
           {f.type === "expense" ? (
             <Field label="Refund">
               <div className="flex-1 flex items-center gap-3">

@@ -24,6 +24,7 @@ import { useShortcuts } from "@/lib/shortcuts";
 import { dateLabel } from "@/lib/format";
 import { budgetImpact, draftMatches, draftsOpen } from "../../../shared/views";
 import { useBudgetLabel } from "@/components/tx/entryBudgets";
+import { useOverText } from "@/lib/budgetText";
 import { importable, type Importable } from "../../../shared/gmail/importable";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { useBottomBar } from "@/components/shell/SplitLayout";
@@ -114,6 +115,7 @@ export default function GmailReviewPage() {
 
   // what importing the ticked ones does to the budgets: the ones it takes over, or past 80%
   const budgetLabel = useBudgetLabel();
+  const overText = useOverText();
   const selectedKey = selected.map((i) => i.draft._id).join(",");
   const budgetHits = useMemo(
     () => budgetImpact(view, selected.map((i) => i.ready!.fields)).filter((x) => x.after < 0 || x.after < x.item.limit * 0.2),
@@ -248,7 +250,7 @@ export default function GmailReviewPage() {
                   return (
                     <div key={`${x.item.budget._id}|${x.item.range.from}`} className="truncate">
                       {x.after < 0
-                        ? <span className="text-expense">{x.item.remaining < 0 ? `${name}: ${fmt(-x.after)} over after import` : `Takes ${name} ${fmt(-x.after)} over`}</span>
+                        ? <span className="text-expense">{x.item.remaining < 0 ? `${name}: ${overText({ spent: x.item.limit - x.after, limit: x.item.limit })} after import` : `Takes ${name} to ${overText({ spent: x.item.limit - x.after, limit: x.item.limit })}`}</span>
                         : <span className="text-muted-foreground">{name}: <span className="text-budget-left">{fmt(x.after)} left</span> after import</span>}
                       {n === 1 && budgetHits.length > 2 ? <span className="text-muted-foreground"> · and {budgetHits.length - 2} more</span> : null}
                     </div>
