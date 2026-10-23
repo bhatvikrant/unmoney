@@ -94,6 +94,7 @@ export default function SettingsPage() {
         <p className="px-4 pt-6 text-xs text-muted-foreground">
           UnMoney · works offline and syncs across your devices · <Link to="/privacy" className="underline underline-offset-2 hover:text-foreground">Privacy policy</Link>
         </p>
+        <p className="px-4 pt-1 pb-2 text-xs text-muted-foreground tabular-nums">Version {(import.meta.env.VITE_APP_VERSION as string | undefined) ?? "dev"}</p>
       </Page>
     </>
   );
