@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { ChevronRight, Sparkles } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { useView } from "@/lib/store";
-import { statsByCategory, statsTrend } from "../../../shared/views";
+import { budgetStatus, statsByCategory, statsTrend } from "../../../shared/views";
 import { monthRecap, recapIndex, type RecapIndexYearRow } from "../../../shared/recap";
 import { monthKeyForDate, monthRange, parseMonthKey } from "../../../shared/period";
 import { addDays, todayISO } from "../../../shared/dates";
@@ -15,6 +15,7 @@ import { StatsHeaderBar } from "./PeriodBar";
 import { useStatPeriod } from "./period";
 import { CategoryPie, TrendBars, colorAt } from "./charts";
 import { Money } from "@/components/shell/Money";
+import { BudgetFlag } from "@/components/BudgetBars";
 import { cn } from "@/lib/utils";
 import { dateLabel, monthLabel } from "@/lib/format";
 
@@ -47,6 +48,9 @@ export default function StatsPage() {
   const expense = useMemo(() => statsByCategory(view, p.range.from, p.range.to, "expense"), [view, p.range.from, p.range.to]);
   const income = useMemo(() => statsByCategory(view, p.range.from, p.range.to, "income"), [view, p.range.from, p.range.to]);
   const data = type === "expense" ? expense : income;
+  // each category's budget for this period (a custom range has none), to flag the ones near or over it
+  const budgetPeriod = p.period === "custom" || type !== "expense" ? null : p.period;
+  const budgets = useMemo(() => (budgetPeriod ? new Map(budgetStatus(view, budgetPeriod, p.key)?.perCategory.map((i) => [i.budget.categoryId as string, i])) : null), [view, budgetPeriod, p.key]);
   const ranges = p.trailing();
   const rangeKey = ranges.map((r) => r.key).join(",");
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,7 +102,7 @@ export default function StatsPage() {
               {data?.items.map((it, i) => (
                 <button key={it.id} type="button" aria-current={pathname === `/stats/c/${encodeURIComponent(it.id)}` || undefined} onClick={() => nav(`/stats/c/${encodeURIComponent(it.id)}?${categoryQuery}`)} className="w-full flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm hover:bg-accent/40 text-left aria-[current]:bg-accent">
                   <span className="flex items-center gap-1.5 w-14 shrink-0 text-[11px] tabular text-muted-foreground"><span className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ background: colorAt(i, data.items.length) }} /><span>{Math.round(it.pct * 100)}%</span></span>
-                  <span className="flex-1 truncate">{it.name}</span>
+                  <span className="flex-1 min-w-0"><span className="block truncate">{it.name}</span>{budgets?.get(it.id) ? <BudgetFlag item={budgets.get(it.id)!} /> : null}</span>
                   <Money amount={it.amount} kind={type} />
                 </button>
               ))}

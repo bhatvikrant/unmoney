@@ -14,6 +14,7 @@ import { TrendBars } from "./charts";
 import { EmptyState } from "@/components/shell/misc";
 import { useToday } from "@/lib/today";
 import { diffDays } from "../../../shared/dates";
+import { billsAgainstBudgets } from "../../../shared/upcoming";
 
 export default function BudgetPage() {
   const nav = useNavigate();
@@ -39,6 +40,13 @@ export default function BudgetPage() {
   const label = period === "weekly" ? "Weekly" : period === "yearly" ? "Annual" : "Monthly";
   // In the current period: what can still go out each day, and where spending at this rate ends up.
   const today = useToday();
+  // in the period running today: the bills scheduled before it ends, per budget
+  const due = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!status || today < status.range.from || today > status.range.to) return m;
+    for (const o of billsAgainstBudgets(view, today)) if (o.item.range.from === status.range.from && o.item.period === period) m.set(o.item.budget._id, o.adds);
+    return m;
+  }, [view, status, today, period]);
   const pace = status && status.spentAll && today >= status.range.from && today <= status.range.to && status.elapsed > 0 ? {
     perDay: status.total && status.total.remaining > 0 ? Math.floor(status.total.remaining / (diffDays(today, status.range.to) + 1)) : null,
     end: Math.round(status.spentAll / status.elapsed),
@@ -61,10 +69,10 @@ export default function BudgetPage() {
           </div>
           <Button variant="secondary" size="sm" onClick={() => nav(`/budget/settings?period=${period}&key=${key}`)}>Budget setting ›</Button>
         </div>
-        {status?.total ? <div className="bg-card border-y"><BudgetBar item={status.total} label={label} elapsed={status.elapsed} onClick={() => setDetail({ item: status.total!, label })} /></div> : null}
+        {status?.total ? <div className="bg-card border-y"><BudgetBar item={status.total} label={label} elapsed={status.elapsed} due={due.get(status.total.budget._id)} onClick={() => setDetail({ item: status.total!, label })} /></div> : null}
         {status?.perCategory.length ? (
           <div className="bg-card border-y mt-2">
-            {status.perCategory.map((it) => { const name = categoryById.get(it.budget.categoryId!)?.name ?? ""; return <BudgetBar key={it.budget._id} item={it} label={name} elapsed={status.elapsed} onClick={() => setDetail({ item: it, label: name })} />; })}
+            {status.perCategory.map((it) => { const name = categoryById.get(it.budget.categoryId!)?.name ?? ""; return <BudgetBar key={it.budget._id} item={it} label={name} elapsed={status.elapsed} due={due.get(it.budget._id)} onClick={() => setDetail({ item: it, label: name })} />; })}
           </div>
         ) : null}
         {status && !status.total && !status.perCategory.length ? <EmptyState title={`No ${label.toLowerCase()} budgets`} hint="Set a total budget or one per category. The bar fills as you spend; the marker shows where today falls." action={<Button onClick={() => nav(`/budget/settings?period=${period}`)}>Set a budget</Button>} /> : null}

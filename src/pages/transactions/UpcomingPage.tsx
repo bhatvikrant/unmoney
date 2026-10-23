@@ -5,13 +5,15 @@ import { useApp } from "@/lib/app";
 import { useToday } from "@/lib/today";
 import { useOpenEntry } from "@/lib/nav";
 import { dateLabel } from "@/lib/format";
-import { next30Days, recurringSuggestions, subscriptionsList, type Occurrence, type RecurringSuggestion } from "../../../shared/upcoming";
+import { billsAgainstBudgets, next30Days, recurringSuggestions, subscriptionsList, type Occurrence, type RecurringSuggestion } from "../../../shared/upcoming";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { EmptyState, InfoHint, Section } from "@/components/shell/misc";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
 import { UpcomingRow, UpcomingSheet } from "@/components/tx/Upcoming";
 import { FREQ_LABEL } from "@/components/tx/RepeatSheet";
+import { EntryBudgetHint } from "@/components/BudgetBars";
+import { useBudgetLabel } from "@/components/tx/entryBudgets";
 
 /**
  * Bills & subscriptions (More › Look ahead): what the repeat schedules will add in the next 30
@@ -33,6 +35,13 @@ export default function UpcomingPage() {
   const out = soon.reduce((s, o) => s + (o.repeat.template.type === "expense" ? o.repeat.template.amount : 0), 0);
   const comingIn = soon.reduce((s, o) => s + (o.repeat.template.type === "income" ? o.repeat.template.amount : 0), 0);
   const perMonth = subs.reduce((s, x) => s + x.monthly, 0);
+  // the budgets running now, with the bills still due in them
+  const outlook = useMemo(() => billsAgainstBudgets(snap, today), [snap, today]);
+  const budgetLabel = useBudgetLabel();
+  const billNames = (bills: Occurrence[]) => {
+    const names = bills.map((o) => `${o.repeat.template.note || categoryLabel(o.repeat.template)} ${dateLabel(o.date)}`);
+    return names.length > 2 ? `${names.slice(0, 2).join(", ")} and ${names.length - 2} more` : names.join(", ");
+  };
 
   const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed");
   async function makeRepeat(s: RecurringSuggestion) {
@@ -75,6 +84,20 @@ export default function UpcomingPage() {
           </Section>
         ) : !nothing ? (
           <Section title="Next 30 days"><div className="px-4 py-3 text-sm text-muted-foreground">Nothing scheduled in the next 30 days.</div></Section>
+        ) : null}
+
+        {outlook.length ? (
+          <Section title={<span className="inline-flex items-center gap-1">Budgets after bills <InfoHint text="What each budget running now will have left once the bills scheduled before it ends go out. Nothing counts until a bill is added." /></span>}>
+            {outlook.map((o) => {
+              const { name, when } = budgetLabel(o.item);
+              return (
+                <div key={`${o.item.budget._id}|${o.item.range.from}`} className="border-b px-4 py-2.5 last:border-b-0">
+                  <EntryBudgetHint name={name} when={when} item={o.item} amount={o.adds} after="After these bills" over="These bills take it" />
+                  <div className="mt-0.5 truncate text-xs text-muted-foreground"><Money amount={o.adds} muted /> due: {billNames(o.bills)}</div>
+                </div>
+              );
+            })}
+          </Section>
         ) : null}
 
         {subs.length ? (

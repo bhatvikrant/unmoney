@@ -37,6 +37,8 @@ import { fromTemplate, isEntryLink, linkEntry, parseEntryLink, templateUsable } 
 import type { TxFields } from "../../../shared/ops";
 import { useQuickSave } from "@/components/tx/QuickAdd";
 import { useToday } from "@/lib/today";
+import { useEntryBudgets } from "@/components/tx/entryBudgets";
+import { EntryBudgetHint } from "@/components/BudgetBars";
 
 /** Links already acted on (by history entry), so a re-render or React's double effect never saves twice. */
 const savedLinks = new Set<string>();
@@ -288,6 +290,8 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   const wantSuggestions = settings.autocompleteEnabled && noteFocus && !notePicked && f.type !== "transfer";
   const suggestions = useMemo(() => (wantSuggestions ? noteSuggestions(view, f.note, f.type) : undefined), [view, wantSuggestions, f.note, f.type]);
   const recent = useMemo(() => (!id && f.type !== "transfer" ? recentCategories(view, f.type) : []), [view, id, f.type]);
+  // what the budget this expense counts against has left, before and after it
+  const budgets = useEntryBudgets(f, id);
 
   const sub = f.subCurrency ? currencies.find((c) => c.code === f.subCurrency) : undefined;
   const refreshRates = useRefreshRates();
@@ -578,6 +582,11 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             </Field>
           ) : null}
 
+          {budgets.hints.length ? (
+            <Field label="Budget">
+              <div className="flex-1 min-w-0 space-y-2">{budgets.hints.map((h) => <EntryBudgetHint key={h.key} name={h.name} when={h.when} item={h.item} amount={h.amount} />)}</div>
+            </Field>
+          ) : null}
           {f.type === "expense" ? (
             <Field label="Refund">
               <div className="flex-1 flex items-center gap-3">
@@ -688,7 +697,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       <AccountPicker open={sheet === "account"} onOpenChange={(o) => !o && setSheet(null)} onPick={(a) => { chosen.current.account = true; set("accountId", a); }} title={f.type === "transfer" ? "From" : "Payment method"} exclude={f.type === "transfer" ? f.toAccountId : undefined} />
       <AccountPicker open={sheet === "to"} onOpenChange={(o) => !o && setSheet(null)} onPick={(a) => set("toAccountId", a)} title="To" exclude={f.accountId} />
       {f.type !== "transfer" ? (
-        <CategoryPicker open={sheet === "category"} onOpenChange={(o) => !o && setSheet(null)} type={f.type} onPick={(c, s) => { chosen.current.category = true; setF((p) => ({ ...p, categoryId: c, subcategoryId: s })); }} />
+        <CategoryPicker open={sheet === "category"} onOpenChange={(o) => !o && setSheet(null)} type={f.type} budgets={budgets.byCategory} onPick={(c, s) => { chosen.current.category = true; setF((p) => ({ ...p, categoryId: c, subcategoryId: s })); }} />
       ) : null}
       {sheet === "keypad" ? (
         <AmountKeypad open onOpenChange={(o) => !o && setSheet(null)} initial={sub ? f.subAmount : f.amount} currencyLabel={sub ? sub.code : settings.mainCurrency} onDone={(v) => set(sub ? "subAmount" : "amount", v)} />
