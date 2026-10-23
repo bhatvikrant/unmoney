@@ -199,6 +199,8 @@ export interface Ops {
   "categories.create": { args: { type: "income" | "expense"; name: string; parentId?: Id<"categories"> }; result: Id<"categories"> };
   "categories.update": { args: { id: Id<"categories">; name?: string; parentId?: Id<"categories"> | null }; result: void };
   "categories.remove": { args: { id: Id<"categories"> }; result: void };
+  /** Undoes categories.remove: the category comes back, with the subcategories deleted along with it. */
+  "categories.restore": { args: { id: Id<"categories"> }; result: void };
   "categories.reorder": { args: { ids: Id<"categories">[] }; result: void };
   /** Archives (or brings back) categories no longer in use. Entries, budgets and schedules on them are left untouched. */
   "categories.setArchived": { args: { ids: Id<"categories">[]; archived: boolean }; result: void };
@@ -354,6 +356,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "categories.create": ["categories"],
   "categories.update": ["categories"],
   "categories.remove": ["categories"],
+  "categories.restore": ["categories"],
   "categories.reorder": ["categories"],
   "categories.setArchived": ["categories"],
   "categories.applyCleanup": ["categories", "transactions", "budgets", "repeats", "bookmarks", "categoryCleanups"],
@@ -1432,9 +1435,19 @@ const handlers: Handlers = {
   },
   "categories.remove": (w, { id }) => {
     w.must("categories", id);
-    const now = Date.now();
-    for (const c of [...w.snap.categories]) if (c.parentId === id) w.patch("categories", c._id, { deletedAt: now });
+    // the op's own time, so the subcategories going with it carry the same stamp on every device and restore knows them; one deleted earlier keeps its own
+    const now = w.at;
+    for (const c of [...w.snap.categories]) if (c.parentId === id && !c.deletedAt) w.patch("categories", c._id, { deletedAt: now });
     w.patch("categories", id, { deletedAt: now });
+  },
+  "categories.restore": (w, { id }) => {
+    const c = w.must("categories", id);
+    if (!c.deletedAt) return;
+    if (c.parentId && w.snap.categories.find((p) => p._id === c.parentId)?.deletedAt) throw new Error("Restore its main category first");
+    if (w.snap.categories.some((x) => !x.deletedAt && x.type === c.type && x.parentId === c.parentId && x.name.trim().toLowerCase() === c.name.trim().toLowerCase())) throw new Error(`A category named ${c.name} already exists`);
+    // the subcategories that went with it share its deletedAt; one deleted earlier on its own stays deleted
+    for (const s of [...w.snap.categories]) if (s.parentId === id && s.deletedAt === c.deletedAt) w.patch("categories", s._id, { deletedAt: undefined });
+    w.patch("categories", id, { deletedAt: undefined });
   },
   "categories.setArchived": (w, { ids, archived }) => {
     if (!ids.length) throw new Error("Pick at least one category");

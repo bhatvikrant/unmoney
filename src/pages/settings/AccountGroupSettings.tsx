@@ -40,8 +40,8 @@ export default function AccountGroupSettings() {
           {live.map((g, i) => (
             <SwipeToDelete key={g._id} className="border-b last:border-b-0" {...swipe.row(g._id)} onDelete={() => setDeleting(g)}>
               <div className="flex items-center gap-1 px-2 py-1.5 text-sm">
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7" aria-label={`Move ${g.name} up`} onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7" aria-label={`Move ${g.name} down`} onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
                 <div className="flex-1 px-1 min-w-0"><div className="truncate">{g.name}</div><div className="text-xs text-muted-foreground">{count(inGroup(g._id))}</div></div>
                 <Button variant="ghost" size="icon" className="size-7" aria-label={`Rename ${g.name}`} onClick={() => setDialog({ id: g._id, name: g.name })}><Pencil className="size-4" /></Button>
                 <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Delete ${g.name}`} onClick={() => setDeleting(g)}><Trash2 className="size-4" /></Button>

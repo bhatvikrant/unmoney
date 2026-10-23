@@ -73,3 +73,30 @@ test("archiving a category leaves its entries, budgets and stats alone and can b
   const back = run(after, "categories.setArchived", { ids: [pets], archived: false });
   expect(back.categories.find((c) => c._id === pets)!.archivedAt).toBeUndefined();
 });
+
+test("a deleted category can be restored, with the subcategories that went with it", () => {
+  let s = run(emptySnapshot(), "settings.completeOnboarding", { currency: "USD" });
+  const pets = s.categories.find((c) => c.name === "Pets")!._id;
+  const cash = s.accounts.find((a) => a.name === "Cash")!._id;
+  s = run(s, "categories.create", { type: "expense", name: "Vet", parentId: pets });
+  s = run(s, "categories.create", { type: "expense", name: "Toys", parentId: pets });
+  const vet = s.categories.find((c) => c.name === "Vet")!._id;
+  const toys = s.categories.find((c) => c.name === "Toys")!._id;
+  s = run(s, "transactions.create", { type: "expense", date: "2026-10-01", accountId: cash, categoryId: pets, subcategoryId: vet, amount: 4500, note: "Checkup", tags: [], photoIds: [] });
+  // Toys goes first on its own; then Pets takes Vet with it
+  s = run(s, "categories.remove", { id: toys });
+  const gone = run(s, "categories.remove", { id: pets });
+  expect(gone.categories.filter((c) => [pets, vet, toys].includes(c._id)).every((c) => c.deletedAt)).toBe(true);
+
+  const back = run(gone, "categories.restore", { id: pets });
+  expect(back.categories.find((c) => c._id === pets)!.deletedAt).toBeUndefined();
+  expect(back.categories.find((c) => c._id === vet)!.deletedAt).toBeUndefined();
+  expect(back.categories.find((c) => c._id === toys)!.deletedAt).toBeDefined();
+  expect(back.transactions).toEqual(s.transactions);
+  // restoring what is not deleted changes nothing
+  expect(run(back, "categories.restore", { id: pets }).categories).toEqual(back.categories);
+  // a live category that took the name blocks it, as does a main category still deleted
+  const taken = run(gone, "categories.create", { type: "expense", name: "pets" });
+  expect(() => run(taken, "categories.restore", { id: pets })).toThrow(/already exists/);
+  expect(() => run(gone, "categories.restore", { id: vet })).toThrow(/main category first/);
+});

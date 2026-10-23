@@ -57,6 +57,8 @@ function timeLabel(t: string): string {
 /** The Stats page for a month key or a year key. */
 const statsPath = (key: string) => (/^\d{4}$/.test(key) ? `/stats?period=yearly&year=${key}` : `/stats?month=${key}`);
 const pct = (n: number) => `${Math.round(n * 100)}%`;
+/** "34% kept", or "120% spent" when more went out than came in: a negative share kept reads badly. */
+const keptText = (keptPct: number) => (keptPct < 0 ? `${100 - keptPct}% spent` : `${keptPct}% kept`);
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const joinAnd = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 
@@ -254,14 +256,15 @@ export function BiggestCard({ card }: Props<"biggest">) {
   const title = (tx: Tx) => tx.note.trim() || categoryLabel(tx) || (tx.type === "transfer" ? `Transfer to ${accountName(tx.toAccountId)}` : "Uncategorised");
   const line = (tx: Tx) => [tx.type === "transfer" ? "Transfer" : categoryLabel(tx) || "Uncategorised", accountName(tx.accountId), dayLabel(tx.date)].join(" · ");
   const year = card.scope === "year";
-  const rows = [{ tx: card.tx, note: title(card.tx), amount: card.tx.amount }, ...card.runnersUp];
+  // card.amount is what counted (a transfer's amount plus its fee), the same figure the closer shows
+  const rows = [{ tx: card.tx, note: title(card.tx), amount: card.amount }, ...card.runnersUp];
   const together = rows.length === 1 ? "The one entry" : rows.length === 2 ? "Top two together" : "Top three together";
   const period = year ? "the year" : "the month";
   return (
     <CardFrame kind="biggest">
       <Vis>
         <Label>Biggest single spend</Label>
-        <Num><Money amount={card.tx.amount} kind="expense" /></Num>
+        <Num><Money amount={card.amount} kind="expense" /></Num>
         <H className="line-clamp-2">{title(card.tx)}</H>
         <Ctx><B>{pct(card.share)}</B> of {period} in one entry{year ? ` · ${dayLabel(card.tx.date)}` : ""}</Ctx>
         <div className="mt-[22px] overflow-hidden rounded-lg border bg-card">
@@ -380,9 +383,12 @@ export function ChangesCard({ card }: Props<"changes">) {
   const { fmt } = useApp();
   const year = card.scope === "year";
   const [first, ...others] = card.movers;
-  const fallers = card.movers.filter((m) => m.after < m.before).map((m) => m.name);
+  // the line is about the other movers: the headline already says what the first one did
+  const firstRose = first.after > first.before;
+  const fallers = others.filter((m) => m.after < m.before).map((m) => m.name);
+  const risers = others.filter((m) => m.after > m.before).map((m) => m.name);
   const biggest = Math.max(1, ...card.movers.map((m) => Math.abs(m.after - m.before)));
-  const line = fallers.length ? `${joinAnd(fallers)} fell` : others.length ? `${joinAnd(others.map((m) => m.name))} rose too` : "Nothing else moved by much";
+  const line = fallers.length ? `${joinAnd(fallers)} fell${firstRose ? "" : " too"}` : risers.length ? `${joinAnd(risers)} rose${firstRose ? " too" : ""}` : "Nothing else moved by much";
   return (
     <CardFrame kind="changes">
       <Label>What changed since {card.prevLabel}</Label>
@@ -414,15 +420,16 @@ export function InOutCard({ card }: Props<"inout">) {
   const { fmt } = useApp();
   const year = card.scope === "year";
   const spentShare = Math.min(1, card.spent / card.income);
+  const over = card.keptPct < 0;
   const foot = year
-    ? (card.prevKeptPct !== undefined ? `Last year: ${card.prevKeptPct}% kept` : "No income recorded the year before")
-    : (card.prevKeptPct !== undefined ? `Last month: ${card.prevKeptPct}% kept` : "No income recorded the month before");
+    ? (card.prevKeptPct !== undefined ? `Last year: ${keptText(card.prevKeptPct)}` : "No income recorded the year before")
+    : (card.prevKeptPct !== undefined ? `Last month: ${keptText(card.prevKeptPct)}` : "No income recorded the month before");
   return (
     <CardFrame kind="inout">
       <Vis>
         <Label>In vs out</Label>
-        <Num>{card.keptPct}%</Num>
-        <H className="-mt-1">of what came in, {card.keptPct < 0 ? "and more, spent" : "kept"}</H>
+        <Num>{over ? 100 - card.keptPct : card.keptPct}%</Num>
+        <H className="-mt-1">of what came in, {over ? "spent" : "kept"}</H>
         <div className="my-3.5 mb-2.5 flex h-12 gap-1 overflow-hidden rounded-md">
           <i className="flex h-full items-center overflow-hidden bg-expense px-2.5 text-[13px] font-medium whitespace-nowrap" style={{ width: spentShare < 1 ? pct(spentShare) : undefined, flex: spentShare < 1 ? undefined : 1, color: ON_SIGNAL }}>Spent {fmt(card.spent)}</i>
           {spentShare < 1 ? <i className="flex h-full flex-1 items-center overflow-hidden bg-income px-2.5 text-[13px] font-medium whitespace-nowrap" style={{ color: ON_SIGNAL }}>Kept</i> : null}
@@ -435,7 +442,7 @@ export function InOutCard({ card }: Props<"inout">) {
         {card.budgets ? <Tiles><BudgetsTile budgets={card.budgets} className="col-span-full" /></Tiles> : null}
         {year && (card.bestMonth || card.budgetMonths) ? (
           <Tiles>
-            {card.bestMonth ? <Tile label="Best month" value={longMonth(card.bestMonth.month)} hint={`${card.bestMonth.keptPct}% kept`} /> : null}
+            {card.bestMonth ? <Tile label="Best month" value={longMonth(card.bestMonth.month)} hint={keptText(card.bestMonth.keptPct)} /> : null}
             {card.budgetMonths ? <Tile label="Budgets" value={`${card.budgetMonths.held} of ${card.budgetMonths.total}`} hint="months within budget" /> : null}
           </Tiles>
         ) : null}
@@ -523,11 +530,11 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
           {row("Top category", s.top ? `${s.top.name} · ${pct(s.top.pct)}` : "—", "top")}
           {row("Biggest spend", s.biggest ? `${s.biggest.note} · ${fmt(s.biggest.amount)}` : "—", "big")}
           {year ? row("Most logged", s.repeat ? `“${s.repeat.text}” ×${s.repeat.count}` : "—", "repeat") : null}
-          {row("Kept", s.keptPct !== undefined ? `${s.keptPct}% of income` : "no income logged", "kept")}
+          {s.keptPct === undefined ? row("Kept", "no income logged", "kept") : s.keptPct < 0 ? row("Spent", `${100 - s.keptPct}% of income`, "kept") : row("Kept", `${s.keptPct}% of income`, "kept")}
           {row("No-spend days", s.noSpend, "nospend")}
           {year ? row("Personality", s.personality ?? "—", "personality") : row("On repeat", s.repeat ? `“${s.repeat.text}” ×${s.repeat.count}` : "—", "repeat")}
           <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
-            <span>{year ? `${plural(s.entries, "entry", "entries")} · ${plural(diffDays(s.range.from, s.range.to) + 1, "day")}` : `${rangeLabel(s.range)} · ${plural(s.entries, "entry", "entries")}`}</span>
+            <span>{year ? `${plural(s.entries, "entry", "entries")} · ${plural(s.days, "day")}` : `${rangeLabel(s.range)} · ${plural(s.entries, "entry", "entries")}`}</span>
             <span>unmoney.vercel.app</span>
           </div>
         </div>
@@ -669,7 +676,7 @@ export function ClockCard({ card }: Props<"clock">) {
         <div className="flex justify-between text-[11px] text-muted-foreground"><span>12 am</span><span>6 am</span><span>12 pm</span><span>6 pm</span><span>11 pm</span></div>
         <Tiles>
           <Tile label="Mornings" value={pct(card.morningShare)} hint="before noon" />
-          {card.first ? <Tile label="First entry" value={timeLabel(card.first.time)} hint={`${card.first.note}, ${shortDay(card.first.date)}`} /> : null}
+          {card.first ? <Tile label="Earliest" value={timeLabel(card.first.time)} hint={`${card.first.note}, ${shortDay(card.first.date)}`} /> : null}
         </Tiles>
       </Vis>
       <Foot><span>Only entries with a time ({card.timed.toLocaleString()} of {card.total.toLocaleString()})</span></Foot>

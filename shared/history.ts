@@ -155,6 +155,11 @@ const describers: Partial<Record<OpKind, Describe>> = {
     const subs = before.categories.filter((c) => c.parentId === a.id && !c.deletedAt).map((c) => c.name);
     return cat(`Deleted ${names(before).categoryName(a.id)}${subs.length ? ` and its subcategories ${list(subs)}` : ""}`);
   },
+  "categories.restore": (a, before, after) => {
+    if (!names(before).category(a.id)?.deletedAt) return [];
+    const subs = after.categories.filter((c) => c.parentId === a.id && !c.deletedAt).map((c) => c.name);
+    return cat(`Restored ${names(after).categoryName(a.id)}${subs.length ? ` and its subcategories ${list(subs)}` : ""}`);
+  },
   "categories.reorder": (a, before) => {
     const first = names(before).category((a.ids as string[])[0]);
     return cat(`Reordered ${first?.parentId ? `subcategories of ${names(before).categoryName(first.parentId)}` : `${first?.type ?? ""} categories`.trim()}`);
