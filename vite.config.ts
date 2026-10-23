@@ -4,7 +4,17 @@ import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vite";
 
+/**
+ * What the More page shows as the version: when this build was made, in Indian time, as
+ * YYYY.MM.DD-HH:MM. Each deploy builds once, so it is when that deploy went out.
+ */
+function appVersion(at = new Date()): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at).map((x) => [x.type, x.value]));
+  return `${p.year}.${p.month}.${p.day}-${p.hour}:${p.minute}`;
+}
+
 export default defineConfig({
+  define: { "import.meta.env.VITE_APP_VERSION": JSON.stringify(appVersion()) },
   plugins: [
     react(),
     tailwindcss(),
