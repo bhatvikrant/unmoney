@@ -173,3 +173,15 @@ test("not suggested: twice a month, too few, stopped, amounts all over, already 
   }).snap;
   expect(recurringSuggestions(scheduled, "2026-10-21")).toEqual([]);
 });
+
+test("catching up never adds a date the schedule already has an entry for", () => {
+  const { s, rep } = withRepeat("2026-09-14", "weekly");
+  const caught = run(s, "repeats.catchUp", { today: "2026-10-21" }).snap;
+  const n = caught.transactions.length;
+  // its next date moved back by hand to one already added
+  const back = run(caught, "repeats.update", { id: rep._id, nextDate: "2026-09-21" }).snap;
+  const again = run(back, "repeats.catchUp", { today: "2026-10-21" });
+  expect(again.result).toBe(0);
+  expect(again.snap.transactions.length).toBe(n);
+  expect(again.snap.repeats[0].nextDate).toBe("2026-10-26");
+});

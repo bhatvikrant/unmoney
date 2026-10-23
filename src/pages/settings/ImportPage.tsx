@@ -378,14 +378,20 @@ function Review({ loaded, onBack, onCancel, onDone }: { loaded: Loaded; onBack?:
   const [skipLikely, setSkipLikely] = useState(true);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
+  // While importing, the review reads the data as it was when Import was pressed: every chunk changes
+  // the local copy, and re-running the whole file's dry run against the whole ledger once per chunk
+  // stalled the screen and counted the file down to "0 ready".
+  const frozen = useRef(view);
+  if (!busy) frozen.current = view;
+  const base = frozen.current;
   // How the file writes dates and numbers, read from all its rows; the user can correct it below.
   const [format, setFormat] = useState<ImportFormat>(() => detectImportFormat(loaded.rows, LOCALE_FORMAT));
   const hasSlashDates = useMemo(() => loaded.rows.some((r) => /^\d{1,2}[/-]\d{1,2}[/-]\d{4}/.test((r.date ?? "").trim())), [loaded.rows]);
   // Accounts the file names that do not exist yet, each with a type the user can correct, so cards keep a billing cycle.
   const newNames = useMemo(() => {
-    const have = new Set(view.accounts.filter((a) => !a.deletedAt).map((a) => a.name.trim().toLowerCase()));
+    const have = new Set(base.accounts.filter((a) => !a.deletedAt).map((a) => a.name.trim().toLowerCase()));
     return accountNamesIn(loaded.rows).filter((n) => !have.has(n.toLowerCase()));
-  }, [loaded.rows, view.accounts]);
+  }, [loaded.rows, base.accounts]);
   const [kinds, setKinds] = useState<Record<string, NewImportAccount["kind"]>>({});
   const newAccounts = useMemo<NewImportAccount[] | undefined>(
     () => (createAccounts ? newNames.map((name) => ({ name, kind: kinds[name] ?? guessKind(name) })) : undefined),
@@ -397,14 +403,14 @@ function Review({ loaded, onBack, onCancel, onDone }: { loaded: Loaded; onBack?:
   const dry = useMemo<DryRun | { error: string }>(() => {
     try {
       const op = { id: "dryrun", kind: "transactions.importRows" as const, args: { rows: loaded.rows, format, newAccounts, createMissing, createAccounts, skipInvalid: true, skipDuplicates: true }, at: 0 };
-      return applyOp(view, op, { userId: (userId ?? "") as Id<"users"> }).result as DryRun;
+      return applyOp(base, op, { userId: (userId ?? "") as Id<"users"> }).result as DryRun;
     } catch (e) {
       return { error: e instanceof Error ? e.message : "This file cannot be imported" };
     }
-  }, [loaded.rows, view, userId, format, newAccounts, createMissing, createAccounts]);
+  }, [loaded.rows, base, userId, format, newAccounts, createMissing, createAccounts]);
 
   const fileCurrency = loaded.currency && loaded.currency !== settings.mainCurrency && CURRENCIES.some((c) => c.code === loaded.currency) ? loaded.currency : null;
-  const noEntriesYet = view.transactions.length === 0;
+  const noEntriesYet = base.transactions.length === 0;
 
   async function run() {
     if ("error" in dry) return;

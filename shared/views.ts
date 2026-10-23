@@ -63,10 +63,17 @@ export function notesRange(snap: Snapshot, from: string, to: string): Doc<"notes
  * user typed in since, before the next check records it.
  */
 export function draftMatches(snap: Snapshot): Map<Id<"drafts">, Id<"transactions">> {
+  // The ledger, its Gmail strip and the review page all ask for this on every render, and the answer
+  // only changes when one of these three tables does (an op copies just the tables it touches, so the
+  // others keep their identity): remember the last one.
+  const c = matchesCache;
+  if (c && c.drafts === snap.drafts && c.transactions === snap.transactions && c.accounts === snap.accounts) return c.out;
   const out = laterMatches(snap.drafts, snap.transactions, snap.accounts);
   for (const d of snap.drafts) if (d.status === "open" && d.matchedTransactionId) out.set(d._id, d.matchedTransactionId);
+  matchesCache = { drafts: snap.drafts, transactions: snap.transactions, accounts: snap.accounts, out };
   return out;
 }
+let matchesCache: { drafts: Doc<"drafts">[]; transactions: Tx[]; accounts: Doc<"accounts">[]; out: Map<Id<"drafts">, Id<"transactions">> } | null = null;
 
 /** Open drafts from Gmail dated in the range, for the ledger's faded rows. Ones matched to an entry the user already has are left out. */
 export function draftsRange(snap: Snapshot, from: string, to: string): Doc<"drafts">[] {
