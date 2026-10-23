@@ -106,9 +106,9 @@ test("an IMPS credit names the sender from its reference, not the time or the he
   expect([p?.type, p?.amount, p?.merchantRaw, p?.time]).toEqual(["credit", 100000, "VIKRANTB", "12:21"]);
 });
 
-test("any .bank.in sender is read as a bank alert, named from the mail or its domain", () => {
+test("any .bank.in sender is read as a bank alert, named from its sender or its domain", () => {
   const base = { id: "1", threadId: "1", subject: "Transaction Alert", receivedAt: 0 };
-  const named = parseMail({ ...base, from: "alerts@southindianbank.bank.in", text: "Your South Indian Bank A/c XX9012 is debited for Rs.75.00 on 21-10-26 to VPA tea.stall@oksbi." });
+  const named = parseMail({ ...base, from: "South Indian Bank <alerts@southindianbank.bank.in>", text: "Your South Indian Bank A/c XX9012 is debited for Rs.75.00 on 21-10-26 to VPA tea.stall@oksbi." });
   expect([named?.rule, named?.bankName, named?.amount, named?.vpa, named?.last4]).toEqual(["bank", "South Indian Bank", 75, "tea.stall@oksbi", "9012"]);
   expect(sourceLabel(named!)).toBe("South Indian Bank alert");
   const unnamed = parseMail({ ...base, from: "alerts@kvb.bank.in", text: "INR 120.00 debited from A/c XX3344 on 21-10-2026. Info: UPI/P2M/529712345602/BOOK HOUSE." });

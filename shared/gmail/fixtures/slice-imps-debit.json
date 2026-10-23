@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "bank",
+    "type": "debit",
+    "amount": 100000,
+    "currency": "INR",
+    "date": "2026-10-13",
+    "dateSource": "mail",
+    "last4": "9901",
+    "bankName": "Slice",
+    "channel": "netbanking",
+    "merchantRaw": "RAHUL SHARMA"
+  }
+}

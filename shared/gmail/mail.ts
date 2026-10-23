@@ -64,9 +64,12 @@ export function isoDateIn(ms: number, timeZone = "Asia/Kolkata"): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
 }
 
-/** Whitespace collapsed to single spaces, so patterns can span the line breaks of HTML turned into text. */
+/**
+ * Whitespace collapsed to single spaces, so patterns can span the line breaks of HTML turned into
+ * text; zero-width characters dropped, so "₹46,\u200c514.62" reads as one amount.
+ */
 export function oneLine(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return text.replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").replace(/\s+/g, " ").trim();
 }
 
 /** A UPI id: "swiggy.upi@axisbank", "rahul.v@okicici". An email address (handle@domain.tld) is not one. */
