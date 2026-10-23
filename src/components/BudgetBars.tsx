@@ -2,6 +2,7 @@ import { useApp } from "@/lib/app";
 import { Money } from "@/components/shell/Money";
 import { cn } from "@/lib/utils";
 import { budgetLevel } from "../../shared/views";
+import { useOverText, useShortMoney } from "@/lib/budgetText";
 
 export type BudgetItem = { budget: { _id: string; categoryId?: string; period: string }; limit: number; spent: number; remaining: number; isOverride?: boolean; carry?: number };
 
@@ -52,6 +53,7 @@ export function BudgetBar({ item, label, elapsed, onClick, due = 0 }: {
 }
 
 type BudgetState = { limit: number; spent: number };
+
 const usedPct = (b: BudgetState) => (b.limit > 0 ? Math.round((b.spent / b.limit) * 100) : 100);
 
 /**
@@ -59,7 +61,8 @@ const usedPct = (b: BudgetState) => (b.limit > 0 ? Math.round((b.spent / b.limit
  * "86% of budget · ₹840 left", or "₹540 over budget" in the expense colour. Nothing below 80%.
  */
 export function BudgetFlag({ item }: { item: BudgetState }) {
-  const { fmt } = useApp();
+  const short = useShortMoney();
+  const overText = useOverText();
   if (!budgetLevel(item)) return null;
   const over = item.spent > item.limit;
   const left = item.limit - item.spent;
@@ -69,18 +72,18 @@ export function BudgetFlag({ item }: { item: BudgetState }) {
         <span className={cn("block h-full rounded-full", over ? "bg-expense" : "bg-expense/60")} style={{ width: `${Math.min(100, usedPct(item))}%` }} />
       </span>
       <span className={cn("truncate", over ? "font-medium text-expense" : "text-expense/80")}>
-        {over ? `${fmt(-left)} over budget` : left === 0 ? "Budget used up" : <>{usedPct(item)}% of budget · <span className="text-budget-left">{fmt(left)} left</span></>}
+        {over ? `${overText(item)} budget` : left === 0 ? "Budget used up" : <>{usedPct(item)}% of budget · <span className="text-budget-left">{short(left)} left</span></>}
       </span>
     </span>
   );
 }
 
 /**
- * In the entry form, under the amount: what the budget this entry counts against has left in its
- * period, and what it will have once this entry is in. The bar shows what was spent and, lighter,
- * this entry's share; both turn the expense colour when they go past the limit.
+ * A budget and what something not in the ledger yet (bills still due) would leave in it: what it has
+ * left in its period, a bar of what was spent with the new amount lighter on top, and the outcome.
+ * Past the limit it reads as what went out against it ("₹ 6,100 / ₹ 6,000").
  */
-export function EntryBudgetHint({ name, when, item, amount, after = "After this", over = "This takes it" }: {
+export function BudgetProjection({ name, when, item, amount, after = "After this", over = "This takes it" }: {
   name: string; when: string; item: BudgetState; amount: number | null;
   /** "After this: ₹300 left", and "This takes it ₹400 over" when it goes past the limit; other wording for bills or an import. */
   after?: string; over?: string;
@@ -93,12 +96,13 @@ export function EntryBudgetHint({ name, when, item, amount, after = "After this"
   const scale = Math.max(item.limit, item.spent + Math.max(0, amount ?? 0), 1);
   const spentW = (Math.max(0, item.spent) / scale) * 100;
   const addW = amount && amount > 0 ? (amount / scale) * 100 : 0;
+  const overText = useOverText();
   const leftText = (n: number) => (n < 0 ? `${fmt(-n)} over` : `${fmt(n)} left`);
   return (
     <div className="flex-1 min-w-0 py-0.5">
       <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="truncate text-muted-foreground">{name} · {when}</span>
-        <span className={cn("shrink-0 tabular font-medium", wasOver ? "text-expense" : "text-budget-left")}>{leftText(before)}</span>
+        <span className={cn("shrink-0 tabular font-medium", wasOver ? "text-expense" : "text-budget-left")}>{wasOver ? overText(item) : leftText(before)}</span>
       </div>
       <div className="relative mt-1 flex h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
         <span className={cn("h-full", wasOver ? "bg-expense" : "bg-budget-left")} style={{ width: `${spentW}%` }} />
@@ -107,9 +111,37 @@ export function EntryBudgetHint({ name, when, item, amount, after = "After this"
       </div>
       {afterLeft !== null && amount ? (
         <div className={cn("mt-1 text-xs", goesOver ? "text-expense" : "text-muted-foreground")}>
-          {goesOver && !wasOver ? <>{over} <b className="font-medium">{fmt(-afterLeft)} over</b></> : <>{after}: <span className={cn("tabular font-medium", afterLeft < 0 ? "text-expense" : "text-budget-left")}>{leftText(afterLeft)}</span></>}
+          {goesOver && !wasOver ? <>{over} to <b className="font-medium tabular">{overText({ spent: item.limit - afterLeft, limit: item.limit })}</b></>
+            : <>{after}: <span className={cn("tabular font-medium", afterLeft < 0 ? "text-expense" : "text-budget-left")}>{afterLeft < 0 ? overText({ spent: item.limit - afterLeft, limit: item.limit }) : leftText(afterLeft)}</span></>}
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * In the entry form, beside the category: a small bar and one figure for its budget, live as the
+ * amount is typed. The bar is what was spent with this entry lighter on top, and a tick at the limit
+ * once past it; the figure is what will be left ("₹ 300 left", green) or, past the limit, what went
+ * out against it ("₹ 6,100 / ₹ 6,000", the expense colour).
+ */
+export function BudgetPill({ item, amount, label, className }: { item: BudgetState; amount: number | null; label: string; className?: string }) {
+  const short = useShortMoney();
+  const overText = useOverText();
+  const add = amount ?? 0;
+  const after = { spent: item.spent + add, limit: item.limit };
+  const over = after.spent > after.limit;
+  const scale = Math.max(item.limit, after.spent, 1);
+  const pct = (n: number) => `${(Math.max(0, n) / scale) * 100}%`;
+  const text = over ? overText(after) : `${short(after.limit - after.spent)} left`;
+  return (
+    <span role="img" aria-label={`${label}: ${text}${add ? " after this entry" : ""}`} title={`${label}: ${text}`} className={cn("flex shrink-0 items-center gap-1.5 pl-2", className)}>
+      <span className="relative flex h-1.5 w-10 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+        <span className={cn("h-full", item.spent > item.limit ? "bg-expense" : "bg-budget-left")} style={{ width: pct(item.spent) }} />
+        {add > 0 ? <span className={cn("h-full", over ? "bg-expense/50" : "bg-budget-left/45")} style={{ width: pct(add) }} /> : null}
+        {over && item.limit > 0 ? <span className="absolute inset-y-0 w-px bg-foreground" style={{ left: pct(item.limit) }} /> : null}
+      </span>
+      <span className={cn("max-w-36 truncate text-xs font-medium tabular whitespace-nowrap", over ? "text-expense" : "text-budget-left")}>{text}</span>
+    </span>
   );
 }

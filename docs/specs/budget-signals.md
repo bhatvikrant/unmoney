@@ -6,16 +6,16 @@ Status: built · 2026-10-24 (follows docs/specs/budget-alerts.md)
 
 Budgets lived on the Budget page and in a toast when one crossed 80%. The figures matter where decisions get made: when you look at a category, when you log a spend, and when you look back on a month or a year. This puts each budget's state in those places, read from the same `budgetStatus` the Budget page uses, so every figure matches it.
 
-Colour: what a budget has **left** is green (`text-budget-left`, the chart green, the same in both colour sets); what is **over** is the expense colour.
+Colour: what a budget has **left** is green (`text-budget-left`, the chart green, the same in both colour sets); what is **over** is the expense colour. Past its limit a budget reads as what went out against it, "₹ 10,500 / ₹ 10,000" (whole amounts without ".00", `useOverText` in src/lib/budgetText.ts), rather than "₹500 over".
 
 ## 2. UX
 
 | Where | What |
 |---|---|
 | Budget settings › a budget | Under **Default amount**: "You spent ₹6,450 a month on average over the last 6 months" for the chosen category (or everything, for the total budget), in the budget's own period (a week, a month, a year). The six whole months before this one; fewer when the ledger is younger; hidden with no earlier month. |
-| Stats › Expenses list | Under a category whose budget for the shown period is 80% used or more: a small bar and "87% of budget · ₹800 left" (left in green), or "₹600 over budget" in the expense colour. Nothing under 80%, nothing for a custom range. |
+| Stats › Expenses list | Under a category whose budget for the shown period is 80% used or more: a small bar and "87% of budget · ₹ 800 left" (left in green), or "₹ 2,600 / ₹ 2,000 budget" in the expense colour. Nothing under 80%, nothing for a custom range. |
 | Stats › a category | Its budget bar for the period (tap: the Budget page), and the budget drawn on the trend chart: a dashed line, bars past their period's limit in the expense colour. |
-| Entry form | With an expense category picked, a **Budget** row under the amount: "Food budget · this month — ₹800 left", a bar of what was spent with this entry's share lighter on top, and "After this: ₹300 left", or "This takes it ₹400 over". An entry dated in another period says that period ("Sep 2026"). The category's own budget, else the total one; a weekly and a monthly budget both show. Editing an entry leaves its old amount out. A card purchase counted when the card is paid adds nothing yet. |
+| Entry form | Nothing extra on the form: with an expense category that has a budget of its own, the **Category** row carries a small bar and one figure, live as the amount is typed. The bar is what was spent with this entry lighter on top (a tick at the limit once past it); the figure is what will be left, "₹ 300 left" in green, or past the limit "₹ 6,400 / ₹ 6,000" in the expense colour. Follows the entry's date; editing an entry leaves its old amount out; a card purchase counted when the card is paid adds nothing yet. A category without its own budget shows nothing (the total budget isn't the category's). |
 | Category picker (entry form) | A budgeted category's tile shows "₹800 left" in green or "₹600 over" in the expense colour, for the entry's date. |
 | Monthly recap | A **Budgets** card before In vs out (monthly spec card 8): each budget's bar, the day it went over, months-in-a-row runs, and two tiles of the most telling facts. |
 | Yearly recap | A **Budgets** card (yearly spec card 12): each monthly budget as twelve held/over squares, and the year's **annual budgets** as bars under them (or the whole card, with annual budgets alone: "2 of 3 held", runs counted in years). |

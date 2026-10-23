@@ -12,7 +12,7 @@ import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
 import { UpcomingRow, UpcomingSheet } from "@/components/tx/Upcoming";
 import { FREQ_LABEL } from "@/components/tx/RepeatSheet";
-import { EntryBudgetHint } from "@/components/BudgetBars";
+import { BudgetProjection } from "@/components/BudgetBars";
 import { useBudgetLabel } from "@/components/tx/entryBudgets";
 
 /**
@@ -92,7 +92,7 @@ export default function UpcomingPage() {
               const { name, when } = budgetLabel(o.item);
               return (
                 <div key={`${o.item.budget._id}|${o.item.range.from}`} className="border-b px-4 py-2.5 last:border-b-0">
-                  <EntryBudgetHint name={name} when={when} item={o.item} amount={o.adds} after="After these bills" over="These bills take it" />
+                  <BudgetProjection name={name} when={when} item={o.item} amount={o.adds} after="After these bills" over="These bills take it" />
                   <div className="mt-0.5 truncate text-xs text-muted-foreground"><Money amount={o.adds} muted /> due: {billNames(o.bills)}</div>
                 </div>
               );
