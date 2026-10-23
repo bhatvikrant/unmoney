@@ -78,3 +78,26 @@ test("a second-currency amount keeps the rate the file's two amounts imply, not 
   expect(t.exchangeRate).toBeCloseTo(100 / 84.5);
   expect(Math.round((t.subAmount! / 100 / t.exchangeRate!) * 100)).toBe(8450);
 });
+
+describe("duplicates", () => {
+  const noted = (date: string, amount: string, note: string) => ({ ...row(date, amount), note });
+  test("a row matching an entry without the note is a likely duplicate, reported apart from exact ones and still going in", () => {
+    const s = run(onboarded(), "transactions.importRows", { rows: [noted("2026-03-25", "485", "UPI-SWIGGY-8812-PAYMENT FROM PHONE"), noted("2026-03-25", "300", "Tea")], skipInvalid: true }).snap;
+    const rows = [
+      noted("2026-03-25", "485", "Swiggy"), // the same payment, its note cleaned from mail
+      noted("2026-03-25", "300", "tea"), // exact (case aside)
+      noted("2026-03-25", "300", "Coffee"), // the Tea entry is claimed by the row above
+      noted("2026-03-26", "485", "Swiggy"), // another day
+      noted("2026-03-25", "48.50", "Swiggy"), // another amount
+    ];
+    const { result, snap } = run(s, "transactions.importRows", { rows, skipInvalid: true, skipDuplicates: true });
+    expect(result).toMatchObject({ duplicates: [2], likelyDuplicates: [1], inserted: 4 });
+    expect(snap.transactions).toHaveLength(6);
+  });
+
+  test("without skipDuplicates nothing is matched", () => {
+    const s = run(onboarded(), "transactions.importRows", { rows: [noted("2026-03-25", "485", "Swiggy")], skipInvalid: true }).snap;
+    const { result } = run(s, "transactions.importRows", { rows: [noted("2026-03-25", "485", "Swiggy"), noted("2026-03-25", "485", "Zomato")], skipInvalid: true });
+    expect(result).toMatchObject({ duplicates: [], likelyDuplicates: [], inserted: 2 });
+  });
+});

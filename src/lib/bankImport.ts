@@ -77,6 +77,9 @@ function looksDrCr(grid: Grid, headerRow: number, col: Col): boolean {
   return vals.length > 0 && vals.filter((v) => /^(dr|cr|debit|credit|d|c|withdrawal|deposit)\.?$/.test(v)).length >= vals.length * 0.8;
 }
 
+/** The sign rule while the user has not set it: a Dr/Cr column says; else a credit card lists purchases as positive, a bank uses the minus sign. */
+export const guessSign = (drcr: Col, accountKind?: string): BankMapping["sign"] => (drcr >= 0 ? "drcr" : accountKind === "card" ? "positiveOut" : "negativeOut");
+
 /**
  * A first guess from the header names in English bank wording (date, narration, withdrawal,
  * deposit, Dr/Cr…). Balance columns are never picked. A credit card statement lists purchases
@@ -104,8 +107,24 @@ export function guessMapping(grid: Grid, headerRow: number, accountKind?: string
     headerRow, date, description, mode: split ? "split" : "single",
     amount: split ? amount : amount >= 0 ? amount : out >= 0 ? out : inn,
     out: split ? out : -1, in: split ? inn : -1,
-    sign: drcr >= 0 ? "drcr" : accountKind === "card" ? "positiveOut" : "negativeOut", drcr, category,
+    sign: guessSign(drcr, accountKind), drcr, category,
   };
+}
+
+/** What a layout is remembered under on this device: its header row's text. */
+export const layoutKey = (header: string[]) => header.map((c) => c.trim().toLowerCase()).join("|").slice(0, 300);
+
+/**
+ * A mapping remembered for this file: the first of the first 30 rows whose text is a header mapped
+ * before, the mapping moved onto that row. The account details a statement puts above its header
+ * grow or shrink between months, so the row's number is not what to look for.
+ */
+export function recallMapping<T extends { mapping: BankMapping }>(grid: Grid, saved: Record<string, T>): T | undefined {
+  for (let i = 0; i < Math.min(30, grid.length); i++) {
+    const s = grid[i].some((c) => c.trim()) ? saved[layoutKey(grid[i])] : undefined;
+    if (s) return { ...s, mapping: { ...s.mapping, headerRow: i } };
+  }
+  return undefined;
 }
 
 /** Whether a mapping can produce rows: a date and somewhere to read the amount. */

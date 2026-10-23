@@ -217,7 +217,8 @@ export interface Ops {
   "transactions.importRows": {
     /**
      * createMissing: categories · createAccounts: accounts, of type Other · new accounts land outside any group · skipInvalid: import the good rows, report the rest ·
-     * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry ·
+     * skipDuplicates: leave out rows matching an entry already there (same day, account, type, amount and note), one per existing entry, and report
+     * the rows that match one without the note (likelyDuplicates: a bank's narration against a note typed by hand), which still go in ·
      * rowOffset: numbering of the first row, for chunked imports · format: how the whole file writes dates and numbers
      */
     args: {
@@ -225,7 +226,7 @@ export interface Ops {
       /** One file's import (every chunk sends the same): its entries carry the id, and it joins settings.recentImports so it can be undone. */
       batch?: ImportBatch;
     };
-    result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[] };
+    result: { inserted: number; errors: { row: number; reason: string }[]; createdAccounts: string[]; duplicates: number[]; likelyDuplicates: number[] };
   };
   /** today: the device's date, so the server (in UTC) puts the copy on the same day. */
   "transactions.copy": { args: { id: Id<"transactions">; useToday: boolean; today?: string }; result: Id<"transactions"> };
@@ -1669,25 +1670,40 @@ const handlers: Handlers = {
       }
       prepared.push(base);
     }
-    if (errors.length && !skipInvalid) return { inserted: 0, errors, createdAccounts: [], duplicates: [] };
-    // Entries already there, counted so that two identical coffees on one day both match.
-    const dupKey = (t: { type: string; date: string; accountId: string; toAccountId?: string; amount: number; note: string }) =>
-      [t.type, t.date, t.accountId, t.toAccountId ?? "", t.amount, t.note.trim().toLowerCase()].join("|");
+    if (errors.length && !skipInvalid) return { inserted: 0, errors, createdAccounts: [], duplicates: [], likelyDuplicates: [] };
+    // Entries already there, counted so that two identical coffees on one day both match. The rows left
+    // over get a second, looser look without the note, against the entries the exact pass did not claim:
+    // a bank's narration against the same payment typed by hand or read from mail. Those are only
+    // reported; the review leaves them out unless the user says otherwise.
+    const looseKey = (t: { type: string; date: string; accountId: string; toAccountId?: string; amount: number }) =>
+      [t.type, t.date, t.accountId, t.toAccountId ?? "", t.amount].join("|");
+    const dupKey = (t: Parameters<typeof looseKey>[0] & { note: string }) => `${looseKey(t)}|${t.note.trim().toLowerCase()}`;
+    const count = (m: Map<string, number>, k: string, by: number) => m.set(k, (m.get(k) ?? 0) + by);
     const existing = new Map<string, number>();
-    if (skipDuplicates) for (const t of w.snap.transactions) existing.set(dupKey(t), (existing.get(dupKey(t)) ?? 0) + 1);
-    const duplicates: number[] = [];
-    const fresh = prepared.filter((p) => {
-      if (!skipDuplicates) return true;
+    const loose = new Map<string, number>();
+    if (skipDuplicates) for (const t of w.snap.transactions) { count(existing, dupKey(t), 1); count(loose, looseKey(t), 1); }
+    /** The row with its account ids, or null while an account is new (it has no entries yet). */
+    const keyed = (p: Prepared) => {
       const acc = accByName.get(p._acc.toLowerCase());
       const to = p._to ? accByName.get(p._to.toLowerCase()) : undefined;
-      if (!acc || (p._to && !to)) return true; // a new account has no entries yet
-      const key = dupKey({ ...p, accountId: acc._id, toAccountId: to?._id });
-      const n = existing.get(key) ?? 0;
-      if (!n) return true;
-      existing.set(key, n - 1);
+      return !acc || (p._to && !to) ? null : { ...p, accountId: acc._id, toAccountId: to?._id };
+    };
+    const duplicates: number[] = [];
+    const likelyDuplicates: number[] = [];
+    const fresh = prepared.filter((p) => {
+      const k = skipDuplicates ? keyed(p) : null;
+      if (!k || !(existing.get(dupKey(k)) ?? 0)) return true;
+      count(existing, dupKey(k), -1);
+      count(loose, looseKey(k), -1); // that entry is claimed
       duplicates.push(p._row);
       return false;
     });
+    if (skipDuplicates) for (const p of fresh) {
+      const k = keyed(p);
+      if (!k || !(loose.get(looseKey(k)) ?? 0)) continue;
+      count(loose, looseKey(k), -1);
+      likelyDuplicates.push(p._row);
+    }
     // Only create accounts some imported row still uses.
     const used = new Set(fresh.flatMap((p) => [p._acc.toLowerCase(), ...(p._to ? [p._to.toLowerCase()] : [])]));
     const createdAccounts: string[] = [...createdTyped];
@@ -1739,7 +1755,7 @@ const handlers: Handlers = {
         : [{ id: batch.id, name: batch.name.trim().slice(0, 120) || "Import", at: w.at, count: inserted }, ...list].slice(0, RECENT_IMPORTS);
       w.patch("settings", settings._id, { recentImports: next });
     }
-    return { inserted, errors, createdAccounts, duplicates };
+    return { inserted, errors, createdAccounts, duplicates, likelyDuplicates };
   },
 
   "transactions.rescale": (w, { ids, factor }) => {

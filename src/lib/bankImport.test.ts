@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { Id } from "../../convex/_generated/dataModel";
 import { applyOp, detectImportFormat, emptySnapshot, type Snapshot } from "../../shared/ops";
-import { findHeaderRow, guessMapping, isMoneyManagerHeader, mappingReady, normaliseBankDate, toImportRows, type Grid } from "./bankImport";
+import { findHeaderRow, guessMapping, guessSign, isMoneyManagerHeader, layoutKey, mappingReady, normaliseBankDate, recallMapping, toImportRows, type Grid } from "./bankImport";
 import { readImportFile } from "./importFile";
 
 const ctx = { userId: "u" as Id<"users"> };
@@ -128,6 +128,30 @@ test("money in that says refund or reversal imports as a refund in the merchant'
   s = run(s, "transactions.importRows", { rows: on.rows, format: detectImportFormat(on.rows, { dateOrder: "mdy", decimal: "." }), createMissing: true, skipInvalid: true }).snap;
   const myntra = s.transactions.filter((t) => t.note.includes("MYNTRA")).map((t) => [t.type, t.amount]);
   expect(myntra.sort()).toEqual([["expense", -89900], ["expense", 249900]]);
+});
+
+test("the sign rule follows the payment method's kind until set by hand; a Dr/Cr column always wins", () => {
+  const card: Grid = [["Date", "Description", "Amount"], ["2026-10-04", "AMAZON", "1,299.00"]];
+  const m = guessMapping(card, 0, "bank");
+  expect(m.sign).toBe("negativeOut");
+  expect(guessSign(m.drcr, "card")).toBe("positiveOut");
+  expect(guessSign(m.drcr, "bank")).toBe("negativeOut");
+  expect(guessSign(m.drcr, undefined)).toBe("negativeOut");
+  const icici = guessMapping([["Transaction Date", "Transaction Remarks", "Amount (INR)", "Dr / Cr"], ["01-Oct-2026", "UPI/ZOMATO", "350.00", "DR"], ["03-Oct-2026", "NEFT", "120.50", "CR"]], 0, "bank");
+  expect(icici.sign).toBe("drcr");
+  expect(guessSign(icici.drcr, "card")).toBe("drcr");
+});
+
+test("a remembered layout is found by its header text wherever the row sits, not by the row number", () => {
+  const saved = { [layoutKey(HDFC[3])]: { mapping: { ...guessMapping(HDFC, 3), description: 2 }, accountId: "a1" } };
+  // next month's statement has one more line of account details above the header
+  const grid: Grid = [HDFC[0], ["Branch : MG Road", "", "", "", "", "", ""], ...HDFC.slice(1)];
+  expect(findHeaderRow(grid)).toBe(4);
+  expect(recallMapping(grid, saved)).toMatchObject({ accountId: "a1", mapping: { headerRow: 4, description: 2, out: 4, in: 5 } });
+  expect(recallMapping(HDFC, saved)?.mapping.headerRow).toBe(3);
+  expect(recallMapping([["Date", "Amount"], ["2026-10-01", "5"]], saved)).toBeUndefined();
+  // a header row with the same text but different spacing or case is the same layout
+  expect(layoutKey(["Date ", "NARRATION", "Chq./Ref.No.", "Value Dt", "Withdrawal Amt.", "Deposit Amt.", "Closing Balance"])).toBe(layoutKey(HDFC[3]));
 });
 
 test("Deposit and Withdrawal words, and a Dr/Cr after the amount, decide the direction", () => {
