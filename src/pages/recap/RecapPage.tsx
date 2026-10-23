@@ -45,8 +45,6 @@ const HOLD_MS = 300;
 /** A pull down past this many px, or faster than PULL_FLICK px/ms, closes the story. */
 const PULL_CLOSE = 140;
 const PULL_FLICK = 0.6;
-/** Off once the user has opened a drawer from a card: the dots that point at tappable parts have done their job. */
-const HINTS_KEY = "unmoney:recap-hints";
 const variants = {
   enter: (dir: number) => ({ opacity: 0, x: dir * SLIDE }),
   center: { opacity: 0.999, x: 0 },
@@ -56,7 +54,8 @@ const variants = {
 export default function RecapPage() {
   const { key = "" } = useParams();
   if (!/^\d{4}(-(0[1-9]|1[0-2]))?$/.test(key)) return <Navigate to="/stats" replace />;
-  return <Recap month={key} />;
+  // keyed, so each recap starts afresh (its hint dots, its timer), even one opened from another
+  return <Recap key={key} month={key} />;
 }
 
 function Recap({ month }: { month: string }) {
@@ -86,7 +85,9 @@ function Recap({ month }: { month: string }) {
   const pullScale = useTransform(pullY, [0, 600], [1, 0.82]);
   const pullRadius = useTransform(pullY, [0, 60], [0, 28]);
   const backdrop = useTransform(pullY, [0, 1, 500], [0, 1, 0.4]);
-  const [hints, setHints] = useState(() => { try { return localStorage.getItem(HINTS_KEY) !== "off"; } catch { return true; } });
+  // the dots that point at tappable parts: on each time a recap opens, off for the rest of it once a
+  // drawer has been opened. Back from an entry opened in a drawer is the same viewing, so they stay off.
+  const [hints, setHints] = useState(() => !params.get("drill"));
   useEffect(() => {
     const h = () => setHidden(document.hidden);
     document.addEventListener("visibilitychange", h);
@@ -104,7 +105,7 @@ function Recap({ month }: { month: string }) {
   const card = recap?.cards[Math.min(at, n - 1)];
   const drill = decodeDrill(params.get("drill"), card);
   const openDrill = (d: RecapDrill | null) => {
-    if (d && hints) { setHints(false); try { localStorage.setItem(HINTS_KEY, "off"); } catch { /* storage unavailable: the dots go for this visit */ } }
+    if (d) setHints(false);
     setParams({ ...(at ? { card: String(at) } : {}), ...(d ? { drill: encodeDrill(d) } : {}) }, { replace: true });
   };
 
