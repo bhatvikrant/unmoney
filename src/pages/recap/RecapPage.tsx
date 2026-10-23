@@ -12,7 +12,7 @@
  * carries on from where it was, without the release counting as a tap. It also waits while the
  * drawer is open, while the tab is in the background, and while paused with the button (or Space).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router";
 import { AnimatePresence, motion, useReducedMotion, type Transition } from "framer-motion";
 import { ChevronLeft, ChevronRight, Pause, Play, X } from "lucide-react";
@@ -95,9 +95,19 @@ function Recap({ month }: { month: string }) {
   useShortcuts({ ArrowRight: next, ArrowLeft: prev, Escape: close, " ": () => setStopped((v) => !v) });
   const swipe = useSwipe(next, prev);
   const paused = held || stopped || hidden || !!drill;
-  // holding pauses; a release after a long hold is not a tap on the zone beneath
+  // holding pauses; a release after a long hold is not a tap on the zone beneath. A long press
+  // must not select text (iOS) or open the context menu (Android) either: select-none and the
+  // callout style cover most of it, and the story refuses to start a selection at all.
+  const noSelect = useCallback((el: HTMLDivElement | null) => { el?.addEventListener("selectstart", (e) => e.preventDefault()); }, []);
   const holdProps = {
-    onPointerDown: (e: React.PointerEvent) => { if (e.button === 0) { press.current = { at: Date.now(), long: false }; setHeld(true); } },
+    ref: noSelect,
+    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+    onPointerDown: (e: React.PointerEvent) => {
+      if (e.button !== 0) return;
+      window.getSelection()?.removeAllRanges();
+      press.current = { at: Date.now(), long: false };
+      setHeld(true);
+    },
     onPointerUp: () => { press.current.long = Date.now() - press.current.at >= HOLD_MS; setHeld(false); },
     onPointerCancel: () => setHeld(false),
     onPointerLeave: () => setHeld(false),
@@ -162,7 +172,7 @@ function Recap({ month }: { month: string }) {
   const zone = "absolute top-12 bottom-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
   const story = (
-    <div {...swipe} {...holdProps} className="relative h-full w-full touch-none overflow-hidden bg-background [-webkit-touch-callout:none]">
+    <div {...swipe} {...holdProps} className="relative h-full w-full touch-none overflow-hidden bg-background select-none [-webkit-touch-callout:none] [-webkit-tap-highlight-color:transparent]">
       {/* tap zones: right 65% next, left 35% back. They sit under the card, whose text lets taps through (pointer-events-none) while its buttons and links catch them. */}
       <button type="button" aria-label="Previous card" onClick={tap(prev)} className={cn(zone, "left-0 w-[35%]")} />
       <button type="button" aria-label={at < n - 1 ? "Next card" : "Done"} onClick={tap(next)} className={cn(zone, "right-0 w-[65%]")} />
