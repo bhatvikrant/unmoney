@@ -1,0 +1,5 @@
+From: YES BANK <alerts@yesbank.in>
+Subject: YES BANK - Transaction Alert
+Received: 2026-10-22T05:10:00Z
+
+Dear Customer, Your A/c XXXXXX1234 has been debited with INR 60.00 on 22-OCT-26. Info: UPI/P2M/529512345679/RAMESH TEA STALL. Avl Bal: INR 4,512.30. Not you? Call 18001200.

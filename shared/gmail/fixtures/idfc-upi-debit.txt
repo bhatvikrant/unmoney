@@ -1,0 +1,5 @@
+From: IDFC FIRST Bank <transaction.alerts@idfcfirst.bank.in>
+Subject: Debit Alert: Your IDFC FIRST Bank Account
+Received: 2026-10-20T08:00:00Z
+
+Dear Customer, your IDFC FIRST Bank account XXX5678 has been debited for INR 250.00 on 20/10/2026 to VPA grocer.mart@okhdfcbank. UPI Ref No 529612345601.

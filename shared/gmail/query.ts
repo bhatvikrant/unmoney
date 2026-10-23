@@ -6,10 +6,13 @@ import { senderAddress, senderDomain } from "./mail";
 
 /** Named groups of senders the settings page adds or removes in one go. One entry is an address or a domain. */
 export const SENDER_PRESETS: { id: string; name: string; senders: string[] }[] = [
+  // each bank's old domain and its RBI .bank.in one (rules.ts reads mail from any .bank.in sender)
   { id: "banks", name: "Indian banks", senders: [
     "hdfcbank.net", "hdfcbank.com", "hdfc.bank.in", "icicibank.com", "icici.bank.in", "axisbank.com", "axis.bank.in",
-    "sbi.co.in", "sbi.bank.in", "kotak.com", "kotakbank.com", "kotak.bank.in", "idfcfirstbank.com", "yesbank.in",
-    "indusind.com", "federalbank.co.in", "hsbc.bank.in", "hsbc.co.in",
+    "sbi.co.in", "sbi.bank.in", "kotak.com", "kotakbank.com", "kotak.bank.in", "idfcfirstbank.com", "idfcfirst.bank.in", "yesbank.in", "yes.bank.in",
+    "indusind.com", "indusind.bank.in", "federalbank.co.in", "federal.bank.in", "hsbc.bank.in", "hsbc.co.in",
+    "pnb.co.in", "pnb.bank.in", "bankofbaroda.co.in", "bankofbaroda.bank.in", "canarabank.com", "canarabank.bank.in",
+    "unionbankofindia.co.in", "unionbankofindia.bank.in", "aubank.in", "au.bank.in", "rblbank.com", "rbl.bank.in", "idbi.bank.in",
   ] },
   { id: "cards", name: "Credit cards", senders: ["sbicard.com"] },
   { id: "upi", name: "UPI apps", senders: ["phonepe.com", "paytm.com", "paytmmail.com", "payments-noreply@google.com", "npci.org.in"] },

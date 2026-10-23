@@ -97,6 +97,8 @@ export function findLast4(text: string): string | undefined {
 const BANK_NAMES: [RegExp, string][] = [
   [/\bHDFC\b/i, "HDFC"], [/\bICICI\b/i, "ICICI"], [/\bAxis\b/i, "Axis"], [/\b(SBI|State Bank)\b/i, "SBI"], [/\bKotak\b/i, "Kotak"], [/\bHSBC\b/i, "HSBC"],
   [/\bYes Bank\b/i, "Yes Bank"], [/\bIDFC\b/i, "IDFC First"], [/\bIndusInd\b/i, "IndusInd"], [/\bFederal\b/i, "Federal"], [/\bPNB\b/i, "PNB"], [/\bCanara\b/i, "Canara"], [/\bBank of Baroda\b/i, "Bank of Baroda"],
+  [/\bUnion Bank\b/i, "Union Bank"], [/\bRBL\b/i, "RBL"], [/\bIDBI\b/i, "IDBI"], [/\bBandhan\b/i, "Bandhan"], [/\bStandard Chartered\b/i, "Standard Chartered"],
+  [/\bSouth Indian Bank\b/i, "South Indian Bank"], [/\bCentral Bank\b/i, "Central Bank"], [/\bIndian Bank\b/i, "Indian Bank"], [/\bBank of India\b/i, "Bank of India"],
 ];
 
 /** A bank named in the text, as the user would print it on a card. */
@@ -174,6 +176,49 @@ const BANKS: Bank[] = [
     /\bto\s+(?!your\b)(?<m>.+?)\s+on\b/i, /\bfrom\s+(?!your\b)(?<m>.+?)\s+on\b/i, /\bby\s+(?!your\b)(?<m>.+?)\s+on\b/i,
   ] },
 ];
+
+/**
+ * The sentences most Indian banks' alerts share, for the banks with no layout of their own here:
+ * "Info: UPI/P2M/…/SHOP", "towards UPI/…/shop@ybl", "to VPA x@ybl", "by IMPS/…/NAME", "to NAME on".
+ */
+const COMMON: RegExp[] = [
+  /\bInfo(?:rmation)?\s*[:-]\s*(?<m>.+?)(?=\.\s|\s+(?:Avl|Available|Avail|Bal|Balance|If|Please|Not you|Call|Regards|Thank)\b|$)/i,
+  /\b(?:to|by|from) VPA\s+(?<vpa>[a-z0-9.\-_]+@[a-z]+)\b/i,
+  /\b(?:towards|by|via|Ref(?:erence)?\s*(?:No\.?)?\s*[:-]?)\s*(?<m>(?:UPI|IMPS|NEFT|RTGS)\/(?:[^.]|\.(?=\S)){2,80})/i,
+  /\b(?:to|from)\s+(?<vpa>[a-z0-9.\-_]+@[a-z]+)\b(?!\.[a-z])/i,
+  /\btowards\s+(?!your\b)(?<m>.+?)(?:\s+on\b|\.\s|$)/i,
+  /\b(?:to|from|by)\s+(?!(?:your|you|A\/c|account|transfer)\b)(?<m>[^.]{1,60}?)\s+on\s+\d/i,
+  /(?<vpa>[a-z0-9.\-_]+@[a-z]+)\b(?!\.[a-z])/i,
+];
+
+/** Banks whose alerts carry nothing a pattern above COMMON needs. Old domain first, then the .bank.in one. */
+const COMMON_BANKS: [name: string, rule: string, domains: string[]][] = [
+  ["Yes Bank", "yes", ["yesbank.in", "yesbank.co.in", "yes.bank.in"]],
+  ["IDFC First", "idfc", ["idfcfirstbank.com", "idfcbank.com", "idfcfirst.bank.in"]],
+  ["IndusInd", "indusind", ["indusind.com", "indusind.bank.in"]],
+  ["Federal", "federal", ["federalbank.co.in", "federal.bank.in"]],
+  ["PNB", "pnb", ["pnb.co.in", "pnbindia.in", "pnb.bank.in"]],
+  ["Bank of Baroda", "bob", ["bankofbaroda.co.in", "bankofbaroda.com", "bankofbaroda.bank.in"]],
+  ["Canara", "canara", ["canarabank.com", "canarabank.in", "canarabank.bank.in"]],
+  ["Union Bank", "union", ["unionbankofindia.co.in", "unionbankofindia.com", "unionbankofindia.bank.in"]],
+  ["AU", "au", ["aubank.in", "au.bank.in"]],
+  ["RBL", "rbl", ["rblbank.com", "rbl.bank.in"]],
+  ["IDBI", "idbi", ["idbibank.in", "idbibank.co.in", "idbi.bank.in"]],
+  ["Bandhan", "bandhan", ["bandhanbank.com", "bandhan.bank.in"]],
+  ["Indian Bank", "indianbank", ["indianbank.in", "indianbank.co.in", "indianbank.bank.in"]],
+  ["Bank of India", "boi", ["bankofindia.co.in", "bankofindia.bank.in"]],
+  ["Standard Chartered", "scb", ["sc.com"]],
+];
+const ALL_BANKS: Bank[] = [...BANKS, ...COMMON_BANKS.map(([name, rule, domains]) => ({ name, rule, domains, merchant: COMMON }))];
+
+/** Only banks RBI regulates get a .bank.in domain, so mail from one no bank above knows is still a bank's alert. */
+const BANK_IN = "bank.in";
+function anyBank(mail: Mail, text: string): Bank {
+  // "alerts@southindianbank.bank.in": the label before .bank.in, when the mail names no bank we know
+  const label = senderDomain(mail.from).slice(0, -BANK_IN.length).replace(/\.$/, "").split(".").pop() || "Bank";
+  const name = findBankName(`${mail.subject} ${text}`) ?? (label.length <= 4 ? label.toUpperCase() : label[0].toUpperCase() + label.slice(1));
+  return { name, rule: "bank", domains: [BANK_IN], merchant: COMMON };
+}
 
 const CARD_PAYMENT = /\bpayment\b.{0,60}?\breceived\b.{0,60}?\bcard\b|\breceived\b.{0,40}?\btowards\b.{0,40}?\bcard\b|\breceived\s+(?:a\s+|your\s+)?payment\b.{0,80}?\bcard\b/i;
 const REFUND = /\b(refund|refunded|reversal|reversed|credited back)\b/i;
@@ -318,8 +363,9 @@ const SHOPS: Shop[] = [
 
 /** What a draft's provenance line calls the mail: "HDFC alert", "Google Pay", "Swiggy receipt". */
 export function sourceLabel(parsed: Pick<Parsed, "rule" | "bankName" | "merchantRaw">): string {
-  const bank = BANKS.find((b) => b.rule === parsed.rule);
+  const bank = ALL_BANKS.find((b) => b.rule === parsed.rule);
   if (bank) return `${bank.name} alert`;
+  if (parsed.rule === "bank") return `${parsed.bankName ?? "Bank"} alert`;
   const app = UPI_APPS.find((a) => a.rule === parsed.rule);
   if (app) return app.name;
   return `${parsed.merchantRaw} receipt`;
@@ -355,7 +401,8 @@ export function parseMail(mail: Mail, opts: { timeZone?: string } = {}): Parsed 
   if (shop) return receipt(mail, text, shop, opts.timeZone);
   const app = UPI_APPS.find((a) => inDomains(domain, a.domains));
   if (app) return upiApp(mail, text, app, opts.timeZone);
-  const bank = BANKS.find((b) => inDomains(domain, b.domains));
+  const bank = ALL_BANKS.find((b) => inDomains(domain, b.domains));
   if (bank) return bankAlert(mail, text, bank, opts.timeZone);
+  if (inDomains(domain, [BANK_IN])) return bankAlert(mail, text, anyBank(mail, text), opts.timeZone);
   return null;
 }

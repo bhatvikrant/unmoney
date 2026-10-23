@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "idfc",
+    "type": "debit",
+    "amount": 250,
+    "currency": "INR",
+    "date": "2026-10-20",
+    "dateSource": "mail",
+    "last4": "5678",
+    "bankName": "IDFC First",
+    "channel": "upi",
+    "merchantRaw": "grocer.mart",
+    "vpa": "grocer.mart@okhdfcbank"
+  }
+}

@@ -45,7 +45,7 @@ const MANUAL_EVERY_MS = 60 * 1000;
 const STATE_TTL_MS = 10 * 60 * 1000;
 /** Entries this far back are read for "already added?" matching and for the category a merchant had last time. */
 const HISTORY_DAYS = 365;
-const MAX_SENDERS = 60;
+const MAX_SENDERS = 100;
 /** Mails fetched in parallel, and the least time each such batch takes: 3 per 300 ms is 50 quota units a second. */
 const FETCH_AT_ONCE = 3;
 const FETCH_BATCH_MS = 300;

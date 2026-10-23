@@ -1,0 +1,14 @@
+From: YES BANK <alerts@yes.bank.in>
+Subject: YES BANK - Transaction Alert
+Received: 2026-10-22T13:20:00Z
+
+Dear Customer,
+
+INR 60.00 has been debited from your account XXXXXXXX1234 on 22-10-2026 at 18:49:59 towards UPI/529512345678/chai.point@ybl.
+
+Available balance: INR 4,512.30
+
+If this transaction was not done by you, please call 1800 1200 immediately.
+
+Regards,
+YES BANK

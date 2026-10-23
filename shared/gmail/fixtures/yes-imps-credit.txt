@@ -1,0 +1,5 @@
+From: YES BANK <alerts@yes.bank.in>
+Subject: YES BANK - Transaction Alert
+Received: 2026-10-21T06:00:00Z
+
+Dear Customer, Your A/c XXXXXXXX1234 has been credited with INR 500.00 on 21-10-2026 by IMPS/P2A/628606858621/PRIYA MENON. Avl Bal INR 5,012.30.

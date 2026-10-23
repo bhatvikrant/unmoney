@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "yes",
+    "type": "debit",
+    "amount": 60,
+    "currency": "INR",
+    "date": "2026-10-22",
+    "dateSource": "mail",
+    "time": "01:02",
+    "last4": "4321",
+    "bankName": "Yes Bank",
+    "channel": "card",
+    "merchantRaw": "ZOMATO LTD"
+  }
+}
