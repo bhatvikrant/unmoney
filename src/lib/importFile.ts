@@ -43,7 +43,8 @@ const pad = (n: number) => String(n).padStart(2, "0");
 /** First worksheet's cells as text. Date cells become "YYYY-MM-DD HH:MM", or "YYYY-MM-DD" when formatted without a time. */
 async function readSheet(file: Blob): Promise<Grid> {
   const XLSX = await import("xlsx");
-  const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellNF: true });
+  // only the first sheet is read; `raw` keeps a text file that reached here (a CSV named .xls) as the strings it holds, so its dates are parsed below like any other
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellNF: true, sheets: 0, raw: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
   if (!ws || !ws["!ref"]) return [];
   const range = XLSX.utils.decode_range(ws["!ref"]);
@@ -78,16 +79,24 @@ async function readSheet(file: Blob): Promise<Grid> {
 
 /** A CSV/TSV's cells, the delimiter guessed. */
 function readText(text: string): Grid {
-  return (Papa.parse<string[]>(text.trim(), { header: false, skipEmptyLines: true, delimiter: "", transform: unescapeFormula }).data ?? []).map((r) => r.map((c) => String(c ?? "")));
+  return (Papa.parse<string[]>(text.replace(/^\uFEFF/, "").trim(), { header: false, skipEmptyLines: true, delimiter: "", transform: unescapeFormula }).data ?? []).map((r) => r.map((c) => String(c ?? "")));
 }
 
 /**
  * `name` is the filename when the blob has none of its own (a shared or downloaded file). A picked
  * File is never mutated: `File.name` is a getter-only property and assigning it throws in Safari.
  */
+/** The file's text: UTF-16 by its byte-order mark, else UTF-8, else Windows-1252 (many European banks' CSVs). */
+async function decodeText(file: Blob): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const b = new Uint8Array(buf);
+  if ((b[0] === 0xff && b[1] === 0xfe) || (b[0] === 0xfe && b[1] === 0xff)) return new TextDecoder(b[0] === 0xff ? "utf-16le" : "utf-16be").decode(buf);
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { return new TextDecoder("windows-1252").decode(buf); }
+}
+
 export async function readImportFile(file: Blob, name = (file as File).name ?? ""): Promise<ParsedImport> {
   const isSheet = SHEET.test(name) || SHEET_TYPES.has(file.type) || (await looksLikeSheet(file));
-  const grid = isSheet ? await readSheet(file) : readText(await file.text());
+  const grid = isSheet ? await readSheet(file) : readText(await decodeText(file));
   if (!grid.some((r) => r.some((c) => c.trim()))) throw new Error("That file has no columns. Export from Money Manager with Settings › Backup › Export to Excel.");
   // statements put account details above the header row
   const headerRow = findHeaderRow(grid);

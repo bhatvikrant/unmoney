@@ -108,7 +108,8 @@ export default function GmailSettings() {
   async function connect() {
     setBusy("connect");
     try {
-      window.location.assign(await connectUrl({ lookbackDays: lookback }));
+      // reconnecting keeps the look-back already chosen; only a first connection takes the picker's
+      window.location.assign(await connectUrl({ lookbackDays: s?.connected ? s.lookbackDays : lookback }));
     } catch (e) {
       toast.error(errorText(e));
       setBusy(null);

@@ -181,7 +181,7 @@ export default function CategoryTidyUp() {
       </Page>
 
       {fixes.length ? (
-        <div className={cn(bar, "z-30 bg-background/95 backdrop-blur border-t md:safe-bottom")}>
+        <div className={cn(bar, "z-30 bg-background border-t md:safe-bottom")}>
           <div className="mx-auto max-w-3xl space-y-2 p-3">
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
             <div className="flex gap-2">

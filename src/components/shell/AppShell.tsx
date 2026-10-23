@@ -105,7 +105,7 @@ export default function AppShell() {
         <Outlet />
         <MoneyManagerPrompt />
       </main>
-      <nav aria-label="Tabs" className="md:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur safe-bottom">
+      <nav aria-label="Tabs" className="md:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-background safe-bottom">
         <div className="grid h-14 grid-cols-4">
           {tabs.map((t) => {
             const active = isActive(pathname, t.to);

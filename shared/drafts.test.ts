@@ -143,3 +143,13 @@ test("reopening undoes an import or a dismiss, and never deletes an entry a draf
   const dismissed = run(s, "drafts.dismiss", { ids: ["d1"] }).snap;
   expect(run(dismissed, "drafts.reopen", { ids: ["d1"] }).snap.drafts.find((x) => x._id === "d1")!.status).toBe("open");
 });
+
+test("saving several drafts at once makes one entry each, and skips the ones that cannot be saved", () => {
+  const { s, d } = ledger();
+  const noMethod = s.drafts[1]; // the mail named no method or category: refused, the rest still go through
+  const r = run(s, "drafts.acceptMany", { items: [fields(d), fields(noMethod), fields(d)] });
+  expect(r.result).toEqual({ ids: [expect.stringMatching(/^tmp_/)], accepted: [d._id], failed: 2 });
+  expect(r.snap.transactions.filter((t) => t.source?.messageId === "msg-d1")).toHaveLength(1);
+  expect(r.snap.drafts.map((x) => x.status)).toEqual(["accepted", "open", "dismissed"]);
+  expect(OP_TABLES["drafts.acceptMany"]).toEqual(OP_TABLES["drafts.accept"]);
+});

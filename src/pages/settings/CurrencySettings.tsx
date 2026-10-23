@@ -1,7 +1,7 @@
 import { useOp } from "@/lib/store";
 import { useLocation, useNavigate } from "react-router";
 import { ChevronRight } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useBulkOps } from "@/lib/bulk";
 import { useApp } from "@/lib/app";
 import { getRates } from "@/lib/fxRates";
@@ -49,7 +49,7 @@ export default function CurrencySettings() {
       <Page className="pb-8">
         <Section title="Main currency">
           <Row label={s.mainCurrency} value={fmt(123456)} />
-          <Row label="Symbol" right={(id) => <Input aria-labelledby={id} className="h-8 w-24" value={s.symbol} onChange={(e) => update({ patch: { symbol: e.target.value } })} />} />
+          <Row label="Symbol" right={(id) => <SymbolField labelledBy={id} value={s.symbol} onSave={(symbol) => update({ patch: { symbol } })} />} />
           <Row label="Symbol position" right={(id) => <Select value={s.symbolPosition} onValueChange={(v) => update({ patch: { symbolPosition: v as "before" | "after" } })}><SelectTrigger aria-labelledby={id} className="h-8 w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="before">Before</SelectItem><SelectItem value="after">After</SelectItem></SelectContent></Select>} />
           <Row label="Decimal places" hint="How many digits after the point amounts keep" right={(id) => <Select value={String(s.decimals)} onValueChange={(v) => setDecimals(Number(v))}><SelectTrigger aria-labelledby={id} className="h-8 w-20"><SelectValue /></SelectTrigger><SelectContent>{[0, 1, 2, 3, 4].map((d) => <SelectItem key={d} value={String(d)}>{d}</SelectItem>)}</SelectContent></Select>} />
         </Section>
@@ -95,4 +95,12 @@ export default function CurrencySettings() {
       </AlertDialog>
     </>
   );
+}
+
+/** Typed here, saved once on blur or Enter: an input bound straight to a synced op lost keystrokes while each one went round through the store. */
+function SymbolField({ value, onSave, labelledBy }: { value: string; onSave: (v: string) => void; labelledBy: string }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => { const v = draft.trim(); if (v && v !== value) onSave(v); else setDraft(value); };
+  return <Input className="h-8 w-24" aria-labelledby={labelledBy} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} />;
 }

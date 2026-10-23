@@ -191,8 +191,13 @@ export function toImportRows(grid: Grid, m: BankMapping, opts: { account: string
       if (v) {
         if (m.sign === "drcr") {
           const d = cell(r, m.drcr).toLowerCase();
-          out = /^(dr|debit|d|withdrawal)/.test(d) ? true : /^(cr|credit|c|deposit)/.test(d) ? false : v < 0;
-        } else out = m.sign === "negativeOut" ? v < 0 : v > 0;
+          // whole words: "deposit" starts with d but is money in
+          out = /^(dr|debit|w|withdrawal)\.?$/.test(d) ? true : /^(cr|credit|c|d|deposit)\.?$/.test(d) ? false : v < 0;
+        } else {
+          // "350.00 Dr" / "350.00 Cr" on the amount itself says which way it went; else the sign rule
+          const tail = /\b(dr|cr)\.?$/i.exec(raw)?.[1].toLowerCase();
+          out = tail ? tail === "dr" : m.sign === "negativeOut" ? v < 0 : v > 0;
+        }
       }
     }
     if (out === null) { noAmount++; continue; }
@@ -201,7 +206,11 @@ export function toImportRows(grid: Grid, m: BankMapping, opts: { account: string
     if (refund) refunds++;
     const type = out || refund ? "expense" : "income";
     const note = text.length > NOTE_MAX ? text.slice(0, NOTE_MAX).trim() : text;
-    const category = cell(r, m.category) || opts.categoryFor?.(note, type) || (refund ? opts.categoryFor?.(withoutRefundWords(note), "expense") || categoryInText(text, opts.spent ?? []) : undefined) || "Other";
+    const category = cell(r, m.category) || opts.categoryFor?.(note, type)
+      || (refund ? opts.categoryFor?.(withoutRefundWords(note), "expense") : undefined)
+      // a note the user filed before, inside the narration ("UPI-SWIGGY-…" holds "swiggy"): its category, rather than Other
+      || (type === "expense" ? categoryInText(text, opts.spent ?? []) : undefined)
+      || "Other";
     rows.push({
       date: normaliseBankDate(cell(r, m.date)), account: opts.account, category, note,
       amount: raw.replace(/^[-+]\s*|\s*(dr|cr)\.?$/gi, "").replace(/^\((.*)\)$/, "$1"),
