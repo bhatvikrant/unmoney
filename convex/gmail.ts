@@ -32,9 +32,10 @@ import { senderAddress } from "../shared/gmail/mail";
 import { AI_BATCH, AI_MODEL, AI_MONTHLY_CAP, buildAiInput, lowerConfidence, OUTPUT_SCHEMA, SYSTEM_PROMPT, validateAiResults, type AiRead } from "../shared/gmail/ai";
 
 type Connection = Doc<"gmailConnections">;
-/** Mails listed on the first check and on later ones; later ones cover 30 days too, and fetch only what is new. */
-const FIRST_SYNC_MAX = 300;
+/** Mails one check reads; the rest of the window waits for the next one. */
 const SYNC_MAX = 300;
+/** A check holds the connection at most this long: Convex ends an action after 10 minutes, so an older claim is a run that died. */
+const LEASE_MS = 10 * 60 * 1000;
 /** How many checks the log keeps, and after how many failures in a row a connection pauses itself. */
 const LOG_KEEP = 10;
 const PAUSE_AFTER_FAILURES = 3;
@@ -52,6 +53,8 @@ const FETCH_BATCH_MS = 300;
 const lookbackArg = v.union(...LOOKBACKS.map((d) => v.literal(d)));
 const redirectUri = () => `${process.env.CONVEX_SITE_URL}/gmail/callback`;
 const monthOf = (ms: number) => new Date(ms).toISOString().slice(0, 7);
+/** Whether a check is running on this connection (claimed, and not so long ago that it must have died). */
+const syncing = (c: Pick<Connection, "syncingSince">, now: number) => c.syncingSince !== undefined && now - c.syncingSince < LEASE_MS;
 
 // ---------- what the app sees ----------
 
@@ -69,6 +72,7 @@ export const status = query({
       configured: hasTokenKey(),
       email: c?.email ?? null,
       status: c?.status ?? null,
+      syncing: !!c && syncing(c, Date.now()),
       lastSyncAt: c?.lastSyncAt ?? null,
       lastError: c?.lastError ?? null,
       lookbackDays: (c?.lookbackDays ?? 30) as Lookback,
@@ -348,6 +352,20 @@ export const syncNow = action({
   },
 });
 
+/**
+ * The start of a check claims the connection, so the hourly check, "Check now" and the first check
+ * after connecting never run at once; false when another run holds it or the connection is not live.
+ */
+export const claimSync = internalMutation({
+  args: { userId: v.id("users"), startedAt: v.number() },
+  handler: async (ctx, { userId, startedAt }): Promise<boolean> => {
+    const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (!c || c.status !== "ok" || syncing(c, startedAt)) return false;
+    await ctx.db.patch(c._id, { syncingSince: startedAt });
+    return true;
+  },
+});
+
 /** Everything one check needs, read in one consistent query. */
 export const prepareSync = internalQuery({
   args: { userId: v.id("users") },
@@ -470,13 +488,21 @@ async function askClaude(mails: Mail[], prep: Prep): Promise<{ reads: AiRead[]; 
 async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<Collected> {
   const c = prep.connection;
   const token = await gmailApi.accessToken(await decryptText(c.refreshTokenEnc, c.iv));
-  const first = !c.syncedUpTo;
   const afterMs = windowStart(c, startedAt);
   const muted = c.muted ?? [];
   const q = buildQuery({ senders: c.senders, scanPurchases: c.scanPurchases, afterSeconds: afterMs / 1000, muted });
-  const ids = await gmailApi.listMessageIds(token, q, first ? FIRST_SYNC_MAX : SYNC_MAX);
-  const seen = new Set(await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids }));
-  const fresh = ids.filter((id) => !seen.has(id));
+  // The whole window, a page at a time, less what already has a draft or was read and made none:
+  // a check reaches past the mail it has handled to what it has not. The newest SYNC_MAX of those
+  // are read now; the rest wait, and the window is held so the next check carries on from there.
+  const unread: string[] = [];
+  let scanned = 0;
+  for await (const page of gmailApi.listMessageIds(token, q)) {
+    scanned += page.length;
+    const seen = new Set(await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids: page }));
+    unread.push(...page.filter((id) => !seen.has(id)));
+  }
+  const fresh = unread.slice(0, SYNC_MAX);
+  const waiting = unread.length - fresh.length;
   const mails: Mail[] = [];
   // Paced to about half of Gmail's per-user quota (6,000 units a minute, 5 per mail), so even a
   // first check of 300 mails never trips it; a call that is still refused backs off on its own.
@@ -558,28 +584,32 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   // no amount means a currency no rate could be found for: no ₹0 draft; the mail stays unread, so the next check tries again
   const waitingRate = candidates.filter((d) => d.proposal.amount === 0);
   if (waitingRate.length) notes.push(`${waitingRate.length} ${waitingRate.length === 1 ? "mail waits" : "mails wait"} for an exchange rate`);
+  if (waiting) notes.push(`${waiting} older ${waiting === 1 ? "mail" : "mails"} waiting`);
   const { inserts, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), prep.openDrafts, prep.accounts.filter((a) => !a.deletedAt));
   return {
-    scanned: ids.length,
+    scanned,
     inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, prep.transactions, prep.accounts) })),
     updates,
     matches: [...laterMatches(prep.openDrafts, prep.transactions, prep.accounts)].map(([id, transactionId]) => ({ id, transactionId })),
     learned: learnAccounts(prep),
     learnedMerchants: learnMerchants(prep.accepted, c.merchantMap ?? {}, prep.categories),
     aiCalls, aiSkipped, aiDropped, notes, processed,
-    // a check starts the look-back before syncedUpTo: hold it back so the mail skipped this time is in the next window
-    syncedUpTo: Math.min(startedAt, ...retry.map((m) => m.receivedAt + spanMs(c.lookbackDays))),
+    // a check starts the look-back before syncedUpTo: hold it back so the mail skipped this time is in
+    // the next window (where this one started, when older mail still waits)
+    syncedUpTo: Math.min(startedAt, ...retry.map((m) => m.receivedAt + spanMs(c.lookbackDays)), ...(waiting ? [afterMs + spanMs(c.lookbackDays)] : [])),
   };
 }
 
-/** One user's check. Failures are recorded on the connection and never throw out of the cron. */
+/** One user's check, if none is running. Failures are recorded on the connection and never throw out of the cron. */
 export const syncUser = internalAction({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }): Promise<{ ran: boolean; found?: number; error?: string }> => {
-    const prep = await ctx.runQuery(internal.gmail.prepareSync, { userId });
-    if (!prep || prep.connection.status !== "ok") return { ran: false };
     const startedAt = Date.now();
+    if (!(await ctx.runMutation(internal.gmail.claimSync, { userId, startedAt }))) return { ran: false };
     try {
+      const prep = await ctx.runQuery(internal.gmail.prepareSync, { userId });
+      // disconnected since the claim: nothing left to clear
+      if (!prep) return { ran: false };
       const got = await collect(ctx, prep, startedAt);
       await ctx.runMutation(internal.gmail.writeSync, {
         userId, startedAt,
@@ -733,7 +763,7 @@ export const writeSync = internalMutation({
     const reach = syncedUpTo - spanMs(c.lookbackDays);
     const known = new Set(processed.map((p) => p.id));
     await ctx.db.patch(c._id, {
-      lastSyncAt: startedAt, lastError: undefined, syncedUpTo,
+      lastSyncAt: startedAt, lastError: undefined, syncedUpTo, syncingSince: undefined,
       processed: [...(c.processed ?? []).filter((p) => !known.has(p.id)), ...processed].filter((p) => p.receivedAt >= reach),
       aiMonth: month, aiCalls: (c.aiMonth === month ? c.aiCalls : 0) + aiCalls,
       accountMap: { ...c.accountMap, ...learned },
@@ -753,6 +783,6 @@ export const failSync = internalMutation({
     let streak = 0;
     for (const l of log) { if (!l.error) break; streak++; }
     const status = reauth ? "reauth" : streak >= PAUSE_AFTER_FAILURES ? "paused" : c.status;
-    await ctx.db.patch(c._id, { lastSyncAt: startedAt, lastError: error, status, log });
+    await ctx.db.patch(c._id, { lastSyncAt: startedAt, lastError: error, status, log, syncingSince: undefined });
   },
 });
