@@ -51,13 +51,16 @@ export default function GmailReviewPage() {
   const openEntry = useOpenEntry();
   const confirm = useConfirm();
   const bar = useBottomBar();
-  const accept = useOp("drafts.accept");
+  const acceptMany = useOp("drafts.acceptMany");
   const dismiss = useOp("drafts.dismiss");
   const link = useOp("drafts.link");
   const gmail = useQuery(api.gmail.status);
   const muteSender = useMutation(api.gmail.muteSender);
   const reopen = useOp("drafts.reopen");
-  const entryOpen = /\/t\//.test(useLocation().pathname);
+  const { pathname, search } = useLocation();
+  const entryOpen = /\/t\//.test(pathname);
+  // the draft open in the form beside the list (wide screens): Import must not save it from under the user's edits
+  const openDraft = entryOpen ? new URLSearchParams(search).get("draft") : null;
   const [busy, setBusy] = useState(false);
 
   const matches = useMemo(() => draftMatches(view), [view]);
@@ -89,7 +92,7 @@ export default function GmailReviewPage() {
   // Rows the user flipped away from their default. Keeping the flips (not the ticks) means mail
   // that arrives while the page is open shows up as its default too.
   const [flipped, setFlipped] = useState<Set<string>>(() => new Set());
-  const isOn = (i: Item) => !!i.ready && (defaultOn(i) !== flipped.has(i.draft._id));
+  const isOn = (i: Item) => !!i.ready && i.draft._id !== openDraft && (defaultOn(i) !== flipped.has(i.draft._id));
   const toggle = (i: Item) => setFlipped((s) => { const n = new Set(s); if (n.has(i.draft._id)) n.delete(i.draft._id); else n.add(i.draft._id); return n; });
   const selected = shown.filter(isOn);
   // "Select all" is about the new entries: the "maybe already added" ones keep their own ticks
@@ -110,16 +113,17 @@ export default function GmailReviewPage() {
 
   async function importSelected() {
     setBusy(true);
-    let failed = 0;
-    const ids: Id<"drafts">[] = [];
-    const made: Id<"transactions">[] = [];
-    for (const i of selected) {
-      try { made.push(await accept({ id: i.draft._id, ...i.ready!.fields })); ids.push(i.draft._id); } catch { failed++; }
+    try {
+      // one op for the lot: applied, synced and re-rendered once, not once per row
+      const { ids: made, accepted, failed } = await acceptMany({ items: selected.map((i) => ({ id: i.draft._id, ...i.ready!.fields })) });
+      // imported rows leave the list; the ones the user unticked stay unticked
+      if (accepted.length) offerUndo(`Imported ${plural(accepted.length, "entry", "entries")}`, () => reopen({ ids: accepted, transactionIds: made }));
+      if (failed) toast.error(`${plural(failed, "entry", "entries")} could not be imported. Open ${failed === 1 ? "it" : "them"} to check.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not import");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
-    // imported rows leave the list; the ones the user unticked stay unticked
-    if (ids.length) offerUndo(`Imported ${plural(ids.length, "entry", "entries")}`, () => reopen({ ids, transactionIds: made }));
-    if (failed) toast.error(`${plural(failed, "entry", "entries")} could not be imported. Open ${failed === 1 ? "it" : "them"} to check.`);
   }
   async function dismissSelected() {
     const n = selected.length;
@@ -217,7 +221,7 @@ export default function GmailReviewPage() {
       </Page>
 
       {items.length ? (
-        <div className={cn(bar, "z-30 border-t bg-background/95 backdrop-blur md:safe-bottom", entryOpen && bar.startsWith("fixed") && "lg:right-[440px]")}>
+        <div className={cn(bar, "z-30 border-t bg-background md:safe-bottom", entryOpen && bar.startsWith("fixed") && "lg:right-[440px]")}>
           <div className="mx-auto max-w-3xl space-y-2 p-3">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>{selected.length ? `${plural(selected.length, "entry", "entries")} to import` : "Nothing selected"}</span>

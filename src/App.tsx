@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigationType } from "react-router";
 import { useConvexAuth } from "@convex-dev/auth/react";
 import { AppDataProvider } from "@/lib/app";
@@ -8,51 +8,68 @@ import { toast } from "sonner";
 import { awayTooLong, clearFailures, clearUnlock, isLocked, markHidden, markUnlocked } from "@/lib/passcode";
 import { useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
-import SignIn from "@/pages/auth/SignIn";
 import Onboarding from "@/pages/auth/Onboarding";
 import Lock from "@/pages/auth/Lock";
 import AppShell from "@/components/shell/AppShell";
-import RecapPage from "@/pages/recap/RecapPage";
-import RecapsPage from "@/pages/recap/RecapsPage";
 import LedgerRoute from "@/pages/transactions/LedgerRoute";
 import { useMediaQuery, WIDE } from "@/lib/media";
-import SearchPage from "@/pages/transactions/SearchPage";
 import TransactionEditor from "@/pages/transactions/TransactionEditor";
 import { SplitLayout } from "@/components/shell/SplitLayout";
-import BookmarksPage from "@/pages/transactions/BookmarksPage";
-import NotesPage from "@/pages/transactions/NotesPage";
-import UnsplitReturn from "@/pages/transactions/UnsplitReturn";
-import StatsPage from "@/pages/stats/StatsPage";
-import CategoryDetail from "@/pages/stats/CategoryDetail";
-import BudgetPage from "@/pages/stats/BudgetPage";
-import BudgetSettings from "@/pages/stats/BudgetSettings";
-import AccountsPage from "@/pages/accounts/AccountsPage";
-import AccountDetail from "@/pages/accounts/AccountDetail";
-import AccountEditor from "@/pages/accounts/AccountEditor";
-import AccountOrder from "@/pages/accounts/AccountOrder";
-import SettingsPage from "@/pages/settings/SettingsPage";
-import CategoriesSettings from "@/pages/settings/CategoriesSettings";
-import CategoryTidyUp from "@/pages/settings/CategoryTidyUp";
-import CurrencySettings from "@/pages/settings/CurrencySettings";
-import SubCurrencySettings from "@/pages/settings/SubCurrencySettings";
-import RepeatSettings from "@/pages/settings/RepeatSettings";
-import PasscodeSettings from "@/pages/settings/PasscodeSettings";
-import PeriodSettings from "@/pages/settings/PeriodSettings";
-import StyleSettings from "@/pages/settings/StyleSettings";
-import BackupSettings from "@/pages/settings/BackupSettings";
-import ImportPage from "@/pages/settings/ImportPage";
-import AccountGroupSettings from "@/pages/settings/AccountGroupSettings";
-import DeletedAccounts from "@/pages/settings/DeletedAccounts";
-import TransferExpenseSettings from "@/pages/settings/TransferExpenseSettings";
-import PaymentMethodsSettings from "@/pages/settings/PaymentMethodsSettings";
-import PreferencesSettings from "@/pages/settings/PreferencesSettings";
-import GmailSettings from "@/pages/settings/GmailSettings";
-import GmailReviewPage from "@/pages/transactions/GmailReviewPage";
-import UpcomingPage from "@/pages/transactions/UpcomingPage";
-import PrivacyPage from "@/pages/legal/PrivacyPage";
 
-function Splash({ text = "Loading…" }: { text?: string }) {
-  return <div className="min-h-dvh flex items-center justify-center text-sm text-muted-foreground">{text}</div>;
+// Only the ledger, the entry form and the shell load with the app. Every other screen is fetched the
+// first time it is opened (from the service worker's cache once installed), so a cold start parses a
+// fraction of the code. The other tabs' screens are fetched a moment after the ledger is up.
+const loadStats = () => import("@/pages/stats/StatsPage");
+const loadAccounts = () => import("@/pages/accounts/AccountsPage");
+const loadSettings = () => import("@/pages/settings/SettingsPage");
+const SignIn = lazy(() => import("@/pages/auth/SignIn"));
+const RecapPage = lazy(() => import("@/pages/recap/RecapPage"));
+const RecapsPage = lazy(() => import("@/pages/recap/RecapsPage"));
+const SearchPage = lazy(() => import("@/pages/transactions/SearchPage"));
+const BookmarksPage = lazy(() => import("@/pages/transactions/BookmarksPage"));
+const NotesPage = lazy(() => import("@/pages/transactions/NotesPage"));
+const UnsplitReturn = lazy(() => import("@/pages/transactions/UnsplitReturn"));
+const StatsPage = lazy(loadStats);
+const CategoryDetail = lazy(() => import("@/pages/stats/CategoryDetail"));
+const BudgetPage = lazy(() => import("@/pages/stats/BudgetPage"));
+const BudgetSettings = lazy(() => import("@/pages/stats/BudgetSettings"));
+const AccountsPage = lazy(loadAccounts);
+const AccountDetail = lazy(() => import("@/pages/accounts/AccountDetail"));
+const AccountEditor = lazy(() => import("@/pages/accounts/AccountEditor"));
+const AccountOrder = lazy(() => import("@/pages/accounts/AccountOrder"));
+const SettingsPage = lazy(loadSettings);
+const CategoriesSettings = lazy(() => import("@/pages/settings/CategoriesSettings"));
+const CategoryTidyUp = lazy(() => import("@/pages/settings/CategoryTidyUp"));
+const CurrencySettings = lazy(() => import("@/pages/settings/CurrencySettings"));
+const SubCurrencySettings = lazy(() => import("@/pages/settings/SubCurrencySettings"));
+const RepeatSettings = lazy(() => import("@/pages/settings/RepeatSettings"));
+const PasscodeSettings = lazy(() => import("@/pages/settings/PasscodeSettings"));
+const PeriodSettings = lazy(() => import("@/pages/settings/PeriodSettings"));
+const StyleSettings = lazy(() => import("@/pages/settings/StyleSettings"));
+const BackupSettings = lazy(() => import("@/pages/settings/BackupSettings"));
+const ImportPage = lazy(() => import("@/pages/settings/ImportPage"));
+const AccountGroupSettings = lazy(() => import("@/pages/settings/AccountGroupSettings"));
+const DeletedAccounts = lazy(() => import("@/pages/settings/DeletedAccounts"));
+const TransferExpenseSettings = lazy(() => import("@/pages/settings/TransferExpenseSettings"));
+const PaymentMethodsSettings = lazy(() => import("@/pages/settings/PaymentMethodsSettings"));
+const PreferencesSettings = lazy(() => import("@/pages/settings/PreferencesSettings"));
+const GmailSettings = lazy(() => import("@/pages/settings/GmailSettings"));
+const GmailReviewPage = lazy(() => import("@/pages/transactions/GmailReviewPage"));
+const UpcomingPage = lazy(() => import("@/pages/transactions/UpcomingPage"));
+const PrivacyPage = lazy(() => import("@/pages/legal/PrivacyPage"));
+
+/**
+ * Shown while there is nothing to show yet. The text waits a moment: a warm start is over before it
+ * could be read, and a flash of "Loading…" between the splash and the ledger reads as a stutter.
+ */
+function Splash({ text = "Loading…", delay = 400 }: { text?: string; delay?: number }) {
+  const [show, setShow] = useState(!delay);
+  useEffect(() => {
+    if (!delay) return;
+    const t = setTimeout(() => setShow(true), delay);
+    return () => clearTimeout(t);
+  }, [delay]);
+  return <div className="min-h-dvh flex items-center justify-center text-sm text-muted-foreground">{show ? text : null}</div>;
 }
 
 /** First load on this device needs the server once; after that the local copy is used. */
@@ -62,7 +79,7 @@ function FirstFetch() {
     const t = setTimeout(() => setSlow(true), 4000);
     return () => clearTimeout(t);
   }, []);
-  return <Splash text={slow ? "Connecting… UnMoney needs a connection the first time it loads on a device." : "Loading your data…"} />;
+  return <Splash delay={0} text={slow ? "Connecting… UnMoney needs a connection the first time it loads on a device." : "Loading your data…"} />;
 }
 
 /**
@@ -72,9 +89,11 @@ function FirstFetch() {
  */
 function usePasscodeLock(settings: ReturnType<typeof settingsOf>) {
   const { status } = useStore();
-  const [unlocked, setUnlocked] = useState(false);
   const hasPin = !!(settings?.passcodeHash && settings.passcodeSalt);
   const lockAfter = settings?.lockAfter ?? "always";
+  // Unlocked from the start when the last unlock is within the window (a reload, the update toast's
+  // reload, a restored tab): otherwise the window running out mid-use would drop the lock screen over a half-typed entry.
+  const [unlocked, setUnlocked] = useState(() => !isLocked(lockAfter));
   const resetRequested = hasPin && !!settings?.passcodeResetRequestedAt;
 
   // "Forgot it?": the server removes the passcode once this is a session begun after the request,
@@ -116,6 +135,11 @@ function Gate() {
   const { view, user } = useStore();
   const settings = settingsOf(view);
   const lock = usePasscodeLock(settings);
+  // the other tabs' code, once the ledger has had a moment to settle, so the first tap on them is instant
+  useEffect(() => {
+    const t = setTimeout(() => { void loadStats(); void loadAccounts(); void loadSettings(); }, 1500);
+    return () => clearTimeout(t);
+  }, []);
   if (!settings?.onboarded) return <Onboarding />;
   const s = settings;
   // Replaces the app rather than covering it: an open dialog would otherwise sit on top of the lock.
@@ -189,10 +213,14 @@ function Gate() {
 
 export default function App() {
   // Above every early return, so the privacy page, sign-in and onboarding get it too.
+  // One Suspense boundary for every lazy screen: navigating is a transition, so a screen still
+  // loading leaves the current one up rather than flashing the splash.
   return (
     <>
       <ScrollToTop />
-      <Screens />
+      <Suspense fallback={<Splash />}>
+        <Screens />
+      </Suspense>
     </>
   );
 }

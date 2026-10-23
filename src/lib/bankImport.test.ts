@@ -129,3 +129,21 @@ test("money in that says refund or reversal imports as a refund in the merchant'
   const myntra = s.transactions.filter((t) => t.note.includes("MYNTRA")).map((t) => [t.type, t.amount]);
   expect(myntra.sort()).toEqual([["expense", -89900], ["expense", 249900]]);
 });
+
+test("Deposit and Withdrawal words, and a Dr/Cr after the amount, decide the direction", () => {
+  const typed: Grid = [
+    ["Date", "Narration", "Type", "Amount"],
+    ["01/10/2026", "SALARY", "Deposit", "1,20,000.00"],
+    ["02/10/2026", "SWIGGY", "Withdrawal", "485.00"],
+  ];
+  const m = guessMapping(typed, 0);
+  expect(m.sign).toBe("drcr");
+  expect(toImportRows(typed, m, { account: "Bank" }).rows.map((r) => r.type)).toEqual(["Income", "Expenses"]);
+  const suffixed: Grid = [
+    ["Date", "Narration", "Amount"],
+    ["01/10/2026", "SALARY", "1,20,000.00 Cr"],
+    ["02/10/2026", "SWIGGY", "485.00 Dr"],
+  ];
+  const rows = toImportRows(suffixed, guessMapping(suffixed, 0), { account: "Bank" }).rows;
+  expect(rows.map((r) => [r.type, r.amount])).toEqual([["Income", "1,20,000.00"], ["Expenses", "485.00"]]);
+});

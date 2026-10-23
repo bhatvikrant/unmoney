@@ -71,7 +71,8 @@ export default function RepeatSettings() {
       subcategoryId: t.type === "transfer" ? undefined : e.subcategoryId,
     };
     try {
-      await update({ id: e.r._id, frequency: e.frequency, endDate: e.endDate || null, nextDate: e.nextDate, active: e.active, template });
+      // only a next date the user changed: the one copied when the dialog opened may have moved on since (the server's job)
+      await update({ id: e.r._id, frequency: e.frequency, endDate: e.endDate || null, nextDate: e.nextDate !== e.r.nextDate ? e.nextDate : undefined, active: e.active, template });
       setEdit(null);
     } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
   };

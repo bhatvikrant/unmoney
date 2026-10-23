@@ -54,10 +54,16 @@ type Store = {
 const Ctx = createContext<Store | null>(null);
 
 const BATCH = 25;
-/** Entries per page of the transactions subscription; each page is one bounded server read. */
-const TX_PAGE = 2000;
+/**
+ * Entries per page of the transactions subscription; each page is one bounded server read. A change to
+ * one entry re-sends its whole page, so smaller pages mean less to download and parse after every save;
+ * more pages mean more round trips before the first load on a device is complete.
+ */
+const TX_PAGE = 1000;
+/** How long after the last change from the server the local copy is written: a save settles in a burst of table updates, and one write covers them. */
+const WRITE_DELAY_MS = 1000;
 /** An import or a tidy-up can write hundreds of documents. */
-const SEND_ALONE = new Set<OpKind>(["transactions.importRows", "categories.applyCleanup", "categories.undoCleanup"]);
+const SEND_ALONE = new Set<OpKind>(["transactions.importRows", "categories.applyCleanup", "categories.undoCleanup", "drafts.acceptMany"]);
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
 /** An op that writes many documents is sent on its own, so one server transaction stays within Convex's limits. */
 const isHeavy = (op: QueuedOp) =>
@@ -118,9 +124,18 @@ function useOffline(connected: boolean): boolean {
   return !connected && (!online || stale);
 }
 
+/**
+ * The last replay. When the same queue has only grown since (another change made while earlier
+ * ones wait to sync, an import's chunks), only the new ops are applied on top of it, instead of
+ * every queued op from the base again.
+ */
+let lastReplay: { base: Snapshot; ops: QueuedOp[]; idMap: Record<string, string>; userId: string; snap: Snapshot } | null = null;
+
 function replay(base: Snapshot, ops: QueuedOp[], idMap: Record<string, string>, userId: string): Snapshot {
-  let snap = base;
-  for (const op of ops) {
+  const prev = lastReplay;
+  const grown = !!prev && prev.base === base && prev.idMap === idMap && prev.userId === userId && prev.ops.length <= ops.length && prev.ops.every((op, i) => op === ops[i]);
+  let snap = grown ? prev.snap : base;
+  for (const op of grown ? ops.slice(prev.ops.length) : ops) {
     if (op.kind === "files.upload") continue;
     try {
       snap = applyOp(snap, { ...op, args: rewriteIds(op.args, idMap) }, { userId: userId as Id<"users"> }).snap;
@@ -128,6 +143,7 @@ function replay(base: Snapshot, ops: QueuedOp[], idMap: Record<string, string>, 
       // the server will reject it too; leave the view consistent
     }
   }
+  lastReplay = { base, ops, idMap, userId, snap };
   return snap;
 }
 
@@ -225,12 +241,47 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   liveRef.current = allLive;
   connectedRef.current = conn.isWebSocketConnected;
 
+  // ---- the local copy ----
+  // The server re-sends a whole table when one document in it changes (a page of entries, for a
+  // save), so the copy is written one table at a time, only the tables that changed, and a moment
+  // after the last change rather than once per change. Writing the whole ledger on every update
+  // kept the main thread busy right after each save.
+  const written = useRef<Partial<Record<Table, unknown[]>>>({});
+  const pendingWrite = useRef<Partial<Snapshot>>({});
+  const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushWrite = useCallback(() => {
+    if (writeTimer.current) clearTimeout(writeTimer.current);
+    writeTimer.current = null;
+    const tables = pendingWrite.current;
+    pendingWrite.current = {};
+    if (Object.keys(tables).length) void local.writeTables(tables);
+  }, []);
+  /** Before the copy is wiped: nothing of it is remembered as written, and nothing waiting goes after the wipe. */
+  const forgetWritten = useCallback(() => {
+    written.current = {};
+    pendingWrite.current = {};
+    if (writeTimer.current) clearTimeout(writeTimer.current);
+    writeTimer.current = null;
+  }, []);
+  // a tab sent to the background may be killed before the timer fires: write what is waiting now
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === "hidden") flushWrite(); };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", flushWrite);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", flushWrite);
+      flushWrite();
+    };
+  }, [flushWrite]);
+
   useEffect(() => {
     if (!liveSnapshot || !me) return;
     (async () => {
       if (metaRef.current.userId && metaRef.current.userId !== me.userId) {
         // Someone else signed in on this device: their predecessor's queue must not be replayed.
         for (const op of opsRef.current) settle(op.id, "Discarded: someone else signed in");
+        forgetWritten();
         await local.wipe();
         opsRef.current = [];
         setOps([]);
@@ -239,8 +290,17 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         metaRef.current = fresh;
         setMeta(fresh);
       }
-      await local.writeSnapshot(liveSnapshot);
       setBase(liveSnapshot);
+      const changed: Partial<Snapshot> = {};
+      for (const t of TABLES) {
+        if (written.current[t] === liveSnapshot[t]) continue;
+        written.current[t] = liveSnapshot[t];
+        (changed as Record<Table, unknown[]>)[t] = liveSnapshot[t];
+      }
+      if (Object.keys(changed).length) {
+        Object.assign(pendingWrite.current, changed);
+        writeTimer.current ??= setTimeout(flushWrite, WRITE_DELAY_MS);
+      }
       if (metaRef.current.userId !== me.userId || JSON.stringify(metaRef.current.user) !== JSON.stringify(me.user)) {
         const next = { ...metaRef.current, userId: me.userId, user: me.user, hasSnapshot: true };
         metaRef.current = next;
@@ -249,7 +309,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         await local.writeMeta("user", me.user);
       }
     })();
-  }, [liveSnapshot, me, settle]);
+  }, [liveSnapshot, me, settle, flushWrite, forgetWritten]);
 
   const effectiveBase = liveSnapshot ?? base;
   const view = useMemo(() => (effectiveBase ? replay(effectiveBase, ops, meta.idMap, meta.userId ?? "") : emptySnapshot()), [effectiveBase, ops, meta.idMap, meta.userId]);
@@ -433,6 +493,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const clearLocal = useCallback(async () => {
     // anyone waiting on these changes (an import, a restore) hears that they will not arrive
     for (const op of opsRef.current) settle(op.id, "Discarded: signed out");
+    forgetWritten();
     await local.wipe();
     await clearSafetyCopies().catch(() => {});
     // what else this device keeps of the user: cached receipt photos, a file shared in, and preferences
@@ -448,7 +509,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     metaRef.current = fresh;
     setMeta(fresh);
     setBlobUrls({});
-  }, [setQueue, settle]);
+  }, [setQueue, settle, forgetWritten]);
 
   const value = useMemo<Store>(() => ({
     ready,
