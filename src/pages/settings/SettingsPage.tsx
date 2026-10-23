@@ -30,7 +30,10 @@ export default function SettingsPage() {
   const gmail = useQuery(api.gmail.status);
   const { signOut } = useAuthActions();
   const confirm = useConfirm();
+  // changes that cannot reach the server would be lost with this device's copy: no signing out until they can
+  const signOutBlocked = status.pending > 0 && !status.connected;
   async function onSignOut() {
+    if (signOutBlocked) return;
     // unsynced changes are lost on sign out, so that case reads as the destructive one
     const ok = await confirm(status.pending > 0
       ? { title: "Sign out anyway?", description: `${status.pending} change${status.pending === 1 ? " has" : "s have"} not reached the server yet and will be lost if you sign out now.`, action: "Sign out" }
@@ -92,7 +95,9 @@ export default function SettingsPage() {
           {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && gmail.open ? "/gmail" : "/settings/gmail", { value: gmailValue, hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
         </Section>
         <Section title="Account">
-          <Row label="Sign out" hint="Your entries stay on the server" right={<Button variant="outline" size="sm" onClick={() => void onSignOut()}>Sign out</Button>} />
+          <Row label="Sign out"
+            hint={signOutBlocked ? `${status.pending} change${status.pending === 1 ? " is" : "s are"} not saved to the server yet. Go online to sign out.` : "Your entries stay on the server"}
+            right={<Button variant="outline" size="sm" disabled={signOutBlocked} onClick={() => void onSignOut()}>Sign out</Button>} />
           <DeleteAccountRow />
         </Section>
         <p className="px-4 pt-6 text-xs text-muted-foreground">UnMoney · works offline and syncs across your devices</p>
