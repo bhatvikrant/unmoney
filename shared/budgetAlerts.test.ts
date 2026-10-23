@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "./ops";
-import { budgetCrossings, budgetLevel, budgetStatus, currentBudgetLevels } from "./views";
+import { budgetAverage, budgetCrossings, budgetImpact, budgetLevel, budgetStatus, budgetsAt, budgetsForCategory, currentBudgetLevels } from "./views";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -83,4 +83,68 @@ test("an entry that pushes a budget past 80% or over is a crossing; staying in t
   // a budget made just now that is already over doesn't alert
   const total = run(s, "budgets.upsert", { period: "monthly", amount: 1000 }).snap;
   expect(budgetCrossings(mid, currentBudgetLevels(total, "2026-10-21"))).toEqual([]);
+});
+
+test("the average spent covers the six whole months before this one, per budget period", () => {
+  const { s: base, spend, food } = ledger();
+  let s = spend(base, "2026-03-31", 99999); // seven months back: outside the window
+  s = spend(s, "2026-04-15", 60000);
+  s = spend(s, "2026-09-30", 60000);
+  s = spend(s, "2026-10-02", 99999); // this month: not finished, left out
+  // Apr–Sep: 1,200 over 6 months
+  expect(budgetAverage(s, food, "monthly", "2026-10-23")).toEqual({ amount: 20000, months: 6 });
+  expect(budgetAverage(s, food, "yearly", "2026-10-23")!.amount).toBe(240000);
+  expect(budgetAverage(s, food, "weekly", "2026-10-23")!.amount).toBe(Math.round((120000 * 7) / 183));
+  // the total counts every category; another category on its own spent nothing
+  const other = s.categories.find((c) => c.type === "expense" && c._id !== food && !c.parentId)!._id;
+  expect(budgetAverage(s, undefined, "monthly", "2026-10-23")!.amount).toBe(20000);
+  expect(budgetAverage(s, other, "monthly", "2026-10-23")).toEqual({ amount: 0, months: 6 });
+});
+
+test("the average starts at the first entry, and is missing with no earlier month", () => {
+  const { s: base, spend, food } = ledger();
+  let s = spend(base, "2026-10-05", 50000);
+  expect(budgetAverage(s, food, "monthly", "2026-10-23")).toBeNull();
+  s = spend(s, "2026-08-20", 40000);
+  // Aug–Sep only
+  expect(budgetAverage(s, food, "monthly", "2026-10-23")).toEqual({ amount: 20000, months: 2 });
+});
+
+test("an entry counts against its main category's budgets in the periods holding its date, else the total ones", () => {
+  const { s: base, spend, food } = ledger();
+  let s = run(base, "budgets.upsert", { period: "monthly", amount: 500000 }).snap;
+  s = spend(s, "2026-09-10", 30000);
+  const t = s.transactions[0]._id;
+  const lunch = run(s, "categories.create", { name: "Lunch", type: "expense", parentId: food });
+  s = lunch.snap;
+  // a subcategory counts against its main one
+  expect(budgetsForCategory(budgetsAt(s, "2026-09-20"), s, lunch.result as string).map((i) => [i.budget.categoryId, i.spent, i.remaining])).toEqual([[food, 30000, 70000]]);
+  // another month starts again
+  expect(budgetsForCategory(budgetsAt(s, "2026-10-01"), s, food)[0].spent).toBe(0);
+  // a category without a budget of its own counts against the total
+  const other = s.categories.find((c) => c.type === "expense" && c._id !== food && !c.parentId)!._id;
+  expect(budgetsForCategory(budgetsAt(s, "2026-09-20"), s, other).map((i) => [i.budget.categoryId, i.spent])).toEqual([[undefined, 30000]]);
+  // the entry being edited is left out of what was spent
+  expect(budgetsForCategory(budgetsAt(s, "2026-09-20", t), s, food)[0].spent).toBe(0);
+});
+
+test("pending expenses count against their category's budget and the total, in their own date's period", () => {
+  const { s: base, food } = ledger();
+  const s = run(base, "budgets.upsert", { period: "monthly", amount: 500000 }).snap;
+  const acc = s.accounts[0]._id;
+  const other = s.categories.find((c) => c.type === "expense" && c._id !== food && !c.parentId)!._id;
+  const hits = budgetImpact(s, [
+    { type: "expense", date: "2026-10-03", amount: 80000, accountId: acc, categoryId: food },
+    { type: "expense", date: "2026-10-05", amount: 40000, accountId: acc, categoryId: food },
+    { type: "expense", date: "2026-10-06", amount: 10000, accountId: acc, categoryId: other },
+    { type: "expense", date: "2026-11-02", amount: 10000, accountId: acc, categoryId: food },
+  ]);
+  // Food in October goes 200 over; the total takes all three October ones; November is its own.
+  // Least left (as a share of the limit) first
+  expect(hits.map((h) => [h.item.budget.categoryId ?? "total", h.item.range.from, h.adds, h.after])).toEqual([
+    [food, "2026-10-01", 120000, -20000],
+    ["total", "2026-10-01", 130000, 370000],
+    [food, "2026-11-01", 10000, 90000],
+    ["total", "2026-11-01", 10000, 490000],
+  ]);
 });

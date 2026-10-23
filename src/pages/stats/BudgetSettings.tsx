@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useOp, useView } from "@/lib/store";
-import { budgetsList } from "../../../shared/views";
+import { budgetAverage, budgetsList } from "../../../shared/views";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -28,7 +28,8 @@ export default function BudgetSettings() {
   const [sp] = useSearchParams();
   const { settings, categories, categoryById } = useApp();
   const [period, setPeriod] = useState<Period>((sp.get("period") as Period) || "monthly");
-  const budgets = budgetsList(useView());
+  const view = useView();
+  const budgets = budgetsList(view);
   const upsert = useOp("budgets.upsert");
   const setOverride = useOp("budgets.setOverride");
   const setRollover = useOp("budgets.setRollover");
@@ -51,6 +52,9 @@ export default function BudgetSettings() {
   const mains = categories.filter((c) => c.type === "expense" && !c.parentId && !c.deletedAt && !c.archivedAt);
   const available = mains.filter((c) => !list.some((b) => b.categoryId === c._id));
   const hasTotal = list.some((b) => !b.categoryId);
+  // what this category (or everything, for the total) has cost lately, as a guide for the amount
+  const avgCat = dialog?.categoryId;
+  const avg = useMemo(() => (avgCat ? budgetAverage(view, avgCat === "total" ? undefined : avgCat, period) : null), [view, avgCat, period]);
 
   async function save() {
     if (!dialog) return;
@@ -99,7 +103,9 @@ export default function BudgetSettings() {
                   </Select>
                 </div>
               ) : null}
-              <div className="space-y-1.5"><Label>Default amount</Label><Input inputMode="decimal" value={dialog.amount} onChange={(e) => setDialog({ ...dialog, amount: e.target.value })} /></div>
+              <div className="space-y-1.5"><Label>Default amount</Label><Input inputMode="decimal" value={dialog.amount} onChange={(e) => setDialog({ ...dialog, amount: e.target.value })} />
+                {avg ? <p className="text-xs text-muted-foreground">You spent <Money amount={avg.amount} /> a {nextWord} on average over the last {avg.months === 1 ? "month" : `${avg.months} months`}.</p> : null}
+              </div>
               <div className="space-y-1.5"><Label>Only for {keyLabel} (optional)</Label><Input inputMode="decimal" value={dialog.override} placeholder="Leave blank to use the default" onChange={(e) => setDialog({ ...dialog, override: e.target.value })} /></div>
               <label className="flex items-start justify-between gap-3 pt-1">
                 <span className="space-y-0.5">

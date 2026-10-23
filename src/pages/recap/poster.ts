@@ -6,7 +6,7 @@
  */
 import { pctChange, type RecapSummary } from "../../../shared/recap";
 
-export type PosterRow = { key: string; label: string; value: string; tone?: "income" | "expense" };
+export type PosterRow = { key: string; label: string; value: string; tone?: "income" | "expense" | "budgetLeft" };
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
@@ -23,6 +23,13 @@ export function posterRows(s: RecapSummary, year: boolean, fmt: (minor: number) 
   if (year) rows.push({ key: "repeat", label: "Most logged", value: repeat });
   rows.push(s.keptPct === undefined ? { key: "kept", label: "Kept", value: "no income logged" } : s.keptPct < 0 ? { key: "kept", label: "Spent", value: `${100 - s.keptPct}% of income` } : { key: "kept", label: "Kept", value: `${s.keptPct}% of income` });
   rows.push({ key: "nospend", label: "No-spend days", value: String(s.noSpend) });
+  // every budget held reads green; otherwise just the count
+  if (s.budgets) {
+    const all = s.budgets.held === s.budgets.total;
+    rows.push(year
+      ? { key: "budgets", label: "Within budget", value: `${s.budgets.held} of ${s.budgets.total} months`, tone: all ? "budgetLeft" : undefined }
+      : { key: "budgets", label: "Budgets", value: all ? `all ${s.budgets.total} held` : `${s.budgets.held} of ${s.budgets.total} held`, tone: all ? "budgetLeft" : undefined });
+  }
   rows.push(year ? { key: "personality", label: "Personality", value: s.personality ?? "—" } : { key: "repeat", label: "On repeat", value: repeat });
   return rows;
 }
@@ -73,7 +80,7 @@ export async function posterImage(p: Poster): Promise<Blob> {
   await Promise.all([600, 500, 400].map((w) => document.fonts.load(`${w} 40px ${FONT}`))).catch(() => undefined);
   const color = {
     bg: resolve("var(--card)"), fg: resolve("var(--foreground)"), muted: resolve("var(--muted-foreground)"),
-    border: resolve("var(--border)"), income: resolve("var(--income)"), expense: resolve("var(--expense)"),
+    border: resolve("var(--border)"), income: resolve("var(--income)"), expense: resolve("var(--expense)"), budgetLeft: resolve("var(--chart-3)"),
     paper: resolve("var(--background)"), rest: resolve(p.rest),
   };
   const titleH = p.sub ? 236 : 160;
@@ -145,7 +152,7 @@ export async function posterImage(p: Poster): Promise<Blob> {
     ctx.fillText(r.label, PAD, base);
     const labelW = ctx.measureText(r.label).width;
     ctx.font = `500 38px ${FONT}`;
-    ctx.fillStyle = r.tone === "income" ? color.income : r.tone === "expense" ? color.expense : color.fg;
+    ctx.fillStyle = r.tone === "income" ? color.income : r.tone === "expense" ? color.expense : r.tone === "budgetLeft" ? color.budgetLeft : color.fg;
     ctx.textAlign = "right";
     ctx.fillText(fit(ctx, r.value, inner - labelW - 40), W - PAD, base);
     if (i < p.rows.length - 1) {
