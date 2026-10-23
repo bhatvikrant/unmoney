@@ -34,9 +34,10 @@ export function useEntryBudgets(f: { type: string; categoryId?: string; date: st
   const counted = minor === null || !f.accountId ? minor
     : kindsOf({ _id: "", type: "expense", date: f.date, amount: minor, accountId: f.accountId } as TxLike, ledger).expense;
   const label = useBudgetLabel();
-  const hints: EntryBudget[] = (f.categoryId ? budgetsForCategory(all, view, f.categoryId) : []).slice(0, 2)
-    .map((item) => ({ key: item.budget._id, ...label(item), item, amount: counted }));
-  return { hints, byCategory };
+  // the category's own budget (its shortest period first), for the small bar beside it; a total budget isn't the category's
+  const own = f.categoryId ? budgetsForCategory(all, view, f.categoryId).find((i) => i.budget.categoryId) : undefined;
+  const pill: EntryBudget | null = own ? { key: own.budget._id, ...label(own), item: own, amount: counted } : null;
+  return { pill, byCategory };
 }
 
 /** A budget's name ("Food budget", "Monthly budget") and its period ("this month", "Sep 2026", "week of Oct 5"). */
