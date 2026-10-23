@@ -8,6 +8,7 @@ import { addDays, diffDays } from "./dates";
 import { horizonFor, type Snapshot } from "./ops";
 import { firstDateAfter, nextOccurrence, type Frequency } from "./repeat";
 import { normNote } from "./categoryLint";
+import { budgetImpact, budgetsAt, type BudgetImpact } from "./views";
 
 export type Occurrence = {
   repeat: Doc<"repeats">;
@@ -50,6 +51,30 @@ export function upcomingOccurrences(snap: Snapshot, from: string, to: string, to
 /** Coming dates in the 30 days after today. */
 export function next30Days(snap: Snapshot, today: string): Occurrence[] {
   return upcomingOccurrences(snap, addDays(today, 1), addDays(today, 30), today);
+}
+
+/** A budget of a period running today, with the bills still due in it before the period ends. */
+export type BillsOutlook = BudgetImpact & { bills: Occurrence[] };
+
+/**
+ * What the bills still due (scheduled, not added yet) will do to the budgets of the periods running
+ * today: each budget they add to, what it has left now and what it will have once they go out.
+ * Bills dated after a budget's period count against the next one, so they are left out here.
+ */
+export function billsAgainstBudgets(snap: Snapshot, today: string): BillsOutlook[] {
+  const running = budgetsAt(snap, today);
+  if (!running.length) return [];
+  const end = running.reduce((m, i) => (i.range.to > m ? i.range.to : m), today);
+  const bills = upcomingOccurrences(snap, addDays(today, 1), end, today).filter((o) => o.repeat.template.type !== "income");
+  const current = new Set(running.map((i) => `${i.budget._id}|${i.range.from}`));
+  const main = new Map(snap.categories.map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
+  return budgetImpact(snap, bills.map((o) => ({ ...o.repeat.template, date: o.date })))
+    .filter((x) => current.has(`${x.item.budget._id}|${x.item.range.from}`))
+    .map((x) => ({
+      ...x,
+      bills: bills.filter((o) => o.date >= x.item.range.from && o.date <= x.item.range.to
+        && (!x.item.budget.categoryId || (o.repeat.template.type === "expense" && !!o.repeat.template.categoryId && main.get(o.repeat.template.categoryId) === x.item.budget.categoryId))),
+    }));
 }
 
 const PER_MONTH: Record<Frequency, number> = { daily: 365 / 12, weekly: 52 / 12, biweekly: 26 / 12, monthly: 1, yearly: 1 / 12 };

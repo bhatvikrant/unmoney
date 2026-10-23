@@ -17,8 +17,8 @@ import { Money } from "@/components/shell/Money";
 import { colorAt } from "@/lib/theme";
 import { longMonth } from "@/lib/format";
 import { diffDays, MONTH_LONG, MONTH_SHORT, WEEKDAY_SHORT, parts, weekday, type ISODate } from "../../../shared/dates";
-import { parseMonthKey, type MonthKey, type Range } from "../../../shared/period";
-import { pctChange, type RecapBudgets, type RecapCard, type RecapDrill, type RecapStrip } from "../../../shared/recap";
+import { parseMonthKey, shiftMonthKey as shiftMonth, type MonthKey, type Range } from "../../../shared/period";
+import { pctChange, type RecapBudgetRow, type RecapBudgetYearRow, type RecapCard, type RecapDrill, type RecapStrip } from "../../../shared/recap";
 import type { Tx } from "../../../shared/views";
 import { useDrill, useHints } from "./drill";
 import { MARK, posterImage, posterRows, type Poster, type PosterRow } from "./poster";
@@ -184,10 +184,6 @@ function Delta({ change }: { change: number }) {
       {less ? <ArrowDown className="size-4" /> : <ArrowUp className="size-4" />}{p}% {less ? "less" : "more"} than
     </span>
   );
-}
-function BudgetsTile({ budgets, className }: { budgets: RecapBudgets; className?: string }) {
-  const { fmt } = useApp();
-  return <Tile className={className} label="Budgets" value={`${budgets.held} of ${budgets.total} held`} hint={budgets.worst ? `${budgets.worst.name} went over by ${fmt(budgets.worst.over)}` : "All within budget"} />;
 }
 
 // ---- the cards ----
@@ -497,11 +493,9 @@ export function InOutCard({ card }: Props<"inout">) {
           {legendRow("out", "var(--expense)", "Spent", <Money amount={card.spent} kind="expense" />)}
           {legendRow("kept", REST, "Kept", <Money amount={card.income - card.spent} />)}
         </Legend>
-        {card.budgets ? <Tiles><BudgetsTile budgets={card.budgets} className="col-span-full" /></Tiles> : null}
-        {year && (card.bestMonth || card.budgetMonths) ? (
+        {year && card.bestMonth ? (
           <Tiles>
-            {card.bestMonth ? <Tile label="Best month" value={longMonth(card.bestMonth.month)} hint={keptText(card.bestMonth.keptPct)} drill={{ kind: "month", month: card.bestMonth.month }} /> : null}
-            {card.budgetMonths ? <Tile label="Budgets" value={`${card.budgetMonths.held} of ${card.budgetMonths.total}`} hint="months within budget" /> : null}
+            <Tile label="Best month" value={longMonth(card.bestMonth.month)} hint={keptText(card.bestMonth.keptPct)} drill={{ kind: "month", month: card.bestMonth.month }} />
           </Tiles>
         ) : null}
       </Vis>
@@ -510,31 +504,150 @@ export function InOutCard({ card }: Props<"inout">) {
   );
 }
 
-export function BudgetsCard({ card }: Props<"budgets">) {
+/**
+ * One budget's month: name and what was left (or how far over), a bar of spending against the limit
+ * (past it, the overshoot in full colour beyond the line), and the day it went over or its run of months.
+ */
+function BudgetRow({ row, hint, unit = "month" }: { row: RecapBudgetRow; hint?: boolean; unit?: "month" | "year" }) {
+  const { fmt } = useApp();
+  const over = row.spent > row.limit;
+  const used = row.limit > 0 ? row.spent / row.limit : 1;
+  const line = over ? row.limit / row.spent : undefined;
+  const notes = [
+    `${Math.round(used * 100)}% of ${fmt(row.limit)}`,
+    row.overOn ? `over on ${shortDay(row.overOn)}` : null,
+    row.streak >= 2 ? `${over ? "over" : "held"} ${row.streak} ${unit}s running` : null,
+  ].filter(Boolean).join(" · ");
+  const body = (
+    <>
+      <div className="flex items-baseline justify-between gap-3 text-[13px]">
+        <span className="truncate font-medium">{row.name}</span>
+        <span className={cn("shrink-0 font-medium tabular", over ? "text-expense" : "text-budget-left")}>{over ? `${fmt(row.spent - row.limit)} over` : `${fmt(row.limit - row.spent)} left`}</span>
+      </div>
+      <div className="relative mt-1 flex h-2.5 overflow-hidden rounded-full bg-foreground/10">
+        {line !== undefined
+          ? <><i className="block h-full bg-expense/45" style={{ width: pct(line) }} /><i className="block h-full flex-1 bg-expense" /><i className="absolute inset-y-0 w-0.5 bg-foreground" style={{ left: pct(line) }} /></>
+          : <i className="block h-full rounded-full bg-budget-left" style={{ width: pct(Math.min(1, used)) }} />}
+      </div>
+      <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{notes}</div>
+    </>
+  );
+  return row.id === "total" ? <div>{body}</div> : <Tap drill={{ kind: "category", id: row.id }} hint={hint ? GUTTER : undefined} className="-mx-1.5 block w-[calc(100%+12px)] rounded px-1.5 py-0.5">{body}</Tap>;
+}
+
+/** Twelve squares for one budget's year: held in the income colour, over in the expense colour, faint before it existed. */
+function BudgetYearRowView({ row }: { row: RecapBudgetYearRow }) {
+  const { fmt } = useApp();
+  const months = row.held + row.over;
+  const body = (
+    <>
+      <div className="flex items-baseline justify-between gap-3 text-[13px]">
+        <span className="truncate font-medium">{row.name}</span>
+        <span className={cn("shrink-0 tabular", row.over ? "text-expense" : "text-muted-foreground")}>{row.over ? `over in ${row.over} · ${fmt(row.overBy)}` : months > 1 ? `held all ${months}` : "held"}</span>
+      </div>
+      <div className="mt-1 grid grid-cols-12 gap-[3px]">
+        {row.months.map((o, i) => <i key={i} title={MONTH_SHORT[i]} className={cn("block h-3 rounded-[3px]", o === "over" ? "bg-expense" : o === "held" ? "bg-budget-left" : "bg-foreground/10")} />)}
+      </div>
+    </>
+  );
+  return row.id === "total" ? <div>{body}</div> : <Tap drill={{ kind: "category", id: row.id }} className="-mx-1.5 block w-[calc(100%+12px)] rounded px-1.5 py-0.5">{body}</Tap>;
+}
+
+/** The two most telling facts about a month's budgets, for the tiles under its rows. */
+function budgetFacts(rows: RecapBudgetRow[], prev: { held: number; total: number } | undefined, held: number, prevName: string, fmt: (n: number) => string) {
+  const facts: { label: string; value: string; hint: string }[] = [];
+  const isOver = (r: RecapBudgetRow) => r.spent > r.limit;
+  const again = rows.filter((r) => isOver(r) && r.streak >= 2).sort((a, b) => b.streak - a.streak)[0];
+  if (again) facts.push({ label: "Again", value: again.name, hint: `over ${again.streak} months running` });
+  const run = rows.filter((r) => !isOver(r) && r.streak >= 2).sort((a, b) => b.streak - a.streak)[0];
+  if (run) facts.push({ label: "On a run", value: run.name, hint: `held ${run.streak} months running` });
+  const close = rows.filter((r) => !isOver(r) && r.limit > 0 && r.spent / r.limit >= 0.9).sort((a, b) => b.spent / b.limit - a.spent / a.limit)[0];
+  if (close) facts.push({ label: "Close call", value: close.name, hint: `${fmt(close.limit - close.spent)} to spare` });
+  if (prev) facts.push({ label: `vs ${prevName}`, value: `${prev.held} of ${prev.total} held`, hint: held > prev.held ? `${plural(held - prev.held, "more", "more")} held now` : held < prev.held ? `${plural(prev.held - held, "fewer", "fewer")} held now` : "the same as now" });
+  const roomy = rows.filter((r) => !isOver(r) && r.limit > 0).sort((a, b) => a.spent / a.limit - b.spent / b.limit)[0];
+  if (roomy) facts.push({ label: "Most room", value: roomy.name, hint: `${Math.round((roomy.spent / roomy.limit) * 100)}% used` });
+  return facts.slice(0, 2);
+}
+
+export function BudgetsCard({ card, month }: Props<"budgets">) {
+  const nav = useNavigate();
   const { fmt } = useApp();
   const b = card.budgets;
   if (card.scope === "year") {
+    const rows = card.yearRows ?? [];
+    const annual = card.annual ?? [];
+    // annual budgets alone: the year's card reads like a month's, with runs counted in years
+    if (!rows.length) {
+      const worstA = annual.find((r) => r.spent > r.limit);
+      return (
+        <CardFrame kind="budgets">
+          <Vis>
+            <Label>Annual budgets</Label>
+            <H>{b.held === b.total ? (b.total === 1 ? "Your annual budget held" : `All ${b.total} annual budgets held`) : `${b.held} of ${b.total} held`}</H>
+            <Ctx>{worstA
+              ? <><B>{worstA.name}</B> went over by <B><Money amount={worstA.spent - worstA.limit} kind="expense" /></B>{worstA.overOn ? <> on {shortDay(worstA.overOn)}</> : null}</>
+              : <>with <B className="text-budget-left"><Money amount={annual.reduce((s, r) => s + Math.max(0, r.limit - r.spent), 0)} /></B> to spare</>}</Ctx>
+            <div className="mt-4 space-y-2.5">{annual.slice(0, 5).map((r, i) => <BudgetRow key={r.id} row={r} unit="year" hint={i === 0} />)}</div>
+          </Vis>
+          <Foot><span>Your annual budgets</span><FootLink onClick={() => nav(`/budget?period=yearly&year=${month}`)}>Budget</FootLink></Foot>
+        </CardFrame>
+      );
+    }
+    const steady = rows.filter((r) => !r.over && r.held >= 3).sort((x, y) => y.held - x.held)[0];
+    const worst = rows.find((r) => r.over);
+    const longest = rows.filter((r) => r.run >= 2).sort((x, y) => y.run - x.run)[0];
+    const overBy = rows.filter((r) => r.id !== "total").reduce((s, r) => s + r.overBy, 0);
+    // the sentence above already names the one that never went over
+    const showLongest = !!longest && !(worst && steady && steady.id === longest.id);
     return (
       <CardFrame kind="budgets">
         <Vis>
           <Label>Budgets</Label>
           <H>{b.held} of {b.total} months within budget</H>
-          <Ctx>{b.held === b.total ? "Every budget held in every month" : `${plural(b.total - b.held, "month")} had a budget go over`}</Ctx>
-          <Tiles><Tile label="Held" value={plural(b.held, "month")} /><Tile label="Over" value={plural(b.total - b.held, "month")} /></Tiles>
+          <Ctx>
+            {worst ? <><B>{worst.name}</B> went over in {plural(worst.over, "month")}, <B><Money amount={worst.overBy} kind="expense" /></B> in all</> : "Every budget held in every month"}
+            {steady && worst ? <>; <B>{steady.name}</B> never did</> : null}
+          </Ctx>
+          <div className="mt-4 space-y-2.5">{rows.slice(0, annual.length ? 3 : 5).map((r) => <BudgetYearRowView key={r.id} row={r} />)}</div>
+          <div className="mt-1 grid grid-cols-12 gap-[3px] text-center text-[9px] text-muted-foreground" aria-hidden="true">{MONTH_SHORT.map((m, i) => <span key={i}>{m[0]}</span>)}</div>
+          {annual.length ? (
+            <>
+              <div className="mt-4 mb-1.5 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">Annual budgets</div>
+              <div className="space-y-2.5">{annual.slice(0, 2).map((r) => <BudgetRow key={r.id} row={r} unit="year" />)}</div>
+            </>
+          ) : null}
+          {!annual.length && (showLongest || overBy) ? (
+            <Tiles>
+              {showLongest ? <Tile label="Longest run" value={longest.name} hint={`held ${longest.run} months in a row`} /> : null}
+              {overBy ? <Tile label="Over in all" value={fmt(overBy)} hint="across category budgets" /> : null}
+            </Tiles>
+          ) : null}
         </Vis>
-        <Foot><span>No income was recorded this year</span></Foot>
+        <Foot><span>Each monthly budget, month by month</span><FootLink onClick={() => nav("/budget")}>Budget</FootLink></Foot>
       </CardFrame>
     );
   }
+  const rows = card.rows ?? [];
+  const worst = rows.find((r) => r.spent > r.limit);
+  const total = rows.find((r) => r.id === "total");
+  const spare = total ? total.limit - total.spent : rows.reduce((s, r) => s + Math.max(0, r.limit - r.spent), 0);
+  const early = worst?.overOn && card.end ? diffDays(worst.overOn, card.end) : 0;
+  const facts = budgetFacts(rows, card.prev, b.held, longMonth(shiftMonth(month, -1)), fmt);
   return (
     <CardFrame kind="budgets">
       <Vis>
         <Label>Budgets</Label>
-        <H>{b.held} of {b.total} held</H>
-        <Ctx>{b.worst ? <><B>{b.worst.name}</B> went over by <B><Money amount={b.worst.over} kind="expense" /></B></> : "Every budget stayed within its limit"}</Ctx>
-        <Tiles><Tile label="Held" value={b.held} /><Tile label="Over" value={b.total - b.held} hint={b.worst ? `worst: ${fmt(b.worst.over)}` : undefined} /></Tiles>
+        <H>{b.held === b.total ? (b.total === 1 ? "Your budget held" : `All ${b.total} budgets held`) : `${b.held} of ${b.total} held`}</H>
+        <Ctx>
+          {worst
+            ? <><B>{worst.name}</B> went over by <B><Money amount={worst.spent - worst.limit} kind="expense" /></B>{early > 0 ? <>, {plural(early, "day")} before the month was out</> : null}</>
+            : <>with <B className="text-budget-left"><Money amount={spare} /></B> to spare</>}
+        </Ctx>
+        <div className="mt-4 space-y-2.5">{rows.slice(0, 4).map((r, i) => <BudgetRow key={r.id} row={r} hint={i === rows.findIndex((x) => x.id !== "total")} />)}</div>
+        {rows.length > 4 ? <div className="mt-1.5 text-xs text-muted-foreground">and {plural(rows.length - 4, "more", "more")}{rows.slice(4).every((r) => r.spent <= r.limit) ? ", all held" : ""}</div> : null}
+        {facts.length ? <Tiles>{facts.map((f) => <Tile key={f.label} label={f.label} value={f.value} hint={f.hint} />)}</Tiles> : null}
       </Vis>
-      <Foot><span>No income was recorded this month</span></Foot>
+      <Foot><span>{rows.some((r) => r.carry) ? "Limits include what carried over" : "Your monthly budgets"}</span><FootLink onClick={() => nav(`/budget?month=${month}`)}>Budget</FootLink></Foot>
     </CardFrame>
   );
 }
@@ -572,7 +685,7 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
   const row = (r: PosterRow) => (
     <div key={r.key} className={cn("flex items-baseline justify-between gap-3 border-b py-2 text-sm last:border-b-0", year ? "lg:py-1" : "lg:py-1.5")}>
       <span className="whitespace-nowrap text-muted-foreground">{r.label}</span>
-      <b className={cn("min-w-0 truncate text-right font-medium tabular", r.tone === "income" && "text-income", r.tone === "expense" && "text-expense")}>{r.value}</b>
+      <b className={cn("min-w-0 truncate text-right font-medium tabular", r.tone === "income" && "text-income", r.tone === "expense" && "text-expense", r.tone === "budgetLeft" && "text-budget-left")}>{r.value}</b>
     </div>
   );
   return (

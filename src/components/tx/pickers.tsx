@@ -49,10 +49,12 @@ export function AccountPicker({ open, onOpenChange, onPick, title = "Payment met
   );
 }
 
-export function CategoryPicker({ open, onOpenChange, type, onPick }: {
+export function CategoryPicker({ open, onOpenChange, type, onPick, budgets }: {
   open: boolean; onOpenChange: (o: boolean) => void; type: "income" | "expense"; onPick: (categoryId: Id<"categories">, subcategoryId?: Id<"categories">) => void;
+  /** Each main category's budget in the entry's period, to show what it has left under its name. */
+  budgets?: Map<string, { limit: number; spent: number }>;
 }) {
-  const { categories, settings } = useApp();
+  const { categories, settings, fmt } = useApp();
   const nav = useNavigate();
   const [main, setMain] = useState<Id<"categories"> | null>(null);
   const [query, setQuery] = useState("");
@@ -81,6 +83,17 @@ export function CategoryPicker({ open, onOpenChange, type, onPick }: {
   const nameOf = (id: Id<"categories">) => categories.find((c) => c._id === id)?.name;
   const tile = "rounded-md border px-2 py-2 text-sm text-left truncate hover:bg-accent";
   const shownSubs = q ? subs.filter((s) => matches(s.name)) : subs;
+  // a main category's tile: its name (with › when it opens subcategories) and, with a budget, what is left of it
+  const mainTile = (c: (typeof mains)[number]) => {
+    const b = budgets?.get(c._id);
+    const left = b ? b.limit - b.spent : 0;
+    return (
+      <button key={c._id} type="button" onClick={() => pickMain(c._id)} className={tile}>
+        <span className="flex gap-1"><span className="flex-1 truncate">{c.name}</span>{hasSubs(c._id) ? <span className="text-muted-foreground">›</span> : null}</span>
+        {b ? <span className={cn("block truncate text-[11px] leading-tight tabular", left < 0 ? "text-expense" : "text-budget-left")}>{left < 0 ? `${fmt(-left)} over` : `${fmt(left)} left`}</span> : null}
+      </button>
+    );
+  };
   return (
     <BottomSheet open={open} onOpenChange={(o) => { if (o) onOpenChange(o); else close(); }} title={
       <span className="flex items-center justify-center gap-2">
@@ -115,15 +128,11 @@ export function CategoryPicker({ open, onOpenChange, type, onPick }: {
               <span className="block truncate text-[11px] leading-tight text-muted-foreground">{nameOf(c.parentId)} ›</span>
               <span className="block truncate">{c.name}</span>
             </button>
-          ) : (
-            <button key={c._id} type="button" onClick={() => pickMain(c._id)} className={cn(tile, hasSubs(c._id) && "after:content-['›'] after:float-right after:text-muted-foreground")}>{c.name}</button>
-          ))}
+          ) : mainTile(c))}
         </div>
       ) : (
         <div className="grid grid-cols-3 gap-1.5">
-          {mains.map((c) => (
-            <button key={c._id} type="button" onClick={() => pickMain(c._id)} className={cn(tile, hasSubs(c._id) && "after:content-['›'] after:float-right after:text-muted-foreground")}>{c.name}</button>
-          ))}
+          {mains.map(mainTile)}
         </div>
       )}
       {!mains.length ? <div className="text-sm text-muted-foreground p-4 text-center">No {type} categories. Add some in Settings.</div> : null}

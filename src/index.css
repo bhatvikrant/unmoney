@@ -173,6 +173,8 @@
   --color-income: var(--income);
   --color-expense: var(--expense);
   --color-transfer: var(--transfer);
+  /* what a budget still has left: green in both colour sets (over stays the expense colour) */
+  --color-budget-left: var(--chart-3); /* the poster image draws it from --chart-3 too */
   --shadow-card: var(--shadow-card);
   --shadow-pop: var(--shadow-pop);
 }
