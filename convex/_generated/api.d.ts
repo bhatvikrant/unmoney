@@ -17,6 +17,7 @@ import type * as gmail from "../gmail.js";
 import type * as http from "../http.js";
 import type * as imports from "../imports.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_fxFeed from "../lib/fxFeed.js";
 import type * as lib_gmailApi from "../lib/gmailApi.js";
 import type * as lib_gmailCrypto from "../lib/gmailCrypto.js";
 import type * as lib_snapshot from "../lib/snapshot.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   imports: typeof imports;
   "lib/auth": typeof lib_auth;
+  "lib/fxFeed": typeof lib_fxFeed;
   "lib/gmailApi": typeof lib_gmailApi;
   "lib/gmailCrypto": typeof lib_gmailCrypto;
   "lib/snapshot": typeof lib_snapshot;

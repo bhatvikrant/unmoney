@@ -19,7 +19,7 @@ function amountOf(m: RegExpMatchArray): Amount {
   const sym = m[1] ?? m[4];
   const num = m[2] ?? m[3];
   const currency = CURRENCY_CODES.find(([re]) => re.test(sym))?.[1] ?? "INR";
-  return { amount: Number(num.replace(/,/g, "")), currency, index: m.index ?? 0, length: m[0].length };
+  return { amount: Math.round(Number(num.replace(/,/g, "")) * 100) / 100, currency, index: m.index ?? 0, length: m[0].length };
 }
 
 /** Every amount in the text, in order. */
@@ -76,12 +76,13 @@ export function findDate(text: string): string | null {
 
 /** The first clock time, as HH:MM (24h). */
 export function findTime(text: string): string | null {
-  const m = text.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\s?(AM|PM|am|pm)?\b/);
+  // "1:12 PM", "02:08 p.m."
+  const m = text.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?(?:\s?([AaPp])\.?[Mm]\b\.?)?(?!\d)/);
   if (!m) return null;
   let h = Number(m[1]);
   const ampm = m[3]?.toLowerCase();
-  if (ampm === "pm" && h < 12) h += 12;
-  if (ampm === "am" && h === 12) h = 0;
+  if (ampm === "p" && h < 12) h += 12;
+  if (ampm === "a" && h === 12) h = 0;
   if (h > 23 || Number(m[2]) > 59) return null;
   return `${String(h).padStart(2, "0")}:${m[2]}`;
 }
@@ -186,6 +187,8 @@ const COMMON: RegExp[] = [
   /\b(?:to|by|from) VPA\s+(?<vpa>[a-z0-9.\-_]+@[a-z]+)\b/i,
   // a laid-out alert: "Beneficiary Name VIKRANT BHAT Beneficiary Acc No. xx4190", "Sender Name MR X NEFT Ref No. …"
   /\b(?:Beneficiary|Sender|Payee|Remitter|Merchant) Name\s*:?\s*(?<m>[A-Za-z][A-Za-z .'&-]{1,60}?)(?=\s+(?:Beneficiary|Sender|Payee|Remitter|NEFT|IMPS|RTGS|UPI|Ref|Transaction|Amount|Date|Bank|Account|Acc|Reach|Mode)\b|\s*$)/i,
+  // slice: "received ₹125 via UPI … From POOJA JOSHI RRN 139524549009"
+  /\b(?:From|To)\s+(?<m>[A-Z][A-Z .'&-]{1,60}?)\s+(?:RRN|UTR|Ref)\b/,
   /\b(?:towards|by|via|Ref(?:erence)?\s*(?:No\.?)?\s*[:-]?)\s*(?<m>(?:UPI|IMPS|NEFT|RTGS)\/(?:[^.]|\.(?=\S)){2,80})/i,
   /\b(?:to|from)\s+(?<vpa>[a-z0-9.\-_]+@[a-z]+)\b(?!\.[a-z])/i,
   /\btowards\s+(?!your\b)(?<m>.+?)(?:\s+on\b|\.\s|$)/i,
@@ -210,6 +213,7 @@ const COMMON_BANKS: [name: string, rule: string, domains: string[]][] = [
   ["Indian Bank", "indianbank", ["indianbank.in", "indianbank.co.in", "indianbank.bank.in"]],
   ["Bank of India", "boi", ["bankofindia.co.in", "bankofindia.bank.in"]],
   ["Standard Chartered", "scb", ["sc.com"]],
+  ["SBM", "sbm", ["sbmbank.co.in", "sbm.bank.in"]],
 ];
 const ALL_BANKS: Bank[] = [...BANKS, ...COMMON_BANKS.map(([name, rule, domains]) => ({ name, rule, domains, merchant: COMMON }))];
 
@@ -229,7 +233,7 @@ const CREDIT = /\b(credited|received|deposited|credit (?:of|by))\b/i;
 /** Words that say money left the account. */
 const DEBIT = /\b(debited|spent|sent|paid|withdrawn|charged)\b/i;
 /** Words a debit alert uses without saying which way money went; a credit verb anywhere outranks them. */
-const DEBIT_HINT = /\b(used for|using|transaction of|purchase of)\b/i;
+const DEBIT_HINT = /\b(used for|using|transaction of|purchase of|made (?:a|an) (?:online )?(?:[A-Z]+ )?payment)\b/i;
 
 /**
  * Which way the money went. When the mail has both a credit and a debit verb, the first one
@@ -252,6 +256,8 @@ const RAIL = /^(?:UPI|P2[AM]|NEFT|IMPS|RTGS|MB|BIL|INB|ACH|NACH|ECS|INF|TRF|CMS|
 const NOT_A_NAME = /\b(?:click|clicking|password|cashback|OTP|CVV|call us|customer care|internet banking|available balance|SMS)\b/i;
 /** The counterparty's name in a slash-separated transaction line: the first part that is words, not a rail or a reference. */
 function nameInInfo(info: string): string {
+  // SBM's "Info:20012206721410:Int.Pd:01-08-20": interest paid
+  if (/\bInt\.?\s?Pd\b/i.test(info)) return "Interest";
   if (!info.includes("/")) {
     // "ACH-DR-PPFAS 22102026 CAM", "ACH-DR-BD_HDFCMF-TJOK12832": the rail, the collector (BD is
     // BillDesk), and the mandate's dates and reference codes around the name
@@ -382,6 +388,8 @@ export function isShopMail(mail: { from: string; subject: string }): boolean {
 
 /** "ending in 4521", "Visa •••• 4521", "HDFC Bank Credit Card-4521", "Paid via UPI". */
 function receipt(mail: Mail, text: string, shop: Shop, timeZone?: string): Parsed | null {
+  // Amazon's one mail for several orders: each is its own charge, so no one total is the payment
+  if ((text.match(/\bOrder #\s?\d/g) ?? []).length > 1) return null;
   const amt = receiptTotal(text, shop.total) ?? amounts(text)[0] ?? null;
   if (!amt) return null;
   const type: ParsedKind = /\brefund/i.test(mail.subject) || /\brefund (?:of|has been|is being|initiated|processed)\b/i.test(text) ? "refund" : "debit";

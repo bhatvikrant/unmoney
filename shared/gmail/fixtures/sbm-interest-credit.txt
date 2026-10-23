@@ -1,0 +1,14 @@
+From: SBM Bank <info@sbmbank.co.in>
+Subject: Credit Transaction Alert
+Received: 2026-10-01T04:00:00Z
+
+Dear RAHUL SHARMA,
+
+Greetings from SBM Bank India!
+
+Your account XX1410 is credited with INR 0.27 on 01-10-2026. Info:20012206721499:Int.Pd:01-09-20. The Curr bal is 117.82.
+
+Looking forward to more opportunities to serve you.
+
+Sincerely,
+SBM Bank (India) Ltd.

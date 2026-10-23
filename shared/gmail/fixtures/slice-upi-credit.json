@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "bank",
+    "type": "credit",
+    "amount": 125,
+    "currency": "INR",
+    "date": "2026-09-05",
+    "dateSource": "mail",
+    "last4": "9901",
+    "bankName": "Slice",
+    "channel": "upi",
+    "merchantRaw": "POOJA JOSHI"
+  }
+}

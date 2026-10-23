@@ -1,0 +1,15 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "sbm",
+    "type": "credit",
+    "amount": 0.27,
+    "currency": "INR",
+    "date": "2026-10-01",
+    "dateSource": "mail",
+    "last4": "1410",
+    "bankName": "SBM",
+    "channel": "netbanking",
+    "merchantRaw": "Interest"
+  }
+}

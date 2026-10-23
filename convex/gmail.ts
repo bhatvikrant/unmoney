@@ -683,6 +683,23 @@ export const rebuildOpenDrafts = internalMutation({
 });
 
 /**
+ * One-off, after rebuildOpenDrafts: a check reads back one look-back from where the last one
+ * ended, so mail between the look-back's start and that is never read again. This moves the end
+ * back so the next check reads the whole look-back; what already has a draft is skipped as usual.
+ * `npx convex run gmail:rereadLookback '{"userId":"…"}'` (add --prod for production).
+ */
+export const rereadLookback = internalMutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (!c?.syncedUpTo || c.readsFrom === undefined) return { moved: false };
+    const syncedUpTo = Math.min(c.syncedUpTo, c.readsFrom + spanMs(c.lookbackDays));
+    await ctx.db.patch(c._id, { syncedUpTo });
+    return { moved: syncedUpTo !== c.syncedUpTo };
+  },
+});
+
+/**
  * Dev: the text UnMoney reads from one of a user's mails and what the rules make of it, for
  * fixing a rule. `npx convex run gmail:readMail '{"userId":"…","messageId":"…"}'`
  */
@@ -694,6 +711,41 @@ export const readMail = internalAction({
     const token = await gmailApi.accessToken(await decryptText(prep.connection.refreshTokenEnc, prep.connection.iv));
     const mail = await gmailApi.getMail(token, messageId);
     return { from: mail.from, subject: mail.subject, text: mail.text, triage: triage(mail), parsed: parseMail(mail) };
+  },
+});
+
+/**
+ * Dev: every mail a Gmail search finds and what triage and the rules make of each, for finding
+ * the money mail no rule reads. The text comes back only for mail kept but not read, and the
+ * start of it for mail dropped. `npx convex run gmail:auditMail '{"userId":"…","q":"newer_than:30d (debited OR credited)"}'`
+ */
+export const auditMail = internalAction({
+  args: { userId: v.id("users"), q: v.string(), max: v.optional(v.number()) },
+  handler: async (ctx, { userId, q, max = 500 }) => {
+    const prep = await ctx.runQuery(internal.gmail.prepareSync, { userId });
+    if (!prep) return { error: "not connected" };
+    const token = await gmailApi.accessToken(await decryptText(prep.connection.refreshTokenEnc, prep.connection.iv));
+    const ids: string[] = [];
+    for await (const page of gmailApi.listMessageIds(token, q)) {
+      ids.push(...page);
+      if (ids.length >= max) break;
+    }
+    const out = [];
+    for (let i = 0; i < Math.min(ids.length, max); i += FETCH_AT_ONCE) {
+      const started = Date.now();
+      for (const mail of await Promise.all(ids.slice(i, i + FETCH_AT_ONCE).map((id) => gmailApi.getMail(token, id)))) {
+        const verdict = triage(mail);
+        const parsed = verdict.keep ? parseMail(mail) : null;
+        out.push({
+          id: mail.id, from: mail.from, subject: mail.subject, receivedAt: mail.receivedAt, triage: verdict.keep ? "keep" : verdict.reason,
+          parsed: parsed && { rule: parsed.rule, type: parsed.type, amount: parsed.amount, currency: parsed.currency, merchant: parsed.merchantRaw },
+          text: !verdict.keep ? mail.text.slice(0, 300) : parsed ? undefined : mail.text.slice(0, 1500),
+        });
+      }
+      const wait = FETCH_BATCH_MS - (Date.now() - started);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    }
+    return out;
   },
 });
 

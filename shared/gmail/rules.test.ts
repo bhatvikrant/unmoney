@@ -46,6 +46,7 @@ test("times, with and without am/pm", () => {
   expect(findTime("at 09:15:22.")).toBe("09:15");
   expect(findTime("1:12 PM")).toBe("13:12");
   expect(findTime("12:05 AM")).toBe("00:05");
+  expect(findTime("at 02:08 p.m. from")).toBe("14:08");
   expect(findTime("Ref 5294 at 25:99")).toBeNull();
 });
 
@@ -114,4 +115,10 @@ test("any .bank.in sender is read as a bank alert, named from its sender or its 
   const unnamed = parseMail({ ...base, from: "alerts@kvb.bank.in", text: "INR 120.00 debited from A/c XX3344 on 21-10-2026. Info: UPI/P2M/529712345602/BOOK HOUSE." });
   expect([unnamed?.bankName, unnamed?.merchantRaw]).toEqual(["KVB", "BOOK HOUSE"]);
   expect(parseMail({ ...base, from: "x@notbank.in", text: "INR 120.00 debited" })).toBeNull();
+});
+
+test("an Amazon mail for several orders is no one payment; a float slip is read to the paisa", () => {
+  const base = { id: "1", threadId: "1", from: "auto-confirm@amazon.in", subject: "Ordered: \"Pillow Cover...\" and 2 more items", receivedAt: 0 };
+  expect(parseMail({ ...base, text: "Thanks for your order! Order # 407-1 Pillow Cover 238 INR Total 238.35 INR Order # 407-2 Tripod 1804 INR Total 2313.59 INR" })).toBeNull();
+  expect(parseMail({ ...base, text: "Thanks for your order! Order # 407-1 Plant Cutter 219 INR Total 208.35000000000002 INR" })?.amount).toBe(208.35);
 });

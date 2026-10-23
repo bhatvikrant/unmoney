@@ -1,0 +1,9 @@
+From: " customernotification@icici.bank.in" <customernotification@icici.bank.in>
+Subject: RTGS transaction through ICICI Bank iMobile.
+Received: 2026-10-01T08:40:00Z
+
+Dear Customer,
+
+You have made an online RTGS payment of Rs. 9,40,000.00 towards Rahul Sharma on Oct 01, 2026 at 02:08 p.m. from your ICICI Bank Savings Account XXXX5816. The Transaction ID is ICICR12026100113131399.
+
+If you have not initiated this request, please call our Customer Care. Never share your card number, OTP, CVV, user ID, password, etc. with anyone, even if the person claims to be from ICICI Bank.

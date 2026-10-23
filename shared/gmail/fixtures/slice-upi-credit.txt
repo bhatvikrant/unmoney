@@ -1,0 +1,21 @@
+From: slice <noreply@slice.bank.in>
+Subject: Received ₹125 in your slice account
+Received: 2026-09-05T10:00:00Z
+
+Hi Rahul,
+
+You have received ₹125 via UPI in your slice bank account xx9901.
+
+Avl. Bal. ₹20,07,113.41
+
+Transaction date
+05-Sep-26
+
+From
+POOJA JOSHI
+
+RRN
+139524549099
+
+Best,
+Team slice

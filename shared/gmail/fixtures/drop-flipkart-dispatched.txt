@@ -1,0 +1,5 @@
+From: Flipkart <noreply@flipkart.com>
+Subject: Your order for Boat Airdopes has been dispatched
+Received: 2026-10-20T05:00:00Z
+
+Your order has been dispatched and will be delivered by Oct 23. Amount paid: Rs. 1,299.
