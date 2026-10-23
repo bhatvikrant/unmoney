@@ -20,7 +20,7 @@ import { diffDays, MONTH_LONG, MONTH_SHORT, WEEKDAY_SHORT, parts, weekday, type 
 import { parseMonthKey, type MonthKey, type Range } from "../../../shared/period";
 import { pctChange, type RecapBudgets, type RecapCard, type RecapDrill, type RecapStrip } from "../../../shared/recap";
 import type { Tx } from "../../../shared/views";
-import { useDrill } from "./drill";
+import { useDrill, useHints } from "./drill";
 import { MARK, posterImage, posterRows, type Poster, type PosterRow } from "./poster";
 import { Logo } from "@/components/shell/Logo";
 
@@ -116,7 +116,11 @@ function Tile({ label, value, hint, className, drill }: { label: ReactNode; valu
  * A part of a card that opens its entries in the drawer. It catches the tap the zones beneath the
  * card would take, so a tap on it never steps to the next card (a swipe still does).
  */
-function Tap({ drill, children, className, style, label }: { drill: RecapDrill; children?: ReactNode; className?: string; style?: CSSProperties; label?: string }) {
+function Tap({ drill, children, className, style, label, hint }: {
+  drill: RecapDrill; children?: ReactNode; className?: string; style?: CSSProperties; label?: string;
+  /** Point at this one with a pulsing dot while hints are on: true for its centre, or the dot's position classes. */
+  hint?: boolean | string;
+}) {
   const open = useDrill();
   return (
     <button
@@ -125,15 +129,33 @@ function Tap({ drill, children, className, style, label }: { drill: RecapDrill; 
       title={label}
       onClick={() => open(drill)}
       style={style}
-      className={cn("pointer-events-auto cursor-pointer text-left transition-opacity hover:opacity-85 active:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset", className)}
+      className={cn("pointer-events-auto relative cursor-pointer text-left transition-opacity hover:opacity-85 active:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset", className)}
     >
       {children}
+      {hint ? <HintDot className={typeof hint === "string" ? hint : undefined} /> : null}
     </button>
   );
 }
+/**
+ * A pulsing white dot over one tappable part of a card, so the first recap shows what can be
+ * tapped. One per card, and only until the user first opens a drawer (RecapPage turns them off).
+ */
+function HintDot({ className }: { className?: string }) {
+  if (!useHints()) return null;
+  return (
+    <span aria-hidden="true" className={cn("pointer-events-none absolute z-10 flex size-2.5 animate-in fade-in-0 duration-700", className ?? "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2")}>
+      <span className="absolute inline-flex size-full rounded-full bg-white opacity-75 motion-safe:animate-ping" />
+      <span className="relative inline-flex size-2.5 rounded-full bg-white shadow-[0_0_0_1.5px_rgba(0,0,0,0.25)]" />
+    </span>
+  );
+}
+/** Where a hint dot sits for a row: in the card's left gutter, level with the row. */
+const GUTTER = "-left-[18px] top-1/2 -translate-y-1/2";
+/** For a bar: near its foot, centred. */
+const BAR_FOOT = "bottom-2 left-1/2 -translate-x-1/2";
 /** A legend row that opens its entries: the three cells of `legendRow` on the Legend's own columns. */
-const TapRow = ({ drill, children }: { drill: RecapDrill; children: ReactNode }) => (
-  <Tap drill={drill} className="col-span-3 -mx-1.5 grid grid-cols-subgrid items-center rounded px-1.5 py-px">{children}</Tap>
+const TapRow = ({ drill, children, hint }: { drill: RecapDrill; children: ReactNode; hint?: boolean | string }) => (
+  <Tap drill={drill} hint={hint} className="col-span-3 -mx-1.5 grid grid-cols-subgrid items-center rounded px-1.5 py-px">{children}</Tap>
 );
 const Swatch = ({ color }: { color: string }) => <span className="size-2.5 shrink-0 rounded-[3px]" style={{ background: color }} />;
 /** A legend row: swatch, name, amount; three cells of the grid that holds them. */
@@ -260,7 +282,7 @@ export function CategoriesCard({ card, month }: Props<"categories">) {
       <Vis>
         <div className="my-3.5 mb-3 flex max-h-[280px] min-h-[190px] flex-1 flex-col gap-[3px] overflow-hidden rounded-lg">
           {card.top.map((t, i) => (
-            <Tap key={t.id} drill={{ kind: "category", id: t.id }} label={`${t.name}: see its entries`} className="flex min-h-6 items-center justify-between px-3 text-sm font-medium" style={{ flex: Math.max(t.pct, 0.02), background: colorAt(i, n), color: ON_CHART }}>
+            <Tap key={t.id} drill={{ kind: "category", id: t.id }} hint={i === 0} label={`${t.name}: see its entries`} className="flex min-h-6 items-center justify-between px-3 text-sm font-medium" style={{ flex: Math.max(t.pct, 0.02), background: colorAt(i, n), color: ON_CHART }}>
               <span className="min-w-0 truncate">{t.name}</span><span className="ml-2 font-normal opacity-80">{pct(t.pct)}</span>
             </Tap>
           ))}
@@ -300,7 +322,8 @@ export function BiggestCard({ card }: Props<"biggest">) {
         <Ctx><B>{pct(card.share)}</B> of {period} in one entry{year ? ` · ${dayLabel(card.tx.date)}` : ""}</Ctx>
         <div className="mt-[22px] overflow-hidden rounded-lg border bg-card">
           {rows.map((r, i) => (
-            <button key={r.tx._id} type="button" onClick={() => nav(`/t/${r.tx._id}`)} className="pointer-events-auto flex w-full items-center gap-3 border-b px-3 py-2.5 text-left last:border-b-0 hover:bg-accent/40 active:bg-accent">
+            <button key={r.tx._id} type="button" onClick={() => nav(`/t/${r.tx._id}`)} className="pointer-events-auto relative flex w-full items-center gap-3 border-b px-3 py-2.5 text-left last:border-b-0 hover:bg-accent/40 active:bg-accent">
+              {i === 0 ? <HintDot className="top-1/2 left-1 -translate-y-1/2" /> : null}
               <span className="w-4 text-center text-xs text-muted-foreground">{i + 1}</span>
               <div className={cn("min-w-0 flex-1 text-sm", i === 0 && "font-medium")}><span className="block truncate">{r.note}</span><small className="block truncate text-xs font-normal text-muted-foreground">{line(r.tx)}</small></div>
               <Money amount={r.amount} kind="expense" className="text-sm" />
@@ -341,7 +364,7 @@ export function DaysCard({ card }: Props<"days">) {
             const zero = d.amount === 0;
             // the whole column is the button, so a short bar is as easy to hit as a tall one
             return (
-              <Tap key={d.date} drill={{ kind: "day", date: d.date }} label={dayLabel(d.date)} className="flex h-full min-w-0 flex-1 items-end">
+              <Tap key={d.date} drill={{ kind: "day", date: d.date }} hint={d.date === card.busiest && BAR_FOOT} label={dayLabel(d.date)} className="flex h-full min-w-0 flex-1 items-end">
                 <i
                   className={cn("block w-full rounded-t-[2px]", zero ? "opacity-40" : d.date === card.busiest ? "bg-expense" : wk ? "bg-expense opacity-55" : "bg-expense opacity-40")}
                   style={{ height: zero ? 3 : `${Math.max(2, Math.round((d.amount / max) * 100))}%`, background: zero ? REST : undefined }}
@@ -378,7 +401,7 @@ export function RepeatCard({ card }: Props<"repeat">) {
             <Ctx className="mt-1.5"><B>{note.count} times</B> · {fmt(note.amount)} altogether · {fmt(Math.round(note.amount / note.count))} each</Ctx>
             <div className="mt-[22px]">
               {bars.map((b, i) => (
-                <Tap key={b.text} drill={{ kind: "note", text: b.text }} label={`“${b.text}”: see its entries`} className="my-1.5 grid w-full grid-cols-[72px_1fr_28px] items-center gap-2.5 text-[13px]">
+                <Tap key={b.text} drill={{ kind: "note", text: b.text }} hint={i === 0} label={`“${b.text}”: see its entries`} className="my-1.5 grid w-full grid-cols-[72px_1fr_28px] items-center gap-2.5 text-[13px]">
                   <span className={cn("truncate", i === 0 ? "font-medium text-foreground" : "text-muted-foreground")}>{b.text}</span>
                   <i className={cn("block h-[22px] rounded", i === 0 ? "opacity-100" : "opacity-35")} style={{ width: pct(b.count / note.count), background: "var(--tint)" }} />
                   <span className="text-right font-medium tabular">{b.count}</span>
@@ -435,7 +458,7 @@ export function ChangesCard({ card }: Props<"changes">) {
           // a year shows a rise of 2× or more as "N×" (spec §4.2, card 10)
           const delta = m.before === 0 ? "new" : m.after === 0 ? "gone" : year && m.after / m.before >= 2 ? `${(m.after / m.before).toFixed(1).replace(/\.0$/, "")}×` : `${up ? "+" : "−"}${pctChange(m.pct!).pct}%`;
           return (
-            <Tap key={m.id} drill={{ kind: "category", id: m.id }} label={`${m.name}: see its entries`} className="grid w-full grid-cols-[1fr_96px_auto] items-center gap-3 border-b py-2.5 last:border-b-0">
+            <Tap key={m.id} drill={{ kind: "category", id: m.id }} hint={m === first && GUTTER} label={`${m.name}: see its entries`} className="grid w-full grid-cols-[1fr_96px_auto] items-center gap-3 border-b py-2.5 last:border-b-0">
               <div className="min-w-0 text-[15px]"><span className="block truncate">{m.name}</span><small className="block text-xs text-muted-foreground tabular">{fmt(m.before)} → {fmt(m.after)}</small></div>
               <div className="relative h-[18px]">
                 <span className="absolute top-0 bottom-0 left-1/2 w-px bg-muted-foreground/50" />
@@ -470,7 +493,7 @@ export function InOutCard({ card }: Props<"inout">) {
           {spentShare < 1 ? <i className="flex h-full flex-1 items-center overflow-hidden bg-income px-2.5 text-[13px] font-medium whitespace-nowrap" style={{ color: ON_SIGNAL }}>Kept</i> : null}
         </div>
         <Legend className="mb-1.5">
-          <TapRow drill={{ kind: "income" }}>{legendRow("in", "var(--income)", "Income", <Money amount={card.income} kind="income" />)}</TapRow>
+          <TapRow drill={{ kind: "income" }} hint="-left-2 top-1/2 -translate-y-1/2">{legendRow("in", "var(--income)", "Income", <Money amount={card.income} kind="income" />)}</TapRow>
           {legendRow("out", "var(--expense)", "Spent", <Money amount={card.spent} kind="expense" />)}
           {legendRow("kept", REST, "Kept", <Money amount={card.income - card.spent} />)}
         </Legend>
@@ -620,7 +643,7 @@ export function MonthsCard({ card }: Props<"months">) {
             const hi = m.month === card.priciest, lo = m.month === card.lightest;
             const h = m.amount ? Math.max(2, Math.round((m.amount / max) * 100)) : 0;
             return (
-              <Tap key={m.month} drill={{ kind: "month", month: m.month }} label={longMonth(m.month)} className="relative h-full min-w-0 flex-1">
+              <Tap key={m.month} drill={{ kind: "month", month: m.month }} hint={hi && BAR_FOOT} label={longMonth(m.month)} className="relative h-full min-w-0 flex-1">
                 <i className={cn("absolute inset-x-0 bottom-0 block rounded-t-[3px]", hi ? "bg-expense" : lo ? "bg-income opacity-90" : "bg-expense opacity-40")} style={{ height: `${h}%` }} />
                 {(hi || lo) && m.amount ? <span className="absolute left-1/2 -translate-x-1/2 text-[10px] whitespace-nowrap text-foreground" style={{ bottom: `calc(${h}% + 3px)` }}>{fmt(m.amount)}</span> : null}
               </Tap>
@@ -650,7 +673,7 @@ export function Top5Card({ card }: Props<"top5">) {
       <Vis>
         <div className="mt-2.5">
           {card.notes.map((n, i) => (
-            <Tap key={n.text} drill={{ kind: "note", text: n.text }} label={`“${n.text}”: see its entries`} className="flex w-full items-center gap-3.5 border-b py-2 last:border-b-0">
+            <Tap key={n.text} drill={{ kind: "note", text: n.text }} hint={i === 0 && GUTTER} label={`“${n.text}”: see its entries`} className="flex w-full items-center gap-3.5 border-b py-2 last:border-b-0">
               <span className={cn("w-[30px] shrink-0 text-[28px] font-semibold leading-none tracking-[-0.03em]", i === 0 ? "text-foreground" : "text-muted-foreground")}>{i + 1}</span>
               <div className="min-w-0 flex-1 text-[17px] font-semibold tracking-[-0.01em]">
                 <span className="block truncate">{n.text}</span>
@@ -690,7 +713,7 @@ export function CalendarCard({ card }: Props<"calendar">) {
                     if (!d) return <i key={i} className="invisible block aspect-square" />;
                     const zero = d.amount === 0;
                     return (
-                      <Tap key={d.date} drill={{ kind: "day", date: d.date }} label={dayLabel(d.date)} className="block aspect-square">
+                      <Tap key={d.date} drill={{ kind: "day", date: d.date }} hint={d.date === card.busiest} label={dayLabel(d.date)} className="block aspect-square">
                         <i
                           className={cn("block size-full rounded-[2px]", zero ? "bg-foreground opacity-[0.07]" : "bg-expense", d.date === card.busiest && "outline-2 outline-offset-1 outline-foreground")}
                           style={zero ? undefined : { opacity: 0.18 + 0.82 * (d.amount / max) }}
@@ -727,7 +750,7 @@ export function ClockCard({ card }: Props<"clock">) {
         <Ctx className="mt-1.5">Your spending hour · <B>{pct(card.eveningShare)}</B> of entries after 7 pm</Ctx>
         <div className="my-2.5 mb-1 flex h-[110px] items-end gap-0.5">
           {card.perHour.map((v, h) => (
-            <Tap key={h} drill={{ kind: "hour", hour: h }} label={hourRange(h)} className="flex h-full min-w-0 flex-1 items-end">
+            <Tap key={h} drill={{ kind: "hour", hour: h }} hint={h === card.peakHour && BAR_FOOT} label={hourRange(h)} className="flex h-full min-w-0 flex-1 items-end">
               <i className={cn("block w-full rounded-t-[2px]", h === card.peakHour ? "opacity-100" : "opacity-35")} style={{ height: `${Math.max(2, Math.round((v / max) * 100))}%`, background: "var(--tint)" }} />
             </Tap>
           ))}
@@ -757,7 +780,7 @@ export function MethodsCard({ card }: Props<"methods">) {
         <Ctx className="mt-1.5"><B>{pct(card.share)}</B> of the year went through one method</Ctx>
         <div className="mt-2.5 grid grid-cols-[1fr_auto] items-center gap-x-2.5 gap-y-1.5 text-[13px]">
           {card.top.map((m) => (
-            <Tap key={m.id} drill={{ kind: "account", id: m.id }} label={`${m.name}: see its entries`} className="col-span-2 -mx-1.5 grid grid-cols-subgrid items-center rounded px-1.5 py-0.5">
+            <Tap key={m.id} drill={{ kind: "account", id: m.id }} hint={m === lead && "-left-2 top-1/2 -translate-y-1/2"} label={`${m.name}: see its entries`} className="col-span-2 -mx-1.5 grid grid-cols-subgrid items-center rounded px-1.5 py-0.5">
               <div className="flex min-w-0 items-center gap-2">
                 <i className="block h-2 shrink-0 rounded-[2px]" style={{ width: Math.max(4, Math.round((m.amount / max) * 150)), background: "var(--tint)" }} />
                 <span className="truncate">{m.name}</span>
@@ -784,7 +807,7 @@ export function NewCard({ card, month }: Props<"new">) {
         <Ctx><B>{plural(first.count, "entry", "entries")}</B> since · {fmt(first.amount)}</Ctx>
         <div className="mt-5 overflow-hidden rounded-lg border bg-card">
           {card.items.map((it) => (
-            <Tap key={`${it.kind}-${it.id}`} drill={it.kind === "account" ? { kind: "account", id: it.id } : { kind: "category", id: it.id }} label={`${it.name}: see its entries`} className="flex w-full items-center gap-3 border-b px-3 py-2.5 last:border-b-0">
+            <Tap key={`${it.kind}-${it.id}`} hint={it === first && "top-1/2 left-1 -translate-y-1/2"} drill={it.kind === "account" ? { kind: "account", id: it.id } : { kind: "category", id: it.id }} label={`${it.name}: see its entries`} className="flex w-full items-center gap-3 border-b px-3 py-2.5 last:border-b-0">
               <div className="min-w-0 flex-1 text-sm">
                 <span className="block truncate">{it.name}</span>
                 <small className="block truncate text-xs text-muted-foreground">{it.kind === "account" ? "new method · " : ""}first on {shortDay(it.first)} · {plural(it.count, "entry", "entries")}</small>
