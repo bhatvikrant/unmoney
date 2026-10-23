@@ -55,7 +55,7 @@ export function CardFace({ kind, name, bankName, last4, color, edit, footer, cla
 }) {
   const field = "min-w-0 bg-transparent [color:inherit] outline-none border-b border-dashed border-[var(--ink-soft)] focus:border-solid focus:border-current placeholder:text-current placeholder:opacity-55 transition-colors";
   return (
-    <div style={surface(color)} className={cn("relative isolate flex aspect-[1.586/1] w-full max-w-[340px] flex-col overflow-hidden rounded-2xl p-5 shadow-lg ring-1 ring-black/10 select-none", edit && "select-auto", className)}>
+    <div style={surface(color)} className={cn("relative isolate flex aspect-[1.586/1] w-full max-w-[340px] flex-col overflow-hidden rounded-2xl p-5 shadow-lg ring-1 ring-foreground/10 select-none", edit && "select-auto", className)}>
       {/* two faint rings, the way many cards are printed */}
       <div aria-hidden className="absolute -right-16 -bottom-20 -z-10 size-56 rounded-full border-[28px] border-white/[0.06]" />
       <div aria-hidden className="absolute -right-4 -bottom-28 -z-10 size-56 rounded-full border-[18px] border-white/[0.05]" />
@@ -101,7 +101,7 @@ export function CardFace({ kind, name, bankName, last4, color, edit, footer, cla
 /** A small card for list rows, in the card's colour. */
 export function CardThumb({ color, className }: { color: string; className?: string }) {
   return (
-    <span aria-hidden style={surface(color)} className={cn("relative inline-block h-[26px] w-10 shrink-0 overflow-hidden rounded-[5px] ring-1 ring-black/10", className)}>
+    <span aria-hidden style={surface(color)} className={cn("relative inline-block h-[26px] w-10 shrink-0 overflow-hidden rounded-[5px] ring-1 ring-foreground/15", className)}>
       <span className="absolute left-1.5 top-[9px] h-[7px] w-[9px] rounded-[2px] bg-gradient-to-br from-amber-200 to-amber-500" />
     </span>
   );
@@ -110,7 +110,7 @@ export function CardThumb({ color, className }: { color: string; className?: str
 /** The colours a card can take, plus any colour from the system picker. */
 export function CardColorPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
   const isPreset = CARD_COLORS.some((c) => c.value === value.toLowerCase());
-  const swatch = "relative size-8 shrink-0 rounded-full ring-1 ring-black/15 transition-transform hover:scale-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+  const swatch = "relative size-8 shrink-0 rounded-full ring-1 ring-foreground/15 transition-transform hover:scale-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
   return (
     <div role="radiogroup" aria-label="Card colour" className="flex flex-wrap items-center justify-center gap-2.5">
       {CARD_COLORS.map((c) => {

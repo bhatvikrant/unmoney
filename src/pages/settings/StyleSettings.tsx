@@ -17,8 +17,9 @@ export default function StyleSettings() {
           <Row label="Mode" right={(id) => <Select value={s.theme} onValueChange={(v) => update({ patch: { theme: v as "system" | "light" | "dark" } })}><SelectTrigger aria-labelledby={id} className="h-8 w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="system">System</SelectItem><SelectItem value="light">Light</SelectItem><SelectItem value="dark">Dark</SelectItem></SelectContent></Select>} />
           <Row label="Accent colour" right={(id) => (
             <div role="radiogroup" aria-labelledby={id} className="flex gap-2">
+              {/* Ink is the theme's own neutral (near-white in dark mode), so its swatch follows the mode; the selected one gets a ring outside it, which shows on any colour. */}
               {Object.entries(ACCENTS).map(([k, a]) => (
-                <button key={k} type="button" role="radio" aria-checked={s.accent === k} aria-label={a.label} title={a.label} onClick={() => update({ patch: { accent: k } })} className={cn("size-7 rounded-full border-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2", s.accent === k ? "border-foreground" : "border-transparent")} style={{ background: a.primary }} />
+                <button key={k} type="button" role="radio" aria-checked={s.accent === k} aria-label={a.label} title={a.label} onClick={() => update({ patch: { accent: k } })} className={cn("size-7 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card", s.accent === k && "ring-2 ring-foreground ring-offset-2 ring-offset-card")} style={{ background: k === "neutral" ? "var(--foreground)" : a.primary }} />
               ))}
             </div>
           )} />
