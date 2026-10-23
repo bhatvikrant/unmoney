@@ -30,7 +30,6 @@ import { BudgetBar } from "@/components/BudgetBars";
 import { RecapNudge } from "@/pages/recap/RecapNudge";
 import { GmailNudge } from "@/pages/transactions/GmailNudge";
 import { QuickAddSheet } from "@/components/tx/QuickAdd";
-import { downloadText, toCSV } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 import { kindLabel } from "../../../shared/defaults";
 
@@ -326,6 +325,7 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
 
   async function exportMonth() {
     try {
+      const { downloadText, toCSV } = await import("@/lib/csv");
       const csv = toCSV(txCsvRows(snap, range.from, range.to));
       downloadText(`UnMoney-${month}.csv`, csv, "text/csv");
     } catch { toast.error("Export failed"); }

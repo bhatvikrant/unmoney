@@ -64,26 +64,33 @@ const defaultMeta = (): Meta => ({ userId: null, user: null, hasSnapshot: false,
 
 export async function readAll(): Promise<{ snapshot: Snapshot | null; meta: Meta; ops: QueuedOp[] }> {
   return withDb(async (d) => {
+    // One transaction with every read in flight at once: the app opens as soon as the slowest
+    // answers, instead of waiting for twenty round trips one after another.
+    const tx = d.transaction(["meta", "tables", "ops"], "readonly");
+    const keys = Object.keys(defaultMeta()) as (keyof Meta)[];
+    const [metaValues, tables, rawOps] = await Promise.all([
+      Promise.all(keys.map((k) => tx.objectStore("meta").get(k))),
+      Promise.all(TABLES.map((t) => tx.objectStore("tables").get(t))),
+      tx.objectStore("ops").getAll(),
+    ]);
     const meta = { ...defaultMeta() };
-    for (const k of Object.keys(meta) as (keyof Meta)[]) {
-      const v = await d.get("meta", k);
-      if (v !== undefined) (meta as Record<string, unknown>)[k] = v;
-    }
+    keys.forEach((k, i) => { if (metaValues[i] !== undefined) (meta as Record<string, unknown>)[k] = metaValues[i]; });
     let snapshot: Snapshot | null = null;
     if (meta.hasSnapshot) {
       snapshot = emptySnapshot();
-      for (const t of TABLES) (snapshot as Record<Table, unknown[]>)[t] = ((await d.get("tables", t)) as unknown[]) ?? [];
+      TABLES.forEach((t, i) => { (snapshot as Record<Table, unknown[]>)[t] = (tables[i] as unknown[]) ?? []; });
     }
-    const ops = ((await d.getAll("ops")) as QueuedOp[]).sort((a, b) => a.seq - b.seq);
+    const ops = (rawOps as QueuedOp[]).sort((a, b) => a.seq - b.seq);
     return { snapshot, meta, ops };
   });
 }
 
-export async function writeSnapshot(snapshot: Snapshot): Promise<void> {
+/** Write these tables (a whole snapshot, or only the ones that changed) and note that a copy exists. */
+export async function writeTables(tables: Partial<Snapshot>): Promise<void> {
   if (memory) return;
   await withDb(async (d) => {
     const tx = d.transaction(["tables", "meta"], "readwrite");
-    for (const t of TABLES) void tx.objectStore("tables").put(snapshot[t], t);
+    for (const [t, docs] of Object.entries(tables)) if (docs) void tx.objectStore("tables").put(docs, t as Table);
     void tx.objectStore("meta").put(true, "hasSnapshot");
     await tx.done;
   });

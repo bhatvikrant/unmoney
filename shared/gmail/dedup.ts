@@ -190,11 +190,17 @@ export function laterMatches(drafts: Doc<"drafts">[], transactions: Doc<"transac
   const waiting = drafts.filter((d) => d.status === "open" && !d.matchedTransactionId && !d.keptNew);
   const out = new Map<Id<"drafts">, Id<"transactions">>();
   if (!waiting.length) return out;
-  const amounts = new Set(waiting.map((d) => d.proposal.amount));
-  const near = transactions.filter((t) => amounts.has(t.amount));
+  // one pass over the entries, bucketed by amount: each draft then looks only at the entries of its own amount
+  const byAmount = new Map<number, Doc<"transactions">[]>();
+  for (const d of waiting) if (!byAmount.has(d.proposal.amount)) byAmount.set(d.proposal.amount, []);
+  for (const t of transactions) byAmount.get(t.amount)?.push(t);
+  // an entry is one payment: once a draft has claimed it, the next draft of the same amount is another payment
+  const taken = new Set<string>(drafts.flatMap((d) => (d.status === "open" && d.matchedTransactionId ? [d.matchedTransactionId as string] : [])));
   for (const d of waiting) {
-    const id = matchEntry(d, near, accounts);
-    if (id) out.set(d._id, id);
+    const id = matchEntry(d, (byAmount.get(d.proposal.amount) ?? []).filter((t) => !taken.has(t._id)), accounts);
+    if (!id) continue;
+    out.set(d._id, id);
+    taken.add(id);
   }
   return out;
 }
