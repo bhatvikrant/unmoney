@@ -6,9 +6,9 @@
  * links catch them, and so do the parts that open their entries in the drawer (a category, a day's
  * bar, a note: see drill.ts). The cards a month and a year share switch their copy on `card.scope`.
  */
-import { Fragment, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { ArrowDown, ArrowUp, Check, ChevronRight, Copy, Share2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, Download, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { useApp } from "@/lib/app";
 import { cn } from "@/lib/utils";
@@ -18,9 +18,11 @@ import { colorAt } from "@/lib/theme";
 import { longMonth } from "@/lib/format";
 import { diffDays, MONTH_LONG, MONTH_SHORT, WEEKDAY_SHORT, parts, weekday, type ISODate } from "../../../shared/dates";
 import { parseMonthKey, type MonthKey, type Range } from "../../../shared/period";
-import { pctChange, recapText, type RecapBudgets, type RecapCard, type RecapDrill, type RecapStrip } from "../../../shared/recap";
+import { pctChange, type RecapBudgets, type RecapCard, type RecapDrill, type RecapStrip } from "../../../shared/recap";
 import type { Tx } from "../../../shared/views";
 import { useDrill } from "./drill";
+import { MARK, posterImage, posterRows, type Poster, type PosterRow } from "./poster";
+import { Logo } from "@/components/shell/Logo";
 
 /** The chart hue each card is tinted with, in the order the cards run. */
 const TINT: Record<RecapCard["kind"], string> = {
@@ -519,67 +521,85 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
   const { fmt } = useApp();
   const s = card.summary;
   const year = card.scope === "year";
-  const [copied, setCopied] = useState(false);
   const name = year ? month : longMonth(month);
   const y = year ? "" : String(parseMonthKey(month).y);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(year ? recapText(s, month, fmt, "year") : recapText(s, `${name} ${y}`, fmt));
-      setCopied(true);
-      toast.success("Summary copied");
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("Couldn't copy. Your browser may not allow it here.");
-    }
-  }
-  // the phone's share sheet (Messages, WhatsApp…) where there is one; Copy stays for the rest
-  const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  const rows = posterRows(s, year, fmt);
+  const meta = year ? `${plural(s.entries, "entry", "entries")} · ${plural(s.days, "day")}` : `${rangeLabel(s.range)} · ${plural(s.entries, "entry", "entries")}`;
+  const file = usePosterFile({
+    title: name, sub: y || undefined, meta, rows, rest: REST,
+    strip: s.strip.map((c, i) => ({ pct: c.pct, color: colorAt(i, s.strip.length + 1) })),
+  }, `unmoney-recap-${month}.png`);
+  // the phone's share sheet takes the image where it can (Messages, WhatsApp, Photos…); everywhere else it is a download
+  const canShare = !!file && typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
   async function share() {
-    try { await navigator.share({ text: year ? recapText(s, month, fmt, "year") : recapText(s, `${name} ${y}`, fmt) }); }
+    if (!file) return;
+    try { await navigator.share({ files: [file], title: `${year ? name : `${name} ${y}`} · UnMoney` }); }
     catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) toast.error("Couldn't share it"); }
   }
-  const change = s.change !== undefined && s.prevLabel ? pctChange(s.change) : undefined;
+  function download() {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
   // on a wide screen the card is 560 px tall, so the poster's rows and title tighten a little to fit without scrolling
-  const row = (label: string, value: ReactNode, key: string) => (
-    <div key={key} className={cn("flex items-baseline justify-between gap-3 border-b py-2 text-sm last:border-b-0", year ? "lg:py-1" : "lg:py-1.5")}>
-      <span className="whitespace-nowrap text-muted-foreground">{label}</span><b className="min-w-0 truncate text-right font-medium">{value}</b>
+  const row = (r: PosterRow) => (
+    <div key={r.key} className={cn("flex items-baseline justify-between gap-3 border-b py-2 text-sm last:border-b-0", year ? "lg:py-1" : "lg:py-1.5")}>
+      <span className="whitespace-nowrap text-muted-foreground">{r.label}</span>
+      <b className={cn("min-w-0 truncate text-right font-medium tabular", r.tone === "income" && "text-income", r.tone === "expense" && "text-expense")}>{r.value}</b>
     </div>
   );
   return (
     <CardFrame kind="closer">
       <Label>Keep this one</Label>
       <Vis>
-        {/* the poster: the thing to keep (and later share as an image), so the actions stay outside it */}
-        <div className="rounded-[14px] border bg-card px-4 pt-4 pb-3 shadow-card lg:pt-3">
-          <div className="mb-3 flex items-start justify-between lg:mb-2">
-            {year
-              ? <div className="text-[40px] font-semibold leading-none tracking-[-0.03em] lg:text-[32px]">{name}</div>
-              : <div className="text-[30px] font-semibold leading-none tracking-[-0.03em] lg:text-[26px]">{name}<br /><span className="font-medium text-muted-foreground">{y}</span></div>}
-            <span className="mt-1 text-xs font-semibold tracking-[-0.01em]">UnMoney</span>
-          </div>
+        {/* the poster: the thing to keep, and what Share and Download send as an image (poster.ts draws the same rows) */}
+        <div className="relative isolate overflow-hidden rounded-[14px] border bg-card px-4 pt-4 pb-3 shadow-card lg:pt-3">
+          {/* the watermark: the mark, large and faint, off the bottom-right corner */}
+          <svg viewBox="128 160 256 192" aria-hidden="true" className="absolute -right-6 -bottom-4 -z-10 w-48 fill-foreground opacity-[0.045]"><path d={MARK} /></svg>
+          {year
+            ? <div className="text-[40px] font-semibold leading-none tracking-[-0.03em] lg:text-[32px]">{name}</div>
+            : <div className="text-[30px] font-semibold leading-none tracking-[-0.03em] lg:text-[26px]">{name}<br /><span className="font-medium text-muted-foreground">{y}</span></div>}
+          <div className="mt-1.5 mb-3 text-xs text-muted-foreground lg:mb-2">{meta}</div>
           <Strip strip={s.strip} className="mb-1.5" />
-          {row("Spent", <Money amount={s.spent} kind="expense" />, "spent")}
-          {change ? row(`vs ${s.prevLabel}`, <span className={change.less ? "text-income" : "text-expense"}>{change.pct === 0 ? "the same" : `${change.less ? "↓" : "↑"} ${change.pct}% ${change.less ? "less" : "more"}`}</span>, "vs") : null}
-          {row("Top category", s.top ? `${s.top.name} · ${pct(s.top.pct)}` : "—", "top")}
-          {row("Biggest spend", s.biggest ? `${s.biggest.note} · ${fmt(s.biggest.amount)}` : "—", "big")}
-          {year ? row("Most logged", s.repeat ? `“${s.repeat.text}” ×${s.repeat.count}` : "—", "repeat") : null}
-          {s.keptPct === undefined ? row("Kept", "no income logged", "kept") : s.keptPct < 0 ? row("Spent", `${100 - s.keptPct}% of income`, "kept") : row("Kept", `${s.keptPct}% of income`, "kept")}
-          {row("No-spend days", s.noSpend, "nospend")}
-          {year ? row("Personality", s.personality ?? "—", "personality") : row("On repeat", s.repeat ? `“${s.repeat.text}” ×${s.repeat.count}` : "—", "repeat")}
-          <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
-            <span>{year ? `${plural(s.entries, "entry", "entries")} · ${plural(s.days, "day")}` : `${rangeLabel(s.range)} · ${plural(s.entries, "entry", "entries")}`}</span>
+          <div>{rows.map(row)}</div>
+          {/* the signature, quiet: no rule above it, at half strength */}
+          <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-60">
+            <Logo size={14} wordmark={false} />
+            <span className="mr-auto font-semibold tracking-[-0.01em] text-foreground">UnMoney</span>
             <span>unmoney.vercel.app</span>
           </div>
         </div>
         <div className="pointer-events-auto mt-3.5 flex gap-2 lg:mt-3">
           <Button size="lg" className="h-10 flex-1 lg:h-9" onClick={() => nav(statsPath(month))}>{year ? `Open ${month} in Stats` : "Open in Stats"}</Button>
           {canShare ? <Button size="lg" variant="outline" className="h-10 flex-1 lg:h-9" onClick={() => void share()}><Share2 />Share</Button> : null}
-          <Button size="lg" variant="outline" className={cn("h-10 lg:h-9", canShare ? "px-3" : "flex-1")} aria-label="Copy summary" title="Copy summary" onClick={copy}>{copied ? <Check /> : <Copy />}{canShare ? null : copied ? "Copied" : "Copy summary"}</Button>
+          <Button size="lg" variant="outline" className={cn("h-10 lg:h-9", canShare ? "px-3" : "flex-1")} aria-label="Download image" title="Download image" disabled={!file} onClick={download}>
+            <Download />{canShare ? null : "Download"}
+          </Button>
         </div>
       </Vis>
       <Foot><span>Every {year ? "year's recap stays on Recaps" : "month's recap stays on Stats"}</span><FootLink onClick={onClose}>Done</FootLink></Foot>
     </CardFrame>
   );
+}
+
+/**
+ * The poster as a PNG file, made once when the card opens: the share sheet on iOS only opens
+ * straight from the tap, so the image has to be ready before it.
+ */
+function usePosterFile(poster: Poster, name: string): File | null {
+  const [file, setFile] = useState<File | null>(null);
+  const key = JSON.stringify(poster);
+  useEffect(() => {
+    let live = true;
+    posterImage(poster).then((b) => { if (live) setFile(new File([b], name, { type: "image/png" })); }).catch(() => undefined);
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, name]);
+  return file;
 }
 
 // ---- the year's own cards (yearly spec §4.2) ----
