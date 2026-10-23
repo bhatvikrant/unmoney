@@ -66,4 +66,17 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  build: {
+    rollupOptions: {
+      output: {
+        // React and Convex only change when they are upgraded: in chunks of their own they stay in the
+        // service worker's cache across deploys, so an update downloads the app's code and little else.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/.test(id)) return "react";
+          if (/[\\/]node_modules[\\/](convex|@convex-dev|@auth)[\\/]/.test(id)) return "convex";
+        },
+      },
+    },
+  },
 });

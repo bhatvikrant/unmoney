@@ -64,7 +64,7 @@ export default function SettingsPage() {
           <InstallRow />
         </Section>
         <Section title="Set up">
-          {link(<Tags />, "Categories", "/settings/categories", { value: `${categories.filter((c) => !c.parentId && !c.archivedAt).length}` })}
+          {link(<Tags />, "Categories", "/settings/categories", { value: `${categories.filter((c) => !c.parentId && !c.archivedAt && !c.deletedAt).length}` })}
           {link(<WalletCards />, "Payment methods", "/settings/payment-methods", { value: `${visibleAccounts.length}`, hint: "Defaults, groups, order, deleted", under: ["/settings/groups", "/settings/transfer-expense", "/settings/deleted-payment-methods", "/payment-methods/order"] })}
           {link(<Coins />, "Currencies", "/settings/currency", { value: s.mainCurrency, under: ["/settings/sub-currencies"] })}
           {link(<Repeat />, "Repeats", "/settings/repeats", { hint: "Rent, salary, subscriptions" })}

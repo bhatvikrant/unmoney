@@ -19,7 +19,11 @@ export function GmailNudge({ from, to }: { from: string; to: string }) {
   // online only: offline the card says what the local copy knows and nothing about the connection
   const status = useQuery(api.gmail.status);
   const here = useMemo(() => draftsRange(view, from, to).length, [view, from, to]);
-  const matched = useMemo(() => draftMatches(view).size, [view]);
+  // only the month shown: a match in some other month is not this screen's business
+  const matched = useMemo(() => {
+    const m = draftMatches(view);
+    return view.drafts.filter((d) => m.has(d._id) && d.proposal.date >= from && d.proposal.date <= to).length;
+  }, [view, from, to]);
   const update = useMutation(api.gmail.updateSettings);
   if (status?.connected && status.status === "reauth") {
     return <Strip warn label="Gmail needs reconnecting" action="Reconnect" onClick={() => nav("/settings/gmail")} />;

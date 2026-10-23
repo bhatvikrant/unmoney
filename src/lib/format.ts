@@ -1,6 +1,6 @@
 import { formatMoney, type CurrencyFormat, type DecimalMark } from "../../shared/money";
 import type { ImportFormat } from "../../shared/ops";
-import { MONTH_SHORT, WEEKDAY_SHORT, diffDays, parts, type ISODate } from "../../shared/dates";
+import { MONTH_LONG, MONTH_SHORT, WEEKDAY_SHORT, diffDays, parts, type ISODate } from "../../shared/dates";
 import { parseMonthKey, type MonthKey } from "../../shared/period";
 
 export { formatMoney };
@@ -26,6 +26,9 @@ export function localNumber(n: number): string {
 export function amountInput(minor: number, decimals: number): string {
   return localNumber(minor / 10 ** decimals);
 }
+
+/** "September", from a month key. */
+export const longMonth = (k: MonthKey) => MONTH_LONG[parseMonthKey(k).m - 1];
 
 export function monthLabel(key: MonthKey): string {
   const { y, m } = parseMonthKey(key);
