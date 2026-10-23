@@ -41,6 +41,12 @@ export default function SettingsPage() {
     const active = [to, ...(opts.under ?? [])].some((p) => pathname === p || pathname.startsWith(`${p}/`));
     return <Row icon={icon} label={label} value={opts.value} hint={opts.hint} active={active} onClick={() => nav(to)} right={<ChevronRight className="size-4 text-muted-foreground" />} />;
   };
+  // nothing until the server has answered (offline, it never does), rather than a wrong "Off"
+  const gmailValue = gmail === undefined ? undefined
+    : !gmail?.connected ? "Off"
+    : gmail.status === "reauth" ? "Reconnect"
+    : gmail.status === "paused" ? "Paused"
+    : gmail.open ? `${gmail.open} to review` : "On";
   return (
     <>
       <PageHeader title="More" />
@@ -80,7 +86,7 @@ export default function SettingsPage() {
           {link(<HardDriveDownload />, "Backup & export", "/settings/backup")}
           {link(<FileInput />, "Import", "/import", { hint: "Money Manager or a bank statement" })}
           {/* with drafts waiting, the row goes straight to them; their page links to the settings */}
-          {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && gmail.open ? "/gmail" : "/settings/gmail", { value: gmail === undefined ? undefined : gmail?.connected ? gmail.status === "reauth" ? "Reconnect" : gmail.open ? `${gmail.open} to review` : "On" : "Off", hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
+          {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && gmail.open ? "/gmail" : "/settings/gmail", { value: gmailValue, hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
         </Section>
         <Section>
           <DeleteAccountRow />

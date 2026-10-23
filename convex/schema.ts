@@ -337,6 +337,8 @@ export default defineSchema({
     iv: v.string(),
     /** The last check covered mail received up to this instant; the next one starts the look-back before it (shared/gmail/query.ts windowStart). Unset until the first check. */
     syncedUpTo: v.optional(v.number()),
+    /** A check is running since this instant (gmail.ts syncUser claims it, the check's write or failure clears it): one check at a time. */
+    syncingSince: v.optional(v.number()),
     lastSyncAt: v.optional(v.number()),
     lastError: v.optional(v.string()),
     status: v.union(v.literal("ok"), v.literal("reauth"), v.literal("paused")),
