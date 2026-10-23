@@ -1,0 +1,16 @@
+{
+  "triage": "keep",
+  "parsed": {
+    "rule": "icici",
+    "type": "debit",
+    "amount": 940000,
+    "currency": "INR",
+    "date": "2026-10-01",
+    "dateSource": "mail",
+    "time": "14:08",
+    "last4": "5816",
+    "bankName": "ICICI",
+    "channel": "netbanking",
+    "merchantRaw": "Rahul Sharma"
+  }
+}
