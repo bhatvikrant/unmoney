@@ -1,0 +1,25 @@
+From: slice <noreply@slice.bank.in>
+Subject: Your IMPS transaction is successful!
+Received: 2026-10-13T09:00:00Z
+
+Hi Rahul,
+
+IMPS transaction of ₹1,‌00,‌000 from your slice bank a/c xx9901 is successful!
+
+Transaction Date
+13-Oct-26
+
+Beneficiary Name
+RAHUL SHARMA
+
+Beneficiary Acc No.
+xx4190
+
+Beneficiary Bank
+Axis Bank Ltd.
+
+IMPS Ref No.
+628606858699
+
+Reach out to our customer support team at
+08048329999

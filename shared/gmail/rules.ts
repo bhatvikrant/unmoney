@@ -184,6 +184,8 @@ const BANKS: Bank[] = [
 const COMMON: RegExp[] = [
   /\bInfo(?:rmation)?\s*[:-]\s*(?<m>.+?)(?=\.\s|\s+(?:Avl|Available|Avail|Bal|Balance|If|Please|Not you|Call|Regards|Thank)\b|$)/i,
   /\b(?:to|by|from) VPA\s+(?<vpa>[a-z0-9.\-_]+@[a-z]+)\b/i,
+  // a laid-out alert: "Beneficiary Name VIKRANT BHAT Beneficiary Acc No. xx4190", "Sender Name MR X NEFT Ref No. …"
+  /\b(?:Beneficiary|Sender|Payee|Remitter|Merchant) Name\s*:?\s*(?<m>[A-Za-z][A-Za-z .'&-]{1,60}?)(?=\s+(?:Beneficiary|Sender|Payee|Remitter|NEFT|IMPS|RTGS|UPI|Ref|Transaction|Amount|Date|Bank|Account|Acc|Reach|Mode)\b|\s*$)/i,
   /\b(?:towards|by|via|Ref(?:erence)?\s*(?:No\.?)?\s*[:-]?)\s*(?<m>(?:UPI|IMPS|NEFT|RTGS)\/(?:[^.]|\.(?=\S)){2,80})/i,
   /\b(?:to|from)\s+(?<vpa>[a-z0-9.\-_]+@[a-z]+)\b(?!\.[a-z])/i,
   /\btowards\s+(?!your\b)(?<m>.+?)(?:\s+on\b|\.\s|$)/i,
@@ -213,10 +215,11 @@ const ALL_BANKS: Bank[] = [...BANKS, ...COMMON_BANKS.map(([name, rule, domains])
 
 /** Only banks RBI regulates get a .bank.in domain, so mail from one no bank above knows is still a bank's alert. */
 const BANK_IN = "bank.in";
-function anyBank(mail: Mail, text: string): Bank {
-  // "alerts@southindianbank.bank.in": the label before .bank.in, when the mail names no bank we know
+function anyBank(mail: Mail): Bank {
+  // the sender's name or the subject, never the body: that names the other side's bank too ("Beneficiary Bank Axis Bank Ltd.");
+  // else the label before .bank.in ("alerts@kvb.bank.in")
   const label = senderDomain(mail.from).slice(0, -BANK_IN.length).replace(/\.$/, "").split(".").pop() || "Bank";
-  const name = findBankName(`${mail.subject} ${text}`) ?? (label.length <= 4 ? label.toUpperCase() : label[0].toUpperCase() + label.slice(1));
+  const name = findBankName(`${mail.from.replace(/<[^>]*>/, "")} ${mail.subject}`) ?? (label.length <= 4 ? label.toUpperCase() : label[0].toUpperCase() + label.slice(1));
   return { name, rule: "bank", domains: [BANK_IN], merchant: COMMON };
 }
 
@@ -403,6 +406,6 @@ export function parseMail(mail: Mail, opts: { timeZone?: string } = {}): Parsed 
   if (app) return upiApp(mail, text, app, opts.timeZone);
   const bank = ALL_BANKS.find((b) => inDomains(domain, b.domains));
   if (bank) return bankAlert(mail, text, bank, opts.timeZone);
-  if (inDomains(domain, [BANK_IN])) return bankAlert(mail, text, anyBank(mail, text), opts.timeZone);
+  if (inDomains(domain, [BANK_IN])) return bankAlert(mail, text, anyBank(mail), opts.timeZone);
   return null;
 }
