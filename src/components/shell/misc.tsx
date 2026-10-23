@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Info, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -91,7 +91,9 @@ export function SegmentedTabs<T extends string>({ value, onChange, items, classN
 }
 
 export function Row({ label, value, onClick, right, className, hint, info, active, icon, iconClassName }: {
-  label: ReactNode; value?: ReactNode; onClick?: () => void; right?: ReactNode; className?: string; hint?: ReactNode;
+  label: ReactNode; value?: ReactNode; onClick?: () => void; className?: string; hint?: ReactNode;
+  /** What sits at the right; as a function it gets the label's id, so a switch or select there can say `aria-labelledby={id}`. */
+  right?: ReactNode | ((labelId: string) => ReactNode);
   /** Leading icon in a small tinted square, for rows in a menu of pages. */
   icon?: ReactNode;
   /** Overrides the icon square's colours (a filled square for a row that stands apart). */
@@ -101,18 +103,19 @@ export function Row({ label, value, onClick, right, className, hint, info, activ
   /** Longer explanation shown behind an (i) icon next to the label. */
   info?: ReactNode;
 }) {
+  const labelId = useId();
   const inner = (
     <>
       {icon ? <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-foreground [&_svg]:size-4", iconClassName)}>{icon}</span> : null}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-sm">
-          <span className="min-w-0">{label}</span>
+          <span id={labelId} className="min-w-0">{label}</span>
           {info ? <InfoHint text={info} /> : null}
         </div>
         {hint ? <div className="text-xs text-muted-foreground">{hint}</div> : null}
       </div>
       {value !== undefined ? <div className="text-sm text-muted-foreground truncate max-w-[55%]">{value}</div> : null}
-      {right}
+      {typeof right === "function" ? right(labelId) : right}
     </>
   );
   const cls = cn("flex items-center gap-3 px-4 py-3 border-b last:border-b-0 w-full text-left", onClick && "hover:bg-accent/50 active:bg-accent", active && "bg-accent", className);

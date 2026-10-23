@@ -13,7 +13,8 @@ import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SegmentedTabs } from "@/components/shell/misc";
 import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Button } from "@/components/ui/button";
-import { useConfirm } from "@/components/ConfirmDialog";
+import { useConfirm, type ConfirmOptions } from "@/components/ConfirmDialog";
+import { offerUndo } from "@/lib/undo";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -56,11 +57,19 @@ export default function CategoriesSettings() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
   }
   const swipe = useSwipedRow();
+  const restore = useOp("categories.restore");
+  // Delete offers Archive as the gentler way out, and can be taken back from its toast for a moment
   const del = async (id: Id<"categories">, name: string) => {
     try {
-      if (!(await confirm({ title: `Delete "${name}"?`, description: "Existing entries keep it as a deleted category." }))) return;
+      const opts: ConfirmOptions = { title: `Delete "${name}"?`, description: "Existing entries keep it as a deleted category." };
+      const archived = !!categories.find((c) => c._id === id)?.archivedAt;
+      const choice = archived ? await confirm(opts) : await confirm({ ...opts, alternative: "Archive instead" });
+      if (!choice) return;
+      if (choice === "alternative") { await archive(id, true); return; }
       await remove({ id });
-    } finally { swipe.close(); }
+      offerUndo(`Deleted "${name}"`, () => restore({ id }));
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
+    finally { swipe.close(); }
   };
   return (
     <>

@@ -89,6 +89,8 @@ export type RecapStrip = { id: string; name: string; pct: number }[];
 /** The six tiles of the closer card and the lines of the text summary. */
 export type RecapSummary = {
   range: Range;
+  /** Days tracked: from the ledger's first entry when it falls inside the range, else the whole range. */
+  days: number;
   entries: number;
   strip: RecapStrip;
   spent: number;
@@ -111,7 +113,8 @@ export type MonthCard =
   | { kind: "cover"; scope?: RecapScope; range: Range; entries: number; days: number; count: number; strip: RecapStrip }
   | { kind: "total"; scope?: RecapScope; amount: number; prev?: number; change?: number; prevLabel?: string; perDay: number; perMonth?: number }
   | { kind: "categories"; scope?: RecapScope; total: number; top: { id: string; name: string; amount: number; pct: number }[]; rest: { count: number; amount: number; pct: number }; lead: { count: number; avg: number } }
-  | { kind: "biggest"; scope?: RecapScope; tx: Tx; share: number; runnersUp: { note: string; amount: number; tx: Tx }[]; topShare: number }
+  /** `amount` is what the entry counted as spending (a transfer's amount plus its fee), which can differ from `tx.amount`. */
+  | { kind: "biggest"; scope?: RecapScope; tx: Tx; amount: number; share: number; runnersUp: { note: string; amount: number; tx: Tx }[]; topShare: number }
   | { kind: "days"; perDay: { date: ISODate; amount: number; count: number }[]; busiest: ISODate; busiestNotes: string[]; noSpend: number; weekendShare: number; entriesPerDay: number }
   | { kind: "repeat"; note?: { text: string; count: number; amount: number }; nextNotes: { text: string; count: number }[]; account?: { name: string; share: number }; scheduled?: { amount: number; count: number } }
   | { kind: "changes"; scope?: RecapScope; prevLabel: string; movers: { id: string; name: string; before: number; after: number; pct?: number }[]; threshold: number }
@@ -167,6 +170,31 @@ function budgetsOf(snap: Snapshot, month: MonthKey): RecapBudgets | undefined {
 
 type Entry = ReturnType<typeof statsEntries>[number];
 
+/**
+ * The first day of `range` the ledger covers: its start, or the date of the ledger's very first
+ * entry when that falls inside it (a sign-up or an import part-way through the month or year).
+ * Averages and no-spend days run from here, not over days before there was anything to record.
+ */
+function trackedFrom(snap: Snapshot, range: Range): ISODate {
+  let first = range.to;
+  for (const t of snap.transactions) if (t.date < first) first = t.date;
+  return first > range.from ? first : range.from;
+}
+
+/**
+ * Entries as the ledger has them, largest first. Stats splits a transfer with a fee into two
+ * buckets; for ranking single spends the parts of one entry are added back together (the first
+ * bucket, the transfer's, keeps the label).
+ */
+function rankedByTx(entries: Entry[]): Entry[] {
+  const byId = new Map<string, Entry>();
+  for (const e of entries) {
+    const m = byId.get(e.t._id);
+    if (m) m.amount += e.amount; else byId.set(e.t._id, { ...e });
+  }
+  return [...byId.values()].sort((a, b) => b.amount - a.amount || a.t.date.localeCompare(b.t.date));
+}
+
 /** Notes grouped case-insensitively and trimmed, most frequent first (then by amount); empty notes skipped. */
 function notesByCount(entries: Entry[]): { text: string; count: number; amount: number }[] {
   const notes = new Map<string, { text: string; count: number; amount: number }>();
@@ -191,7 +219,8 @@ export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
   if (entries.length < RECAP_MIN_ENTRIES) return null;
   const byCat = statsByCategory(snap, range.from, range.to, "expense");
   const total = byCat.total;
-  const days = diffDays(range.from, range.to) + 1;
+  const from = trackedFrom(snap, range);
+  const days = diffDays(from, range.to) + 1;
 
   const prevKey = shiftMonthKey(month, -1);
   const prevRange = monthRange(prevKey, settings.monthStartDay);
@@ -223,12 +252,12 @@ export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
   }
 
   // 4 · biggest single spend (an empty note falls back to the category, as the ledger does)
-  const ranked = [...entries].sort((a, b) => b.amount - a.amount || a.t.date.localeCompare(b.t.date));
+  const ranked = rankedByTx(entries);
   const label = (e: (typeof entries)[number]) => e.t.note.trim() || (nameOf.get(e.bucket) ?? "Uncategorised");
   const biggest = ranked[0];
   const topThree = ranked.slice(0, 3);
   cards.push({
-    kind: "biggest", tx: biggest.t, share: total ? biggest.amount / total : 0,
+    kind: "biggest", tx: biggest.t, amount: biggest.amount, share: total ? biggest.amount / total : 0,
     runnersUp: ranked.slice(1, 3).map((e) => ({ note: label(e), amount: e.amount, tx: e.t })),
     topShare: total ? topThree.reduce((s, e) => s + e.amount, 0) / total : 0,
   });
@@ -248,9 +277,9 @@ export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
   }
   let busiest = perDay[0];
   for (const d of perDay) if (d.amount > busiest.amount) busiest = d;
-  const noSpend = perDay.filter((d) => d.amount === 0).length;
+  const noSpend = perDay.filter((d) => d.date >= from && d.amount === 0).length;
   // the two largest entries of the busiest day, by note, for "the flight and dinner out"
-  const busiestNotes = entries.filter((e) => e.t.date === busiest.date).sort((a, b) => b.amount - a.amount).slice(0, 2).map(label);
+  const busiestNotes = ranked.filter((e) => e.t.date === busiest.date).slice(0, 2).map(label);
   cards.push({ kind: "days", perDay, busiest: busiest.date, busiestNotes, noSpend, weekendShare: total ? weekendAmount / total : 0, entriesPerDay: entries.length / days });
 
   // 6 · on repeat
@@ -304,7 +333,7 @@ export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
 
   // 9 · closer
   const summary: RecapSummary = {
-    range, entries: entries.length, strip,
+    range, days, entries: entries.length, strip,
     spent: total, change, prevLabel: prevCat ? prevLabel : undefined,
     top: byCat.items[0] ? { name: byCat.items[0].name, pct: byCat.items[0].pct } : undefined,
     biggest: { note: label(biggest), amount: biggest.amount },
@@ -380,7 +409,10 @@ export function yearRecap(snap: Snapshot, year: number): Recap | null {
   if (perMonth.filter((m) => m.count >= RECAP_MIN_ENTRIES).length < RECAP_YEAR_MIN_MONTHS) return null;
   const byCat = statsByCategory(snap, range.from, range.to, "expense");
   const total = byCat.total;
-  const days = diffDays(range.from, range.to) + 1;
+  // a year the ledger joined part-way (an import that starts in October) is averaged over the months and days tracked
+  const from = trackedFrom(snap, range);
+  const days = diffDays(from, range.to) + 1;
+  const monthsTracked = 12 - (monthIndex.get(monthKeyForDate(from, msd)) ?? 0);
   const nameOf = new Map(byCat.items.map((i) => [i.id, i.name]));
   const label = (e: Entry) => e.t.note.trim() || (nameOf.get(e.bucket) ?? "Uncategorised");
 
@@ -396,7 +428,7 @@ export function yearRecap(snap: Snapshot, year: number): Recap | null {
 
   // 2 · total spent
   const change = prevCat && prevCat.total > 0 ? (total - prevCat.total) / prevCat.total : undefined;
-  cards.push({ kind: "total", scope: "year", amount: total, prev: prevCat?.total, change, prevLabel: prevCat ? prevLabel : undefined, perDay: Math.round(total / days), perMonth: Math.round(total / 12) });
+  cards.push({ kind: "total", scope: "year", amount: total, prev: prevCat?.total, change, prevLabel: prevCat ? prevLabel : undefined, perDay: Math.round(total / days), perMonth: Math.round(total / monthsTracked) });
 
   // 3 · month by month: the months with entries, against their own average
   const active = perMonth.filter((m) => m.count > 0);
@@ -434,12 +466,12 @@ export function yearRecap(snap: Snapshot, year: number): Recap | null {
   }
 
   // 6 · biggest single spend, with the ten largest in the footnote
-  const ranked = [...entries].sort((a, b) => b.amount - a.amount || a.t.date.localeCompare(b.t.date));
+  const ranked = rankedByTx(entries);
   const biggest = ranked[0];
   const topTen = ranked.slice(0, PERSONALITY.bigDayCount);
   const bigDayShare = total ? topTen.reduce((s, e) => s + e.amount, 0) / total : 0;
   cards.push({
-    kind: "biggest", scope: "year", tx: biggest.t, share: total ? biggest.amount / total : 0,
+    kind: "biggest", scope: "year", tx: biggest.t, amount: biggest.amount, share: total ? biggest.amount / total : 0,
     runnersUp: ranked.slice(1, 3).map((e) => ({ note: label(e), amount: e.amount, tx: e.t })),
     topShare: bigDayShare,
   });
@@ -458,12 +490,12 @@ export function yearRecap(snap: Snapshot, year: number): Recap | null {
   }
   let busiest = perDay[0];
   for (const d of perDay) if (d.amount > busiest.amount) busiest = d;
-  const noSpend = perDay.filter((d) => d.amount === 0).length;
+  const noSpend = perDay.filter((d) => d.date >= from && d.amount === 0).length;
   let streak = 0, run = 0;
   for (const d of perDay) { run = d.count ? run + 1 : 0; if (run > streak) streak = run; }
   const spendWeekday = byWeekday.indexOf(Math.max(...byWeekday));
   const weekendShare = total ? (byWeekday[0] + byWeekday[6]) / total : 0;
-  const busiestNotes = entries.filter((e) => e.t.date === busiest.date).sort((a, b) => b.amount - a.amount).slice(0, 2).map(label);
+  const busiestNotes = ranked.filter((e) => e.t.date === busiest.date).slice(0, 2).map(label);
   cards.push({
     kind: "calendar", perDay,
     rows: months.map((month) => { const r = monthRange(month, msd); return { month, from: r.from, days: diffDays(r.from, r.to) + 1 }; }),
@@ -607,7 +639,7 @@ export function yearRecap(snap: Snapshot, year: number): Recap | null {
 
   // 14 · closer
   const summary: RecapSummary = {
-    range, entries: entries.length, strip,
+    range, days, entries: entries.length, strip,
     spent: total, change, prevLabel: prevCat ? prevLabel : undefined,
     top: byCat.items[0] ? { name: byCat.items[0].name, pct: byCat.items[0].pct } : undefined,
     biggest: { note: label(biggest), amount: biggest.amount },
@@ -676,7 +708,8 @@ export function recapText(s: RecapSummary, label: string, fmt: (minor: number) =
   }
   const top = s.top ? `Top: ${s.top.name} ${Math.round(s.top.pct * 100)}%` : "";
   const biggest = s.biggest ? `Biggest: ${s.biggest.note} ${fmt(s.biggest.amount)}` : "";
-  const kept = s.keptPct !== undefined ? `Kept ${s.keptPct}% of income` : "";
+  // more out than in reads as "Spent 120% of income", never as a negative share kept
+  const kept = s.keptPct === undefined ? "" : s.keptPct < 0 ? `Spent ${100 - s.keptPct}% of income` : `Kept ${s.keptPct}% of income`;
   const noSpend = `${s.noSpend} no-spend ${s.noSpend === 1 ? "day" : "days"}`;
   if (scope === "year") {
     const line3 = [top, biggest, s.repeat ? `Most logged: "${s.repeat.text}" ×${s.repeat.count}` : ""].filter(Boolean).join(" · ");

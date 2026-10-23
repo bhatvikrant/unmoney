@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import type { Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "./ops";
 import { statsByCategory } from "./views";
+import { diffDays } from "./dates";
 import { monthRange, yearRange } from "./period";
 import {
   monthRecap, recapIndex, recapNudge, recapText, yearQualifies, yearRecap, yearRecapNudge,
@@ -178,6 +179,47 @@ test("biggest spend, days and the closer come from the same entries", () => {
   expect(closer.keptPct).toBeUndefined();
 });
 
+test("biggest single spend ranks a transfer with a fee as one entry, by what it counted", () => {
+  const f = fresh();
+  september(f);
+  for (const m of ["07", "08"]) for (let d = 1; d <= 5; d++) f.expense(`2026-${m}-0${d}`, 100, "Food", `n${d}`);
+  let s = run(f.snap, "accounts.update", { ...f.bank, id: f.bank._id, transferAsExpense: true });
+  // 190,000 moved plus a 2,000 fee: two Stats buckets (the transfer, then Fees) but one entry of 192,000, more than the flight and its day
+  s = run(s, "transactions.create", { type: "transfer", accountId: f.cash._id, toAccountId: f.bank._id, amount: 190000, feeAmount: 2000, note: "To savings", tags: [], photoIds: [], date: "2026-09-15" });
+  const r = monthRecap(s, "2026-09")!;
+  const total = 269100 + 192000;
+  expect(card(r.cards, "total")!.amount).toBe(total);
+  const big = card(r.cards, "biggest")!;
+  expect(big.tx.note).toBe("To savings");
+  expect(big.tx.amount).toBe(190000);
+  expect(big.amount).toBe(192000);
+  expect(big.share).toBeCloseTo(192000 / total);
+  expect(big.runnersUp.map((x) => [x.note, x.amount])).toEqual([["Flight to Goa", 184000], ["Rent", 62000]]);
+  expect(big.topShare).toBeCloseTo((192000 + 184000 + 62000) / total);
+  // the closer shows the same figure, and the busiest day names the entry once
+  expect(card(r.cards, "closer")!.summary.biggest).toEqual({ note: "To savings", amount: 192000 });
+  expect(card(r.cards, "days")!).toMatchObject({ busiest: "2026-09-15", busiestNotes: ["To savings"] });
+  const y = card(yearRecap(s, 2026)!.cards, "biggest")!;
+  expect([y.tx.note, y.amount]).toEqual(["To savings", 192000]);
+});
+
+test("a month the ledger joined part-way counts its days from the first entry", () => {
+  const f = fresh();
+  for (let d = 20; d <= 24; d++) f.expense(`2026-09-${d}`, 1000, "Food", `n${d}`);
+  const r = monthRecap(f.snap, "2026-09")!;
+  expect(card(r.cards, "cover")!.days).toBe(11);
+  expect(card(r.cards, "total")!.perDay).toBe(Math.round(5000 / 11));
+  const days = card(r.cards, "days")!;
+  expect(days.perDay).toHaveLength(30);
+  expect(days.noSpend).toBe(11 - 5);
+  expect(days.entriesPerDay).toBeCloseTo(5 / 11);
+  expect(card(r.cards, "closer")!.summary).toMatchObject({ days: 11, noSpend: 6 });
+  // with an entry the month before, the ledger was already running: the whole month counts
+  f.expense("2026-08-30", 100, "Food", "old");
+  expect(card(monthRecap(f.snap, "2026-09")!.cards, "cover")!.days).toBe(30);
+  expect(card(monthRecap(f.snap, "2026-09")!.cards, "days")!.noSpend).toBe(25);
+});
+
 test("budgets ride on the in-vs-out card, or get a card of their own without income", () => {
   const f = fresh();
   september(f);
@@ -249,11 +291,13 @@ test("recapNudge with monthStartDay 25 counts the week from the 25th", () => {
 test("recapText writes the three-line summary", () => {
   const fmt = (n: number) => `₹${(n / 100).toLocaleString("en-IN")}`;
   expect(recapText({
-    range: { from: "2026-09-01", to: "2026-09-30" }, entries: 148, strip: [],
+    range: { from: "2026-09-01", to: "2026-09-30" }, days: 30, entries: 148, strip: [],
     spent: 8431000, change: -0.08, prevLabel: "August", top: { name: "Food", pct: 0.31 }, biggest: { note: "Flight to Goa", amount: 1840000 },
     keptPct: 30, noSpend: 5, repeat: { text: "Coffee", count: 22 },
   }, "September 2026", fmt)).toBe("September 2026 · UnMoney\nSpent ₹84,310 (8% less than Aug) · Top: Food 31% · Biggest: Flight to Goa ₹18,400\nKept 30% of income · 5 no-spend days · \"Coffee\" ×22");
-  expect(recapText({ range: { from: "2026-05-01", to: "2026-05-31" }, entries: 5, strip: [], spent: 100, noSpend: 1 }, "May 2026", fmt)).toBe("May 2026 · UnMoney\nSpent ₹1\n1 no-spend day");
+  expect(recapText({ range: { from: "2026-05-01", to: "2026-05-31" }, days: 31, entries: 5, strip: [], spent: 100, noSpend: 1 }, "May 2026", fmt)).toBe("May 2026 · UnMoney\nSpent ₹1\n1 no-spend day");
+  // more out than in: never a negative share kept
+  expect(recapText({ range: { from: "2026-05-01", to: "2026-05-31" }, days: 31, entries: 5, strip: [], spent: 120, keptPct: -20, noSpend: 1 }, "May 2026", fmt)).toBe("May 2026 · UnMoney\nSpent ₹1.2\nSpent 120% of income · 1 no-spend day");
 });
 
 test("recapIndex lists every month with expenses, newest first, with the current month on top", () => {
@@ -339,6 +383,27 @@ test("the year total equals statsByCategory over yearRange, and the cards run in
   const closer = yearCard(r.cards, "closer").summary;
   expect(closer).toMatchObject({ spent: stats.total, prevLabel: "2025", biggest: { note: "Flights to Lisbon", amount: 80000 }, repeat: { text: "Coffee", count: 14 * 12 } });
   expect(closer.personality).toBeDefined();
+});
+
+test("a year the ledger joined part-way averages over the months and days tracked, from its first entry", () => {
+  const f = fresh();
+  // the first entry ever is on 14 October: three qualifying months and 79 days to the end of the year
+  for (const m of ["10", "11", "12"]) for (let d = 14; d <= 18; d++) f.expense(`2026-${m}-${d}`, 1000, "Food", `n${d}`);
+  const r = yearRecap(f.snap, 2026)!;
+  const days = diffDays("2026-10-14", "2026-12-31") + 1;
+  expect(days).toBe(79);
+  expect(yearCard(r.cards, "cover").days).toBe(days);
+  expect(yearCard(r.cards, "total")).toMatchObject({ perMonth: Math.round(15000 / 3), perDay: Math.round(15000 / days) });
+  const cal = yearCard(r.cards, "calendar");
+  expect(cal.perDay).toHaveLength(365); // the grid still draws the whole year
+  expect(cal.noSpend).toBe(days - 15);
+  expect(yearCard(r.cards, "closer").summary).toMatchObject({ days, noSpend: days - 15 });
+  // an entry before the year means the ledger was already running: the whole year counts
+  f.expense("2025-12-30", 100, "Food", "old");
+  const whole = yearRecap(f.snap, 2026)!;
+  expect(yearCard(whole.cards, "cover").days).toBe(365);
+  expect(yearCard(whole.cards, "total")).toMatchObject({ perMonth: Math.round(15000 / 12), perDay: Math.round(15000 / 365) });
+  expect(yearCard(whole.cards, "calendar").noSpend).toBe(365 - 15);
 });
 
 test("a year needs RECAP_YEAR_MIN_MONTHS qualifying months", () => {
@@ -543,7 +608,7 @@ test("recapIndex puts a year row before each finished year's months", () => {
 test("recapText writes the four-line year summary", () => {
   const fmt = (n: number) => `₹${(n / 100).toLocaleString("en-IN")}`;
   expect(recapText({
-    range: { from: "2026-01-01", to: "2026-12-31" }, entries: 1842, strip: [],
+    range: { from: "2026-01-01", to: "2026-12-31" }, days: 365, entries: 1842, strip: [],
     spent: 98431000, change: 0.06, prevLabel: "2025", top: { name: "Food", pct: 0.27 }, biggest: { note: "Flights to Lisbon", amount: 4800000 },
     keptPct: 34, noSpend: 58, repeat: { text: "Coffee", count: 226 }, personality: "The Planner",
   }, "2026", fmt, "year")).toBe("2026 · UnMoney\nSpent ₹9,84,310 (6% more than 2025)\nTop: Food 27% · Biggest: Flights to Lisbon ₹48,000 · Most logged: \"Coffee\" ×226\nKept 34% of income · 58 no-spend days · The Planner");

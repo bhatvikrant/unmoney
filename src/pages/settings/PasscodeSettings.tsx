@@ -47,9 +47,9 @@ export default function PasscodeSettings() {
         ) : (
           <>
             <Section>
-              <Row label="Passcode lock" hint="Asks for a 4-digit code when the app opens" right={s.passcodeHash ? <Button variant="outline" size="sm" onClick={() => setStage({ verify: "off" })}>Turn off</Button> : <Button size="sm" onClick={() => setStage("enter")}>Turn on</Button>} />
+              <Row label="Passcode lock" hint="Asks for a 4-digit code when the app opens" right={s.passcodeHash ? <Button variant="outline" size="sm" aria-label="Turn the passcode lock off" onClick={() => setStage({ verify: "off" })}>Turn off</Button> : <Button size="sm" aria-label="Turn the passcode lock on" onClick={() => setStage("enter")}>Turn on</Button>} />
               {s.passcodeHash ? <Row label="Change passcode" onClick={() => setStage({ verify: "change" })} /> : null}
-              <Row label="Require again after" right={<Select value={s.lockAfter} onValueChange={(v) => update({ patch: { lockAfter: v as "always" | "5m" | "1h" } })}><SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="always">Every open</SelectItem><SelectItem value="5m">5 minutes</SelectItem><SelectItem value="1h">1 hour</SelectItem></SelectContent></Select>} />
+              <Row label="Require again after" right={(id) => <Select value={s.lockAfter} onValueChange={(v) => update({ patch: { lockAfter: v as "always" | "5m" | "1h" } })}><SelectTrigger aria-labelledby={id} className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="always">Every open</SelectItem><SelectItem value="5m">5 minutes</SelectItem><SelectItem value="1h">1 hour</SelectItem></SelectContent></Select>} />
             </Section>
             <p className="px-4 py-3 text-xs text-muted-foreground">The passcode is a screen lock on top of your sign-in. It applies on every device you are signed in on. If you forget it, tap "Forgot it?" on the lock screen and sign in with Google again to remove it.</p>
           </>
