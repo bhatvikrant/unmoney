@@ -73,7 +73,7 @@ Chrome:
 - **×** top right closes: back to where it was opened from, falling back to `/stats?month=<key>` (`useGoBack`).
 - **Navigation:** tap the right 65% of the card for next, left 35% for back; horizontal swipe; `←` `→`; `Esc` closes. The last card's "Done" closes too.
 - **Pull down to close** (phone, touch only): the story follows the finger down, shrinking to 82% with rounded corners over a darkening backdrop; past 140 px or on a flick it slides away and closes, otherwise it springs back. A drag that starts sideways is a swipe instead, and a pull never counts as a tap.
-- **Hints:** a pulsing white dot sits on one tappable part of each card (the top category, the busiest day's bar, the top note…) until the user first opens a drawer; then they are gone on that device.
+- **Hints:** a pulsing white dot sits on one tappable part of each card (the top category, the busiest day's bar, the top note…) each time a recap opens. Opening a drawer turns them off for the rest of that recap (Back from an entry opened in a drawer counts as the same viewing); the next recap, or the same one opened again, shows them again.
 - **Transitions:** a 220 ms fade with a 16 px slide, via Framer Motion's `AnimatePresence`, off under `prefers-reduced-motion`.
 - **Autoplay:** each card moves on by itself after 5 s; the last card waits for Done. Holding the card down (finger or mouse) pauses it, and letting go carries on from where it was; a release after a hold of 300 ms or more does not count as a tap. It also waits while a drawer is open (§4.4), while the tab is in the background, and while paused with the button.
 
