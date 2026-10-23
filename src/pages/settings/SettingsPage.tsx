@@ -31,7 +31,11 @@ export default function SettingsPage() {
   const { signOut } = useAuthActions();
   const confirm = useConfirm();
   async function onSignOut() {
-    if (status.pending > 0 && !(await confirm({ title: "Sign out anyway?", description: `${status.pending} change${status.pending === 1 ? " has" : "s have"} not reached the server yet and will be lost if you sign out now.`, action: "Sign out" }))) return;
+    // unsynced changes are lost on sign out, so that case reads as the destructive one
+    const ok = await confirm(status.pending > 0
+      ? { title: "Sign out anyway?", description: `${status.pending} change${status.pending === 1 ? " has" : "s have"} not reached the server yet and will be lost if you sign out now.`, action: "Sign out" }
+      : { title: "Sign out?", description: `Your entries stay safe on the server. This device forgets them until you sign in${user?.email ? ` as ${user.email}` : ""} again.`, action: "Sign out", destructive: false });
+    if (!ok) return;
     clearUnlock();
     await clearLocal();
     await signOut();
@@ -59,7 +63,6 @@ export default function SettingsPage() {
               {user?.name && user.email ? <div className="truncate text-xs text-muted-foreground">{user.email}</div> : null}
               <SyncBadge className="mt-1" />
             </div>
-            <Button variant="outline" size="sm" onClick={onSignOut}>Sign out</Button>
           </div>
           <InstallRow />
         </Section>
@@ -88,11 +91,13 @@ export default function SettingsPage() {
           {/* with drafts waiting, the row goes straight to them; their page links to the settings */}
           {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && gmail.open ? "/gmail" : "/settings/gmail", { value: gmailValue, hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
         </Section>
-        <Section>
+        <Section title="Account">
+          <Row label="Sign out" hint="Your entries stay on the server" right={<Button variant="outline" size="sm" onClick={() => void onSignOut()}>Sign out</Button>} />
           <DeleteAccountRow />
         </Section>
-        <p className="px-4 pt-6 text-xs text-muted-foreground">
-          UnMoney · works offline and syncs across your devices · <Link to="/privacy" className="underline underline-offset-2 hover:text-foreground">Privacy policy</Link>
+        <p className="px-4 pt-6 text-xs text-muted-foreground">UnMoney · works offline and syncs across your devices</p>
+        <p className="px-4 pt-1 text-xs text-muted-foreground">
+          <Link to="/privacy" className="underline underline-offset-2 hover:text-foreground">Privacy policy</Link>
         </p>
         <p className="px-4 pt-1 pb-2 text-xs text-muted-foreground tabular-nums">Version {(import.meta.env.VITE_APP_VERSION as string | undefined) ?? "dev"}</p>
       </Page>
