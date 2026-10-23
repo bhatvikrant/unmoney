@@ -22,6 +22,15 @@
         var t = localStorage.getItem("unmoney:theme");
         if (t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.classList.add("dark");
       } catch (e) {}
+      // Installed as an app: no pinch or double-tap zoom, as in a native app (the browser tab keeps zoom for accessibility).
+      if (matchMedia("(display-mode: standalone)").matches || navigator.standalone === true) {
+        document.documentElement.classList.add("standalone");
+        var vp = document.querySelector('meta[name="viewport"]');
+        vp.content += ", maximum-scale=1, user-scalable=no";
+        // iOS ignores user-scalable=no for pinches, and a desktop trackpad pinch arrives as a ctrl+wheel
+        document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+        document.addEventListener("wheel", function (e) { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+      }
     </script>
   </head>
   <body>

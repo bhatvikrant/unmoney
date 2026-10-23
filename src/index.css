@@ -196,6 +196,8 @@
 html, body, #root { height: 100%; }
 html, body { overscroll-behavior-y: none; }
 body { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+/* installed app: no double-tap zoom anywhere (touch-action doesn't reach past an inner scroller), layered so touch-none still wins */
+@layer base { :where(.standalone) * { touch-action: manipulation; } }
 /* no link previews or text selection on long-press of app chrome, as in a native app */
 nav, button, [role="button"], a { -webkit-touch-callout: none; }
 nav { user-select: none; }
