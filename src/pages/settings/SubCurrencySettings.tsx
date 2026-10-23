@@ -112,11 +112,11 @@ export default function SubCurrencySettings() {
           {currencies.map((c, i) => (
             <SwipeToDelete key={c._id} className="border-b last:border-b-0" label="Remove" {...swipe.row(c._id)} onDelete={() => void del(c)}>
               <div className="flex items-center gap-1 px-2 py-2 text-sm">
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Up" onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Down" onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7" aria-label={`Move ${c.code} up`} onClick={() => move(i, -1)}><ArrowUp className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7" aria-label={`Move ${c.code} down`} onClick={() => move(i, 1)}><ArrowDown className="size-4" /></Button>
                 <div className="flex-1 px-1 min-w-0"><div className="truncate">{c.code} · {c.name}{c.isCustom ? " (custom)" : ""}</div><div className="text-xs text-muted-foreground">{formatRate(mainSide, c, c.rate)}</div></div>
-                <Button variant="ghost" size="icon" className="size-7" aria-label="Edit" onClick={() => setEdit({ id: c._id, code: c.code, rate: toShown(c.rate, c.rate < 1), flip: c.rate < 1, savedRate: c.rate, symbolPosition: c.symbolPosition, symbol: c.symbol, isCustom: c.isCustom })}><Pencil className="size-4" /></Button>
-                <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label="Delete" onClick={() => void del(c)}><Trash2 className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7" aria-label={`Edit ${c.code}`} onClick={() => setEdit({ id: c._id, code: c.code, rate: toShown(c.rate, c.rate < 1), flip: c.rate < 1, savedRate: c.rate, symbolPosition: c.symbolPosition, symbol: c.symbol, isCustom: c.isCustom })}><Pencil className="size-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Remove ${c.code}`} onClick={() => void del(c)}><Trash2 className="size-4" /></Button>
               </div>
             </SwipeToDelete>
           ))}

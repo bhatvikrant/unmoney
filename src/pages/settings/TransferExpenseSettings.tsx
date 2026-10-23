@@ -27,9 +27,9 @@ export default function TransferExpenseSettings() {
                 return (
                   <div key={a._id} className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 items-center px-4 py-2 border-b last:border-b-0 text-sm">
                     <span className="truncate">{a.name}</span>
-                    <span className="w-16 flex justify-center"><Switch checked={a.includeInTotals} onCheckedChange={(v) => patch({ includeInTotals: v })} /></span>
-                    <span className="w-16 flex justify-center"><Switch checked={!a.hidden} onCheckedChange={(v) => setHidden({ id: a._id, hidden: !v })} /></span>
-                    <span className="w-16 flex justify-center">{transferable ? <Switch checked={a.transferAsExpense} onCheckedChange={(v) => patch({ transferAsExpense: v })} /> : <span className="text-xs text-muted-foreground">—</span>}</span>
+                    <span className="w-16 flex justify-center"><Switch aria-label={`${a.name}: in totals`} checked={a.includeInTotals} onCheckedChange={(v) => patch({ includeInTotals: v })} /></span>
+                    <span className="w-16 flex justify-center"><Switch aria-label={`${a.name}: visible`} checked={!a.hidden} onCheckedChange={(v) => setHidden({ id: a._id, hidden: !v })} /></span>
+                    <span className="w-16 flex justify-center">{transferable ? <Switch aria-label={`${a.name}: transfers count as expense`} checked={a.transferAsExpense} onCheckedChange={(v) => patch({ transferAsExpense: v })} /> : <span className="text-xs text-muted-foreground">—</span>}</span>
                   </div>
                 );
               })}

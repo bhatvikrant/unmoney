@@ -27,12 +27,12 @@ export default function PaymentMethodsSettings() {
       <PageHeader back="/settings" title="Payment methods" />
       <Page className="pb-8">
         <Section title="Defaults">
-          <Row label="Default payment method" info="The payment method a new entry starts on. You can still pick another one on the entry itself. With no default, new entries start on the first visible one." right={
-            <Select value={defaultAccount} onValueChange={(v) => setDefaultAccount({ id: v === "first" ? undefined : (v as Id<"accounts">) })}><SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="first">First in list</SelectItem>{visibleAccounts.map((a) => <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>)}</SelectContent></Select>
-          } />
-          <Row label="Card expenses display" hint="At the time, or as a lump sum on the payment date" info="At the time: a credit-card purchase counts as an expense on the day you make it. Lump sum: card purchases count as transfers until you pay the card off, and the payment to the card is what counts as the expense." right={
-            <Select value={s.cardExpenseDisplay} onValueChange={(v) => update({ patch: { cardExpenseDisplay: v as "atTime" | "lumpSum" } })}><SelectTrigger className="h-8 w-32"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="atTime">At the time</SelectItem><SelectItem value="lumpSum">Lump sum</SelectItem></SelectContent></Select>
-          } />
+          <Row label="Default payment method" info="The payment method a new entry starts on. You can still pick another one on the entry itself. With no default, new entries start on the first visible one." right={(id) => (
+            <Select value={defaultAccount} onValueChange={(v) => setDefaultAccount({ id: v === "first" ? undefined : (v as Id<"accounts">) })}><SelectTrigger aria-labelledby={id} className="h-8 w-36"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="first">First in list</SelectItem>{visibleAccounts.map((a) => <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>)}</SelectContent></Select>
+          )} />
+          <Row label="Card expenses display" hint="At the time, or as a lump sum on the payment date" info="At the time: a credit-card purchase counts as an expense on the day you make it. Lump sum: card purchases count as transfers until you pay the card off, and the payment to the card is what counts as the expense." right={(id) => (
+            <Select value={s.cardExpenseDisplay} onValueChange={(v) => update({ patch: { cardExpenseDisplay: v as "atTime" | "lumpSum" } })}><SelectTrigger aria-labelledby={id} className="h-8 w-32"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="atTime">At the time</SelectItem><SelectItem value="lumpSum">Lump sum</SelectItem></SelectContent></Select>
+          )} />
         </Section>
         <Section title="Organise">
           {link("Groups", "/settings/groups", undefined, "Folders for your payment methods. Deleting one moves its methods to No group.")}
