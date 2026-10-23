@@ -138,7 +138,7 @@ function Tap({ drill, children, className, style, label, hint }: {
 }
 /**
  * A pulsing white dot over one tappable part of a card, so the first recap shows what can be
- * tapped. One per card, and only until the user first opens a drawer (RecapPage turns them off).
+ * tapped. One per card, each time a recap opens, until a drawer is opened in it (RecapPage turns them off).
  */
 function HintDot({ className }: { className?: string }) {
   if (!useHints()) return null;
