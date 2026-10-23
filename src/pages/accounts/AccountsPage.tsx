@@ -193,7 +193,7 @@ export default function AccountsPage() {
         <HistorySection scope="accounts" />
       </Page>
       {selecting ? (
-        <div className={cn(bar, "z-30 bg-background/95 backdrop-blur border-t md:safe-bottom")}>
+        <div className={cn(bar, "z-30 bg-background border-t md:safe-bottom")}>
           <div className="mx-auto max-w-3xl flex items-center gap-2 p-3 text-sm">
             <Button variant="outline" size="sm" onClick={() => setSelected(chosen.length === shown.length ? new Set() : new Set(shown.map((a) => a._id)))}>{chosen.length === shown.length && shown.length ? "Clear" : "Select all"}</Button>
             <span className="text-muted-foreground">{chosen.length}<span className="hidden sm:inline"> selected</span></span>

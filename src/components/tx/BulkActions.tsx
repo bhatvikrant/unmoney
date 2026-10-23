@@ -100,7 +100,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   return (
     <>
       {/* beside an open entry (wide screens) it spans the list only, not the entry's own bar */}
-      <div className={cn(bar, "z-30 bg-background/95 backdrop-blur border-t md:safe-bottom", entryOpen && bar.startsWith("fixed") && "lg:right-[440px]")}>
+      <div className={cn(bar, "z-30 bg-background border-t md:safe-bottom", entryOpen && bar.startsWith("fixed") && "lg:right-[440px]")}>
         <div className="mx-auto max-w-3xl">
           <div className="flex items-center gap-2 px-3 pt-2 text-sm">
             <Button variant="outline" size="sm" onClick={() => (n === txs.length ? bulk.clear() : bulk.selectAll(txs))}>{n === txs.length && n > 0 ? "Clear" : "Select all"}</Button>

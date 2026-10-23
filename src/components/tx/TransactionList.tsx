@@ -1,5 +1,4 @@
 import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import { useLocation } from "react-router";
 import { useOpenEntry } from "@/lib/nav";
 import { ArrowRight, Camera, Mail, Repeat, Star, Users } from "lucide-react";
@@ -143,10 +142,12 @@ export function DraftRow({ draft, onClick, className }: { draft: Draft; onClick?
 /** A row's key: a draft and the entry it becomes share one, so the row fades up in place instead of remounting. */
 const rowKey = (t: Tx) => (t.source ? `g:${t.source.messageId}` : t._id);
 
-/** Faded while the row is a draft, solid once saved; a 300 ms fade between the two, none under reduced motion. */
+/** What a day lists, in order: entries and drafts by time, then the coming dates. */
+type Row = { kind: "tx"; t: Tx; at: number } | { kind: "draft"; d: Draft; at: number } | { kind: "upcoming"; o: Occurrence; at: number };
+
+/** Faded while the row is a draft, solid once saved; a 300 ms CSS fade between the two (none under reduced motion), so a month of rows carries no animation objects. */
 function Fade({ faded, children }: { faded: boolean; children: ReactNode }) {
-  const reduced = useReducedMotion();
-  return <motion.div initial={false} animate={{ opacity: faded ? 0.55 : 1 }} transition={{ duration: reduced ? 0 : 0.3 }}>{children}</motion.div>;
+  return <div className={cn("transition-opacity duration-300 motion-reduce:transition-none", faded && "opacity-[0.55]")}>{children}</div>;
 }
 
 /**
@@ -176,50 +177,52 @@ export function TransactionList({ txs, drafts, upcoming, selectable, selected, o
   const openId = useLocation().pathname.match(/\/t\/([^/]+)$/)?.[1];
   const { ledger } = useApp();
   const bookmarked = useBookmarkedIds();
+  // One list per day with entries and drafts sorted together by time (then the coming dates), so a
+  // draft and the entry it becomes are the same keyed row in the same list: React keeps the node and
+  // the fade runs, instead of unmounting the draft and mounting the entry.
   const groups = useMemo(() => {
-    const map = new Map<string, { txs: Tx[]; drafts: Draft[]; upcoming: Occurrence[] }>();
+    const map = new Map<string, { txs: Tx[]; rows: Row[] }>();
     const day = (date: string) => {
       let g = map.get(date);
-      if (!g) { g = { txs: [], drafts: [], upcoming: [] }; map.set(date, g); }
+      if (!g) { g = { txs: [], rows: [] }; map.set(date, g); }
       return g;
     };
-    for (const t of txs) day(t.date).txs.push(t);
-    for (const d of drafts ?? []) day(d.proposal.date).drafts.push(d);
-    for (const o of upcoming ?? []) day(o.date).upcoming.push(o);
+    for (const t of txs) { const g = day(t.date); g.txs.push(t); g.rows.push({ kind: "tx", t, at: t._creationTime }); }
+    for (const d of drafts ?? []) day(d.proposal.date).rows.push({ kind: "draft", d, at: d.receivedAt });
+    for (const g of map.values()) g.rows.sort((a, b) => b.at - a.at);
+    for (const o of upcoming ?? []) day(o.date).rows.push({ kind: "upcoming", o, at: 0 });
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
   }, [txs, drafts, upcoming]);
   if (!txs.length && !drafts?.length && !upcoming?.length) return <div className="py-12 text-center text-sm text-muted-foreground">{emptyText}</div>;
   return (
     <div className={className}>
-      {groups.map(([date, { txs: list, drafts: dayDrafts, upcoming: dayUpcoming }]) => {
+      {groups.map(([date, { txs: list, rows }]) => {
         const k = sumKinds(list, ledger);
         return (
           <Fragment key={date}>
             <DayHeader date={date} income={k.income} expense={k.expense} totals={list.length > 0} />
-            {list.map((t) => (
-              <Fade key={rowKey(t)} faded={false}>
-                <SwipeToDelete className="border-b last:border-b-0" disabled={selectable} {...swipe.row(t._id)} onDelete={() => remove(t)}>
+            {rows.map((r) => r.kind === "tx" ? (
+              <Fade key={rowKey(r.t)} faded={false}>
+                <SwipeToDelete className="border-b last:border-b-0" disabled={selectable} {...swipe.row(r.t._id)} onDelete={() => remove(r.t)}>
                   <TransactionRow
-                    tx={t}
-                    onClick={selectable ? () => onToggle?.(t._id, !selected?.has(t._id)) : () => openEntry(t._id)}
-                    open={t._id === openId}
-                    onLongPress={!selectable && onLongPress ? () => onLongPress(t._id) : undefined}
-                    selected={selected?.has(t._id)}
-                    bookmarked={bookmarked.has(t._id)}
-                    onSelect={selectable ? (v) => onToggle?.(t._id, v) : undefined}
+                    tx={r.t}
+                    onClick={selectable ? () => onToggle?.(r.t._id, !selected?.has(r.t._id)) : () => openEntry(r.t._id)}
+                    open={r.t._id === openId}
+                    onLongPress={!selectable && onLongPress ? () => onLongPress(r.t._id) : undefined}
+                    selected={selected?.has(r.t._id)}
+                    bookmarked={bookmarked.has(r.t._id)}
+                    onSelect={selectable ? (v) => onToggle?.(r.t._id, v) : undefined}
                     className="border-b-0"
                   />
                 </SwipeToDelete>
               </Fade>
-            ))}
-            {dayDrafts.map((d) => (
-              <Fade key={`g:${d.messageId}`} faded>
-                <DraftRow draft={d} onClick={selectable ? undefined : () => openEntry("new", { draft: d._id })} />
+            ) : r.kind === "draft" ? (
+              <Fade key={`g:${r.d.messageId}`} faded>
+                <DraftRow draft={r.d} onClick={selectable ? undefined : () => openEntry("new", { draft: r.d._id })} />
               </Fade>
-            ))}
-            {dayUpcoming.map((o) => (
-              <Fade key={`r:${o.repeat._id}:${o.date}`} faded>
-                <UpcomingRow occ={o} onClick={selectable ? undefined : () => setOcc(o)} />
+            ) : (
+              <Fade key={`r:${r.o.repeat._id}:${r.o.date}`} faded>
+                <UpcomingRow occ={r.o} onClick={selectable ? undefined : () => setOcc(r.o)} />
               </Fade>
             ))}
           </Fragment>
