@@ -116,7 +116,7 @@ export type MonthCard =
   /** `amount` is what the entry counted as spending (a transfer's amount plus its fee), which can differ from `tx.amount`. */
   | { kind: "biggest"; scope?: RecapScope; tx: Tx; amount: number; share: number; runnersUp: { note: string; amount: number; tx: Tx }[]; topShare: number }
   | { kind: "days"; perDay: { date: ISODate; amount: number; count: number }[]; busiest: ISODate; busiestNotes: string[]; noSpend: number; weekendShare: number; entriesPerDay: number }
-  | { kind: "repeat"; note?: { text: string; count: number; amount: number }; nextNotes: { text: string; count: number }[]; account?: { name: string; share: number }; scheduled?: { amount: number; count: number } }
+  | { kind: "repeat"; note?: { text: string; count: number; amount: number }; nextNotes: { text: string; count: number }[]; account?: { id: string; name: string; share: number }; scheduled?: { amount: number; count: number } }
   | { kind: "changes"; scope?: RecapScope; prevLabel: string; movers: { id: string; name: string; before: number; after: number; pct?: number }[]; threshold: number }
   | { kind: "inout"; scope?: RecapScope; income: number; spent: number; keptPct: number; prevKeptPct?: number; budgets?: RecapBudgets; bestMonth?: { month: MonthKey; keptPct: number }; budgetMonths?: { held: number; total: number } }
   | { kind: "budgets"; scope?: RecapScope; budgets: RecapBudgets }
@@ -129,7 +129,7 @@ export type YearCard =
   | { kind: "calendar"; perDay: { date: ISODate; amount: number; count: number }[]; rows: { month: MonthKey; from: ISODate; days: number }[]; busiest: ISODate; busiestNotes: string[]; noSpend: number; streak: number; spendDay: { weekday: number; share: number } }
   | { kind: "clock"; perHour: number[]; peakHour: number; eveningShare: number; morningShare: number; first?: { time: string; note: string; date: ISODate }; timed: number; total: number }
   | { kind: "methods"; top: { id: string; name: string; amount: number; count: number }[]; share: number; mostEntries?: { id: string; name: string; count: number; avg: number } }
-  | { kind: "new"; items: { kind: "category" | "account"; name: string; first: ISODate; count: number; amount: number }[] }
+  | { kind: "new"; items: { kind: "category" | "account"; id: string; name: string; first: ISODate; count: number; amount: number }[] }
   | { kind: "personality"; archetype: Archetype; why: string; traits: { label: string; value: string; matched: boolean }[] };
 
 export type RecapCard = MonthCard | YearCard;
@@ -316,7 +316,7 @@ function buildMonthRecap(snap: Snapshot, month: MonthKey): Recap | null {
       kind: "repeat",
       note: topNote,
       nextNotes: byCount.slice(1, 4).filter((n) => n.count >= 2).map(({ text, count }) => ({ text, count })),
-      account: { name: accName, share: total ? accAmount / total : 0 },
+      account: { id: accId, name: accName, share: total ? accAmount / total : 0 },
       scheduled,
     });
   }
@@ -599,12 +599,12 @@ function buildYearRecap(snap: Snapshot, year: number): Recap | null {
     for (const it of byCat.items) {
       const f = firsts.get(`c:${it.id}`);
       if (it.id === "none" || it.id === "fees" || it.id.startsWith("transfer:") || bucketsBefore.has(it.id) || !f || f.count < RECAP_YEAR_NEW_MIN) continue;
-      items.push({ kind: "category", name: it.name, ...f });
+      items.push({ kind: "category", id: it.id, name: it.name, ...f });
     }
     for (const m of methods) {
       const f = firsts.get(`a:${m.id}`);
       if (accountsBefore.has(m.id) || !f || f.count < RECAP_YEAR_NEW_MIN) continue;
-      items.push({ kind: "account", name: m.name, ...f });
+      items.push({ kind: "account", id: m.id, name: m.name, ...f });
     }
     items.sort((a, b) => a.first.localeCompare(b.first) || b.amount - a.amount);
     if (items.length) cards.push({ kind: "new", items: items.slice(0, 3) });
@@ -705,6 +705,60 @@ export function recapNudge(snap: Snapshot, today: ISODate): MonthKey | null {
   if (day > RECAP_NUDGE_DAYS) return null;
   const prev = shiftMonthKey(current, -1);
   return recapQualifies(snap, prev) ? prev : null;
+}
+
+// ---- drilling into a card ----
+
+/**
+ * What a tap on part of a card asks for: the entries behind a category block, a day's bar, a note,
+ * a payment method… always inside the recap's own range (a day or a month narrows it).
+ */
+export type RecapDrill =
+  | { kind: "category"; id: string }
+  /** The categories after the card's top ones. */
+  | { kind: "rest"; exclude: string[] }
+  | { kind: "day"; date: ISODate }
+  | { kind: "month"; month: MonthKey }
+  | { kind: "note"; text: string }
+  | { kind: "account"; id: string }
+  | { kind: "hour"; hour: number }
+  | { kind: "scheduled" }
+  | { kind: "income" }
+  /** The `count` largest single entries, largest first. */
+  | { kind: "largest"; count: number };
+
+/**
+ * The entries behind a drill, counted as the card counted them: `amount` is what they add up to on
+ * the card (a transfer's fee included), `txs` each entry once, newest first ("largest": largest first).
+ */
+export function recapDrill(snap: Snapshot, range: Range, drill: RecapDrill): { txs: Tx[]; amount: number } {
+  const msd = settingsOf(snap)?.monthStartDay ?? 1;
+  let { from, to } = range;
+  if (drill.kind === "day") from = to = drill.date;
+  if (drill.kind === "month") ({ from, to } = monthRange(drill.month, msd));
+  if (from < range.from) from = range.from;
+  if (to > range.to) to = range.to;
+  if (from > to) return { txs: [], amount: 0 };
+  const all = statsEntries(snap, from, to, drill.kind === "income" ? "income" : "expense");
+  let picked: Entry[];
+  switch (drill.kind) {
+    case "category": picked = all.filter((e) => e.bucket === drill.id); break;
+    case "rest": { const out = new Set(drill.exclude); picked = all.filter((e) => !out.has(e.bucket)); break; }
+    case "note": { const key = drill.text.trim().toLowerCase(); picked = all.filter((e) => e.t.note.trim().toLowerCase() === key); break; }
+    case "account": picked = all.filter((e) => e.t.accountId === drill.id); break;
+    case "hour": picked = all.filter((e) => hourOf(e.t) === drill.hour); break;
+    case "scheduled": picked = all.filter((e) => e.t.repeatId); break;
+    case "largest": {
+      const top = rankedByTx(all).slice(0, drill.count);
+      return { txs: top.map((e) => e.t), amount: top.reduce((s, e) => s + e.amount, 0) };
+    }
+    default: picked = all;
+  }
+  const seen = new Set<string>();
+  const txs: Tx[] = [];
+  for (const e of picked) if (!seen.has(e.t._id)) { seen.add(e.t._id); txs.push(e.t); }
+  txs.sort((a, b) => b.date.localeCompare(a.date) || b._creationTime - a._creationTime);
+  return { txs, amount: picked.reduce((s, e) => s + e.amount, 0) };
 }
 
 /** Whole-number percent with its sign, for "8% less" / "12% more". */
