@@ -24,10 +24,12 @@ export function GmailNudge({ from, to }: { from: string; to: string }) {
   if (status?.connected && status.status === "reauth") {
     return <Strip warn label="Gmail needs reconnecting" action="Reconnect" onClick={() => nav("/settings/gmail")} />;
   }
-  // stopped after failing several times in a row (a pause the user chose has no error, and needs no nudge)
-  if (status?.connected && status.status === "paused" && status.lastError) {
+  // stopped after failing several times in a row (a warning), or paused by the user (a quiet reminder)
+  if (status?.connected && status.status === "paused") {
     const resume = () => update({ paused: false }).then(() => toast.success("Gmail checks resumed"), () => toast.error("Could not resume. Try again from Settings › Gmail."));
-    return <Strip warn label={`Gmail checks stopped: ${status.lastError}`} action="Resume" onClick={() => void resume()} />;
+    return status.lastError
+      ? <Strip warn label={`Gmail checks stopped: ${status.lastError}`} action="Resume" onClick={() => void resume()} />
+      : <Strip muted label="Gmail checks paused" action="Resume" onClick={() => void resume()} />;
   }
   if (!here && !matched) return null;
   const label = here ? `${here} ${here === 1 ? "entry" : "entries"} found in Gmail` : `Gmail found ${matched} you may already have`;
@@ -53,7 +55,7 @@ export function useGmailCheckOnFocus() {
     if (!ready) return;
     const check = () => {
       const s = latest.current;
-      if (document.visibilityState !== "visible" || !s?.connected || s.status !== "ok") return;
+      if (document.visibilityState !== "visible" || !s?.connected || s.status !== "ok" || s.syncing) return;
       const now = Date.now();
       if (now - (s.lastSyncAt ?? 0) < CHECK_AFTER_MS || now - tried.current < CHECK_AFTER_MS) return;
       tried.current = now;
@@ -68,13 +70,13 @@ export function useGmailCheckOnFocus() {
 
 /**
  * One tappable line, shaped like the "Filtered" strip under the summary bar: the whole row is the
- * target. Tinted amber like the other Gmail notices (red when it is a warning), whatever the accent,
- * so it does not read as a day header.
+ * target. Tinted amber like the other Gmail notices (red when it is a warning, grey when it only
+ * reminds), whatever the accent, so it does not read as a day header.
  */
-function Strip({ label, extra, action, warn, onClick }: { label: string; extra?: string; action: string; warn?: boolean; onClick: () => void }) {
+function Strip({ label, extra, action, warn, muted, onClick }: { label: string; extra?: string; action: string; warn?: boolean; muted?: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={cn("flex w-full items-center gap-2 border-b px-4 py-2 text-left text-xs", warn ? "bg-destructive/10 text-destructive active:bg-destructive/20" : "bg-amber-50 active:bg-amber-100 dark:bg-amber-950/30 dark:active:bg-amber-950/50")}>
-      <Mail className={cn("size-3.5 shrink-0", !warn && "text-amber-600 dark:text-amber-400")} />
+    <button type="button" onClick={onClick} className={cn("flex w-full items-center gap-2 border-b px-4 py-2 text-left text-xs", warn ? "bg-destructive/10 text-destructive active:bg-destructive/20" : muted ? "bg-muted/40 text-muted-foreground active:bg-muted" : "bg-amber-50 active:bg-amber-100 dark:bg-amber-950/30 dark:active:bg-amber-950/50")}>
+      <Mail className={cn("size-3.5 shrink-0", !warn && !muted && "text-amber-600 dark:text-amber-400")} />
       <span className="truncate font-medium">{label}</span>
       {extra ? <span className="shrink-0 text-muted-foreground">· {extra}</span> : null}
       <span className="ml-auto flex shrink-0 items-center text-muted-foreground">{action}<ChevronRight className="size-3.5" /></span>

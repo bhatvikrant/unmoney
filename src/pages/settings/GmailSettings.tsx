@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 /** "just now", "12 min ago", "3 h ago", "2 days ago". */
@@ -42,6 +43,7 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message.replace(/^.*Un
 export default function GmailSettings() {
   const nav = useNavigate();
   const s = useQuery(api.gmail.status);
+  const { status: { offline } } = useStore();
   const connectUrl = useAction(api.gmail.connectUrl);
   const disconnect = useAction(api.gmail.disconnect);
   const syncNow = useAction(api.gmail.syncNow);
@@ -54,12 +56,14 @@ export default function GmailSettings() {
   const [busy, setBusy] = useState<null | "connect" | "check" | "disconnect">(null);
   const [newSender, setNewSender] = useState("");
   /**
-   * Back from connecting: the first check is running, and what it finds opens as a list to pick
-   * from. It started as Google sent the browser back, a moment before this page loaded.
+   * Back from connecting: what the first check finds opens as a list to pick from. It started as
+   * Google sent the browser back, a moment before this page loaded, so its log line is the first
+   * one from around then; whether it is still running is the server's word (`syncing`), never a guess.
    */
   const [waitingSince, setWaitingSince] = useState<number | null>(() => (sp.get("gmail") === "claim" || sp.get("gmail") === "connected" ? Date.now() - FIRST_CHECK_SLACK_MS : null));
   const firstCheck = waitingSince !== null && s?.connected ? s.log.find((l) => l.at >= waitingSince) : undefined;
-  const waiting = waitingSince !== null && !!s?.connected && s.lookbackDays !== 0 && !firstCheck;
+  const waiting = waitingSince !== null && !!s?.connected && s.lookbackDays !== 0 && !firstCheck && s.syncing;
+  const checking = !!s?.syncing || busy === "check";
   const handled = useRef(false);
   const claimed = useRef<string | null>(null);
 
@@ -119,7 +123,7 @@ export default function GmailSettings() {
     setBusy("check");
     try {
       const r = await syncNow({});
-      if (!r.ran) toast("Checked less than a minute ago.");
+      if (!r.ran) toast("Already checking, or checked less than a minute ago.");
       else if (r.error) toast.error(`The check failed: ${r.error}`);
       else if (r.found) toast.success(`Found ${r.found} new ${r.found === 1 ? "entry" : "entries"}`, { action: { label: "Pick what to import", onClick: () => nav("/gmail") } });
       else toast.success("Nothing new.");
@@ -190,7 +194,7 @@ export default function GmailSettings() {
     <>
       <PageHeader back="/settings" title="Gmail" />
       <Page className="pb-10">
-        {s === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
+        {s === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">{offline ? "Offline" : "Loading…"}</div> : null}
 
         {s && !s.connected ? (
           <>
@@ -234,7 +238,7 @@ export default function GmailSettings() {
                 <RefreshCw className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
                 <div>
                   <div className="font-medium">Looking for money mail in your inbox…</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">This takes a few seconds. You'll see everything it finds and pick what to import; nothing is added before that.</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">You'll see everything it finds and pick what to import; nothing is added before that.</div>
                 </div>
               </div>
             ) : null}
@@ -255,15 +259,15 @@ export default function GmailSettings() {
                     <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", s.status === "ok" ? "bg-income" : s.status === "paused" ? "bg-muted-foreground" : "bg-amber-500")} />
                     <span>
                       {s.status === "ok" ? "Checks every hour" : s.status === "paused" ? "Paused" : "Needs reconnecting"}
-                      {" · "}{s.lastSyncAt ? `last checked ${ago(s.lastSyncAt)}` : "not checked yet"}
+                      {" · "}{s.syncing ? "checking now…" : s.lastSyncAt ? `last checked ${ago(s.lastSyncAt)}` : "not checked yet"}
                     </span>
                   </div>
                   {s.status === "paused" && s.lastError ? <div className="mt-1 text-xs text-destructive">Paused after repeated failures: {s.lastError}</div> : null}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2 px-4 pt-3 pb-4">
-                <Button variant="outline" disabled={busy !== null || s.status !== "ok"} onClick={() => void check()}>
-                  <RefreshCw className={cn("size-4", busy === "check" && "animate-spin")} />{busy === "check" ? "Checking…" : "Check now"}
+                <Button variant="outline" disabled={busy !== null || s.status !== "ok" || checking} onClick={() => void check()}>
+                  <RefreshCw className={cn("size-4", checking && "animate-spin")} />{checking ? "Checking…" : "Check now"}
                 </Button>
                 {s.status === "paused" ? (
                   <Button variant="outline" onClick={() => void patch({ paused: false })}><Play className="size-4" />Resume</Button>
