@@ -36,7 +36,8 @@ const CHUNK = 400;
 const SHORTCUT_FILE = "/send-to-unmoney.shortcut";
 
 type Origin = { kind: "pick" } | { kind: "share" } | { kind: "pending"; id: Id<"pendingImports"> };
-type Loaded = ParsedImport & { name: string; origin: Origin };
+/** mapped: a bank statement whose columns are matched, so the review shows (Back to columns clears it). */
+type Loaded = ParsedImport & { name: string; origin: Origin; mapped?: boolean };
 type DryRun = OpResult<"transactions.importRows">;
 
 const isAndroid = () => /Android/i.test(navigator.userAgent);
@@ -65,6 +66,7 @@ export default function ImportPage() {
       setLoaded({ ...parsed, name, origin });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not read that file");
+      closeReview(); // an inbox file can be tried again
     }
     setReading(false);
   }
@@ -87,7 +89,7 @@ export default function ImportPage() {
     } else if (pendingId && pending) {
       handled.current = key;
       const p = pending.find((x) => x._id === pendingId);
-      if (!p?.url) { toast.error("That file is no longer waiting. It may have been imported already."); return; }
+      if (!p?.url) { toast.error("That file is no longer waiting. It may have been imported already."); closeReview(); return; }
       void (async () => {
         try {
           const res = await fetch(p.url!);
@@ -95,6 +97,7 @@ export default function ImportPage() {
           await load(await res.blob(), p.name, { kind: "pending", id: p._id });
         } catch {
           toast.error("Could not download that file. Check your connection and try again.");
+          closeReview();
         }
       })();
     }
@@ -106,7 +109,9 @@ export default function ImportPage() {
     if (origin.kind === "pending") await discard({ id: origin.id }).catch(() => {});
   }
 
+  /** Back to the list; the same inbox file can be reviewed again. */
   function closeReview() {
+    handled.current = null;
     setLoaded(null);
     if (source || pendingId) setSp({}, { replace: true });
   }
@@ -116,13 +121,18 @@ export default function ImportPage() {
       <PageHeader back="/settings" title="Import" />
       <Page className="pb-10">
         {loaded?.bank ? (
-          // a bank statement: its columns first, then the same review
-          <ColumnMapping name={loaded.name} grid={loaded.bank.grid} headerRow={loaded.bank.headerRow}
-            onCancel={async () => { if (loaded.origin.kind === "share") await finish(loaded.origin); closeReview(); }}
-            onContinue={(rows, noAmount) => setLoaded({ ...loaded, rows, noAmount, bank: undefined })} />
-        ) : loaded ? (
+          // a bank statement: its columns first, then the same review. The step stays mounted behind the
+          // review, so Back to columns finds it as the user left it.
+          <div hidden={loaded.mapped}>
+            <ColumnMapping name={loaded.name} grid={loaded.bank.grid} headerRow={loaded.bank.headerRow}
+              onCancel={async () => { if (loaded.origin.kind === "share") await finish(loaded.origin); closeReview(); }}
+              onContinue={(rows, noAmount) => setLoaded({ ...loaded, rows, noAmount, mapped: true })} />
+          </div>
+        ) : null}
+        {loaded?.bank && !loaded.mapped ? null : loaded ? (
           <Review
             loaded={loaded}
+            onBack={loaded.bank ? () => setLoaded({ ...loaded, mapped: false }) : undefined}
             onCancel={async () => { if (loaded.origin.kind === "share") await finish(loaded.origin); closeReview(); }}
             onDone={async () => { await finish(loaded.origin); nav("/", { replace: true }); }}
           />
@@ -355,14 +365,17 @@ function IosSteps() {
   );
 }
 
-function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => void | Promise<void>; onDone: () => void | Promise<void> }) {
+function Review({ loaded, onBack, onCancel, onDone }: { loaded: Loaded; onBack?: () => void; onCancel: () => void | Promise<void>; onDone: () => void | Promise<void> }) {
   const view = useView();
   const { userId, status, dispatchTracked, whenSynced } = useStore();
   const { settings } = useApp();
   const bulk = useBulkOps();
-  const [saving, setSaving] = useState(false);
+  // while the server takes the parts: entries confirmed so far, of those sent
+  const [saving, setSaving] = useState<{ done: number; total: number } | null>(null);
   const [createMissing, setCreateMissing] = useState(true);
   const [createAccounts, setCreateAccounts] = useState(true);
+  // rows that match an entry by day, payment method and amount but not by note: left out unless the user says otherwise
+  const [skipLikely, setSkipLikely] = useState(true);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   // How the file writes dates and numbers, read from all its rows; the user can correct it below.
@@ -399,15 +412,15 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
     let inserted = 0;
     // Duplicates were found over the whole file in the dry run; checking per chunk would also
     // catch identical entries the file itself has in two different chunks.
-    const dup = new Set(dry.duplicates);
+    const dup = new Set([...dry.duplicates, ...(skipLikely ? dry.likelyDuplicates : [])]);
     const rows = loaded.rows.filter((_, i) => !dup.has(i + 1));
-    const opIds: string[] = [];
+    const parts: { id: string; inserted: number }[] = [];
     // every chunk carries the same batch, so the whole file can be undone at once
     const batch = { id: `imp_${crypto.randomUUID?.() ?? Date.now().toString(36)}`, name: loaded.name };
     try {
       for (let i = 0; i < rows.length; i += CHUNK) {
         const { id, result } = await dispatchTracked("transactions.importRows", { rows: rows.slice(i, i + CHUNK), format, newAccounts, createMissing, createAccounts, skipInvalid: true, rowOffset: i, batch });
-        opIds.push(id);
+        parts.push({ id, inserted: result.inserted });
         inserted += result.inserted;
         setProgress(Math.min(1, (i + CHUNK) / rows.length));
       }
@@ -417,11 +430,17 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
       return;
     }
     // Only a confirmed import counts: until then the file stays in the inbox, so it can be tried again.
-    setSaving(true);
-    const { rejected } = await whenSynced(opIds);
-    setSaving(false);
+    // One wait per part, so the count moves as the server takes each.
+    setSaving({ done: 0, total: inserted });
+    const rejected: { id: string; error: string }[] = [];
+    for (const part of parts) {
+      const r = await whenSynced([part.id]);
+      rejected.push(...r.rejected);
+      if (!r.rejected.length) setSaving((x) => x && { ...x, done: x.done + part.inserted });
+    }
+    setSaving(null);
     if (rejected.length) {
-      toast.error(`${rejected.length} of ${opIds.length} parts of the import could not be saved: ${rejected[0].error}. Import the file again to add the rest; entries already in are skipped.`);
+      toast.error(`${rejected.length} of ${parts.length} parts of the import could not be saved: ${rejected[0].error}. Import the file again to add the rest; entries already in are skipped.`);
       setBusy(false);
       return;
     }
@@ -433,7 +452,9 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
   }
 
   const skipped = "error" in dry ? 0 : dry.errors.length;
-  const ready = "error" in dry ? 0 : dry.inserted;
+  const likely = "error" in dry ? 0 : dry.likelyDuplicates.length;
+  // the dry run still counts likely duplicates as going in; the checkbox decides
+  const ready = "error" in dry ? 0 : dry.inserted - (skipLikely ? likely : 0);
   return (
     <>
       <Section title="Review">
@@ -446,6 +467,7 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
               {loaded.noAmount ? ` · ${loaded.noAmount} ${loaded.noAmount === 1 ? "row" : "rows"} without an amount left out` : ""}
             </div>
           </div>
+          {onBack ? <Button size="sm" variant="outline" disabled={busy} onClick={onBack}>Back to columns</Button> : null}
         </div>
         {"error" in dry ? (
           <div className="px-4 py-3 text-sm text-destructive">{dry.error}</div>
@@ -453,6 +475,12 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
           <div className="px-4 py-3 space-y-1 text-sm">
             <div><b className="tabular">{ready}</b> {ready === 1 ? "entry" : "entries"} ready to import.</div>
             {dry.duplicates.length ? <div className="text-muted-foreground">{dry.duplicates.length} {dry.duplicates.length === 1 ? "entry is" : "entries are"} already in UnMoney and will be left out.</div> : null}
+            {likely ? (
+              <div className="text-muted-foreground">
+                {likely} {likely === 1 ? "looks like an entry" : "look like entries"} you already have: the same day, payment method and amount, with a different note.
+                <label className="mt-1 flex items-center gap-2"><Checkbox checked={skipLikely} onCheckedChange={(v) => setSkipLikely(!!v)} />{likely === 1 ? "Leave it out too" : "Leave these out too"}</label>
+              </div>
+            ) : null}
             {skipped ? (
               <details className="text-muted-foreground">
                 <summary className="cursor-pointer text-destructive">{skipped} {skipped === 1 ? "row" : "rows"} will be skipped</summary>
@@ -530,7 +558,7 @@ function Review({ loaded, onCancel, onDone }: { loaded: Loaded; onCancel: () => 
       <div className="flex gap-2 px-4 pt-4 md:px-4">
         <Button variant="outline" className="flex-1" disabled={busy} onClick={() => void onCancel()}>Cancel</Button>
         <Button className="flex-1" disabled={busy || !ready} onClick={() => void run()}>
-          {saving ? (status.connected ? "Saving to your account…" : "Waiting for a connection to save…") : busy ? `Importing… ${Math.round(progress * 100)}%` : !ready ? "Nothing new to import" : skipped ? `Import ${ready}, skip ${skipped}` : `Import ${ready}`}
+          {saving ? (status.connected ? `Saving… ${saving.done.toLocaleString()} of ${saving.total.toLocaleString()}` : "Waiting for a connection to save…") : busy ? `Importing… ${Math.round(progress * 100)}%` : !ready ? "Nothing new to import" : skipped ? `Import ${ready}, skip ${skipped}` : `Import ${ready}`}
         </Button>
       </div>
     </>
