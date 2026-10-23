@@ -105,7 +105,7 @@ test("income adds the in-vs-out card and a previous month adds what changed", ()
   expect(inout.spent).toBe(269100);
   expect(inout.keptPct).toBe(Math.round(((400000 - 269100) / 400000) * 100));
   expect(inout.prevKeptPct).toBe(Math.round(((300000 - 72000) / 300000) * 100));
-  expect(inout.budgets).toBeUndefined();
+  expect(card(r.cards, "budgets")).toBeUndefined();
 
   const changes = card(r.cards, "changes")!;
   expect(changes.prevLabel).toBe("August");
@@ -220,7 +220,7 @@ test("a month the ledger joined part-way counts its days from the first entry", 
   expect(card(monthRecap(f.snap, "2026-09")!.cards, "days")!.noSpend).toBe(25);
 });
 
-test("budgets ride on the in-vs-out card, or get a card of their own without income", () => {
+test("budgets get a card of their own, before in vs out, with income or without", () => {
   const f = fresh();
   september(f);
   let s = run(f.snap, "budgets.upsert", { period: "monthly", amount: 300000 });
@@ -231,8 +231,76 @@ test("budgets ride on the in-vs-out card, or get a card of their own without inc
   expect(card(alone.cards, "budgets")!.budgets).toEqual({ held: 1, total: 3, worst: { name: "Transport", over: 88500 } });
   s = run(s, "transactions.create", { type: "income", accountId: f.cash._id, categoryId: f.cat("Salary"), amount: 500000, note: "", tags: [], photoIds: [], date: "2026-09-01" });
   const withIncome = monthRecap(s, "2026-09")!;
-  expect(card(withIncome.cards, "budgets")).toBeUndefined();
-  expect(card(withIncome.cards, "inout")!.budgets).toEqual({ held: 1, total: 3, worst: { name: "Transport", over: 88500 } });
+  expect(kinds(withIncome.cards).slice(-3)).toEqual(["budgets", "inout", "closer"]);
+  expect(card(withIncome.cards, "budgets")!.budgets).toEqual({ held: 1, total: 3, worst: { name: "Transport", over: 88500 } });
+});
+
+test("the budgets card has each budget: over ones first, the day it went over, and its run of months", () => {
+  const f = fresh();
+  september(f);
+  f.expense("2026-08-10", 12000, "Food", "Dinner"); // August: Food over too
+  f.expense("2026-07-10", 5000, "Food", "Dinner"); // July: Food held
+  let s = run(f.snap, "budgets.upsert", { period: "monthly", amount: 300000 });
+  s = run(s, "budgets.upsert", { period: "monthly", categoryId: f.cat("Food"), amount: 10000 });
+  s = run(s, "budgets.upsert", { period: "monthly", categoryId: f.cat("Transport"), amount: 100000 });
+  const c = card(monthRecap(s, "2026-09")!.cards, "budgets")!;
+  expect(c.end).toBe("2026-09-30");
+  expect(c.prev).toEqual({ held: 2, total: 3 });
+  // Transport is 885 over, Food 56 over; the total held at 2,691 of 3,000
+  expect(c.rows!.map((r) => [r.id, r.name, r.spent, r.limit])).toEqual([
+    [f.cat("Transport"), "Transport", 188500, 100000],
+    [f.cat("Food"), "Food", 15600, 10000],
+    ["total", "Monthly budget", 269100, 300000],
+  ]);
+  // Transport passed 1,000 with the flight on the 12th; Food (18 + 19 + 21 + 98) on the 13th
+  expect(c.rows!.map((r) => r.overOn)).toEqual(["2026-09-12", "2026-09-13", undefined]);
+  // Food: over in August and September, held in July. Transport held in August. The total held back to July, the first month with entries
+  expect(Object.fromEntries(c.rows!.map((r) => [r.name, r.streak]))).toEqual({ Transport: 1, Food: 2, "Monthly budget": 3 });
+});
+
+test("the closer's summary carries the budgets held: of the month's budgets, or of the year's months", () => {
+  const f = fresh();
+  september(f);
+  let s = run(f.snap, "budgets.upsert", { period: "monthly", categoryId: f.cat("Food"), amount: 10000 });
+  s = run(s, "budgets.upsert", { period: "monthly", categoryId: f.cat("Transport"), amount: 1000000 });
+  expect(card(monthRecap(s, "2026-09")!.cards, "closer")!.summary.budgets).toEqual({ held: 1, total: 2 });
+  expect(card(monthRecap(f.snap, "2026-09")!.cards, "closer")!.summary.budgets).toBeUndefined();
+});
+
+test("annual budgets join the year's budgets card, or make it on their own", () => {
+  const f = fresh();
+  for (let m = 1; m <= 12; m++) {
+    const k = `2025-${String(m).padStart(2, "0")}`;
+    for (let d = 1; d <= RECAP_MIN_ENTRIES; d++) f.expense(`${k}-0${d}`, 1000, "Household", "Rent");
+    if (m === 6) f.expense(`${k}-20`, 50000, "Transport", "Flights");
+  }
+  // an annual Transport budget of 400: the June flights take it over on the 20th
+  let s = run(f.snap, "budgets.upsert", { period: "yearly", categoryId: f.cat("Transport"), amount: 40000 });
+  const alone = yearCard(yearRecap(s, 2025)!.cards, "budgets");
+  expect(alone.yearRows).toEqual([]);
+  expect(alone.budgets).toEqual({ held: 0, total: 1 });
+  expect(alone.annual!.map((r) => [r.name, r.spent, r.limit, r.overOn])).toEqual([["Transport", 50000, 40000, "2025-06-20"]]);
+  // with a monthly one too, the headline is months again and the annual ones ride along
+  s = run(s, "budgets.upsert", { period: "monthly", categoryId: f.cat("Household"), amount: 1000000 });
+  const both = yearCard(yearRecap(s, 2025)!.cards, "budgets");
+  expect(both.budgets).toEqual({ held: 12, total: 12 });
+  expect(both.annual!.map((r) => r.name)).toEqual(["Transport"]);
+  expect(yearCard(yearRecap(s, 2025)!.cards, "closer").summary.budgets).toEqual({ held: 12, total: 12 });
+});
+
+test("the year's budgets card shows each budget month by month", () => {
+  const f = fresh();
+  for (let m = 1; m <= 12; m++) {
+    const k = `2025-${String(m).padStart(2, "0")}`;
+    for (let d = 1; d <= RECAP_MIN_ENTRIES; d++) f.expense(`${k}-0${d}`, 1000, "Household", "Rent");
+    if (m === 3 || m === 4) f.expense(`${k}-20`, 20000, "Food", "Feast");
+  }
+  const s = run(f.snap, "budgets.upsert", { period: "monthly", categoryId: f.cat("Food"), amount: 10000 });
+  const c = yearCard(yearRecap(s, 2025)!.cards, "budgets");
+  expect(c.budgets).toEqual({ held: 10, total: 12 });
+  const food = c.yearRows!.find((r) => r.name === "Food")!;
+  expect(food.months.map((o) => o?.[0])).toEqual(["h", "h", "o", "o", "h", "h", "h", "h", "h", "h", "h", "h"]);
+  expect(food).toMatchObject({ held: 10, over: 2, overBy: 20000, run: 8 });
 });
 
 test("a recap only judges the budgets that existed in its month", () => {
@@ -298,6 +366,8 @@ test("recapText writes the three-line summary", () => {
   expect(recapText({ range: { from: "2026-05-01", to: "2026-05-31" }, days: 31, entries: 5, strip: [], spent: 100, noSpend: 1 }, "May 2026", fmt)).toBe("May 2026 · UnMoney\nSpent ₹1\n1 no-spend day");
   // more out than in: never a negative share kept
   expect(recapText({ range: { from: "2026-05-01", to: "2026-05-31" }, days: 31, entries: 5, strip: [], spent: 120, keptPct: -20, noSpend: 1 }, "May 2026", fmt)).toBe("May 2026 · UnMoney\nSpent ₹1.2\nSpent 120% of income · 1 no-spend day");
+  // with budgets, how many held
+  expect(recapText({ range: { from: "2026-05-01", to: "2026-05-31" }, days: 31, entries: 5, strip: [], spent: 100, noSpend: 1, budgets: { held: 3, total: 4 } }, "May 2026", fmt)).toBe("May 2026 · UnMoney\nSpent ₹1\n1 no-spend day · Budgets 3 of 4 held");
 });
 
 test("recapIndex lists every month with expenses, newest first, with the current month on top", () => {
@@ -379,7 +449,7 @@ test("the year total equals statsByCategory over yearRange, and the cards run in
   expect(inout.income).toBe(150000 * 12);
   expect(inout.keptPct).toBe(Math.round(((150000 * 12 - stats.total) / (150000 * 12)) * 100));
   expect(inout.bestMonth).toBeDefined();
-  expect(inout.budgetMonths).toBeUndefined();
+  expect(yearCard(r.cards, "budgets")).toBeUndefined();
   const closer = yearCard(r.cards, "closer").summary;
   expect(closer).toMatchObject({ spent: stats.total, prevLabel: "2025", biggest: { note: "Flights to Lisbon", amount: 80000 }, repeat: { text: "Coffee", count: 14 * 12 } });
   expect(closer.personality).toBeDefined();

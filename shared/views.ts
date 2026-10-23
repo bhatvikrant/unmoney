@@ -9,7 +9,7 @@ import {
 } from "./ledger";
 import type { AccountKind } from "./defaults";
 import { addDays, addMonths, daysInMonth, diffDays, make, parts, todayISO } from "./dates";
-import { elapsedFraction, periodKey, periodRange, type Range } from "./period";
+import { elapsedFraction, monthKeyForDate, monthRange, parseMonthKey, periodKey, periodRange, shiftMonthKey, type Range } from "./period";
 import { laterMatches } from "./gmail/dedup";
 
 export type Tx = Doc<"transactions">;
@@ -593,6 +593,38 @@ export function budgetStatus(snap: Snapshot, period: Doc<"budgets">["period"], k
   return { range, total, perCategory, spentAll, elapsed: elapsedFraction(range, today) };
 }
 
+/**
+ * What went out per `period` on average over the `months` whole months before today's, in one main
+ * category (or in all, without one), counted the way budgetStatus counts it. Months before the first
+ * entry are left out so a new ledger isn't averaged down; null when no earlier month has any entries.
+ */
+export function budgetAverage(snap: Snapshot, categoryId: string | undefined, period: Doc<"budgets">["period"], today = todayISO(), months = 6): { amount: number; months: number } | null {
+  const settings = settingsOf(snap);
+  if (!settings) return null;
+  const msd = settings.monthStartDay;
+  const current = monthKeyForDate(today, msd);
+  const to = monthRange(shiftMonthKey(current, -1), msd).to;
+  let first: string | undefined;
+  for (const t of snap.transactions) if (!first || t.date < first) first = t.date;
+  if (!first || first > to) return null;
+  const startKey = [shiftMonthKey(current, -months), monthKeyForDate(first, msd)].sort()[1];
+  const from = monthRange(startKey, msd).from;
+  const index = (k: string) => { const { y, m } = parseMonthKey(k); return y * 12 + m; };
+  const n = index(current) - index(startKey);
+  const ledger = ledgerOf(snap);
+  const parentOf = new Map(snap.categories.filter((c) => c.type === "expense").map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
+  let spent = 0;
+  for (const t of snap.transactions) {
+    if (t.date < from || t.date > to) continue;
+    const e = kindsOf(t, ledger).expense;
+    if (!e) continue;
+    if (categoryId && (!t.categoryId || (parentOf.get(t.categoryId) ?? t.categoryId) !== categoryId)) continue;
+    spent += e;
+  }
+  const per = period === "weekly" ? (spent * 7) / (diffDays(from, to) + 1) : period === "yearly" ? (spent * 12) / n : spent / n;
+  return { amount: Math.round(per), months: n };
+}
+
 /** The period after `key`. */
 function nextPeriodKey(period: Doc<"budgets">["period"], key: string, monthStartDay: number, weekStartDay: number): string {
   return periodKey(period, addDays(periodRange(period, key, monthStartDay, weekStartDay).to, 1), monthStartDay, weekStartDay);
@@ -654,16 +686,72 @@ export function budgetLevel(item: Pick<BudgetStatusItem, "limit" | "spent">): Bu
 
 /** Every budget in the period that holds `today`, with how far through it is: what the alerts and the Stats tab's dot read. */
 export function currentBudgetLevels(snap: Snapshot, today: string): BudgetAlertItem[] {
+  return budgetsAt(snap, today);
+}
+
+/**
+ * Every budget in the weekly, monthly and annual periods that hold `date`, with its level. `without`
+ * leaves one entry out of the spending: the one open in the form, so its old amount isn't counted
+ * on top of what is being typed. Weekly first, then monthly, then annual; a period's total budget before its categories.
+ */
+export function budgetsAt(snap: Snapshot, date: string, without?: string): BudgetAlertItem[] {
   const settings = settingsOf(snap);
-  if (!settings) return [];
+  if (!settings || !snap.budgets.length) return [];
+  const s = without ? { ...snap, transactions: snap.transactions.filter((t) => t._id !== without) } : snap;
   const out: BudgetAlertItem[] = [];
   for (const period of ["weekly", "monthly", "yearly"] as const) {
     if (!snap.budgets.some((b) => b.period === period)) continue;
-    const status = budgetStatus(snap, period, periodKey(period, today, settings.monthStartDay, settings.weekStartDay), today);
+    const status = budgetStatus(s, period, periodKey(period, date, settings.monthStartDay, settings.weekStartDay), date);
     if (!status) continue;
     for (const it of [...(status.total ? [status.total] : []), ...status.perCategory]) out.push({ ...it, level: budgetLevel(it), range: status.range, period });
   }
   return out;
+}
+
+/** An expense that isn't in the ledger yet (a bill still due, a Gmail draft), as budgets would count it. */
+export type PendingExpense = Pick<Tx, "type" | "date" | "amount" | "accountId"> & Partial<Pick<Tx, "categoryId" | "toAccountId" | "feeAmount">>;
+/** A budget as it stands, and what `adds` more would leave in it (`after`, below zero when over). */
+export type BudgetImpact = { item: BudgetAlertItem; adds: number; after: number };
+
+/**
+ * What a set of expenses not in the ledger yet would do to the budgets: every budget (category and
+ * total, in the period holding each one's date) they add to, with what it has left before and after.
+ * Counted as budgets count entries (kindsOf), so a card purchase shown when paid adds nothing.
+ * The ones left worst off come first.
+ */
+export function budgetImpact(snap: Snapshot, pending: PendingExpense[]): BudgetImpact[] {
+  if (!snap.budgets.length || !pending.length) return [];
+  const ledger = ledgerOf(snap);
+  const parentOf = new Map(snap.categories.map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
+  const atDate = new Map<string, BudgetAlertItem[]>();
+  const out = new Map<string, BudgetImpact>();
+  for (const p of pending) {
+    const adds = kindsOf({ _id: "", ...p } as Parameters<typeof kindsOf>[0], ledger).expense;
+    if (!adds) continue;
+    let items = atDate.get(p.date);
+    if (!items) atDate.set(p.date, (items = budgetsAt(snap, p.date)));
+    const main = p.type === "expense" && p.categoryId ? parentOf.get(p.categoryId) ?? p.categoryId : undefined;
+    for (const item of items) {
+      if (item.budget.categoryId && item.budget.categoryId !== main) continue;
+      const key = `${item.budget._id}|${item.range.from}`;
+      const hit = out.get(key) ?? { item, adds: 0, after: item.remaining };
+      hit.adds += adds;
+      hit.after -= adds;
+      out.set(key, hit);
+    }
+  }
+  return [...out.values()].sort((a, b) => a.after / Math.max(1, a.item.limit) - b.after / Math.max(1, b.item.limit));
+}
+
+/**
+ * The budgets an expense in `categoryId` (a main category or a subcategory) counts against: its
+ * main category's own budgets, else the total ones. Empty when neither exists.
+ */
+export function budgetsForCategory(items: BudgetAlertItem[], snap: Snapshot, categoryId: string | undefined): BudgetAlertItem[] {
+  const c = categoryId ? snap.categories.find((x) => x._id === categoryId) : undefined;
+  const main = c?.parentId ?? categoryId;
+  const own = main ? items.filter((i) => i.budget.categoryId === main) : [];
+  return own.length ? own : items.filter((i) => !i.budget.categoryId);
 }
 
 /**

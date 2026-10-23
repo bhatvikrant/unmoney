@@ -22,7 +22,8 @@ import { useOpenEntry } from "@/lib/nav";
 import { offerUndo } from "@/lib/undo";
 import { useShortcuts } from "@/lib/shortcuts";
 import { dateLabel } from "@/lib/format";
-import { draftMatches, draftsOpen } from "../../../shared/views";
+import { budgetImpact, draftMatches, draftsOpen } from "../../../shared/views";
+import { useBudgetLabel } from "@/components/tx/entryBudgets";
 import { importable, type Importable } from "../../../shared/gmail/importable";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { useBottomBar } from "@/components/shell/SplitLayout";
@@ -110,6 +111,15 @@ export default function GmailReviewPage() {
     if (k === "debit") out += i.draft.proposal.amount;
     else if (k === "credit") inn += Math.abs(i.draft.proposal.amount);
   }
+
+  // what importing the ticked ones does to the budgets: the ones it takes over, or past 80%
+  const budgetLabel = useBudgetLabel();
+  const selectedKey = selected.map((i) => i.draft._id).join(",");
+  const budgetHits = useMemo(
+    () => budgetImpact(view, selected.map((i) => i.ready!.fields)).filter((x) => x.after < 0 || x.after < x.item.limit * 0.2),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view, selectedKey],
+  );
 
   async function importSelected() {
     setBusy(true);
@@ -231,6 +241,21 @@ export default function GmailReviewPage() {
                 {inn ? <span className="text-income">{fmt(inn)} in</span> : null}
               </span>
             </div>
+            {budgetHits.length ? (
+              <div className="space-y-0.5 text-xs">
+                {budgetHits.slice(0, 2).map((x, n) => {
+                  const { name } = budgetLabel(x.item);
+                  return (
+                    <div key={`${x.item.budget._id}|${x.item.range.from}`} className="truncate">
+                      {x.after < 0
+                        ? <span className="text-expense">{x.item.remaining < 0 ? `${name}: ${fmt(-x.after)} over after import` : `Takes ${name} ${fmt(-x.after)} over`}</span>
+                        : <span className="text-muted-foreground">{name}: <span className="text-budget-left">{fmt(x.after)} left</span> after import</span>}
+                      {n === 1 && budgetHits.length > 2 ? <span className="text-muted-foreground"> · and {budgetHits.length - 2} more</span> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
             <div className="flex gap-2">
               <Button className="h-11 flex-1 text-base" disabled={busy || !selected.length} onClick={() => void importSelected()}>{importLabel}</Button>
               <Button variant="outline" className="h-11 text-base" disabled={busy || !selected.length} onClick={() => void dismissSelected()}>Dismiss</Button>

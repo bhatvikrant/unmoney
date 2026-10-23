@@ -7,7 +7,8 @@
 import type { Snapshot } from "./ops";
 import { addDays, diffDays, make, MONTH_LONG, weekday, type ISODate } from "./dates";
 import { monthKey, monthKeyForDate, monthRange, parseMonthKey, shiftMonthKey, yearRange, type MonthKey, type Range } from "./period";
-import { budgetStatus, settingsOf, statsByCategory, statsEntries, type Tx } from "./views";
+import { budgetStatus, ledgerOf, settingsOf, statsByCategory, statsEntries, type Tx } from "./views";
+import { kindsOf } from "./ledger";
 
 /** A month needs this many expense entries before it gets a recap. */
 export const RECAP_MIN_ENTRIES = 5;
@@ -82,6 +83,21 @@ const FOOD_WORDS = ["food", "eating", "dining", "restaurant", "cafe"];
 const TRAVEL_WORDS = ["travel", "transport"];
 
 export type RecapBudgets = { held: number; total: number; worst?: { name: string; over: number } };
+/** One budget in a month's recap: its limit (carry-over included) against what went out. */
+export type RecapBudgetRow = {
+  /** The budget's category, or "total" for the month's total budget. */
+  id: string;
+  name: string;
+  limit: number;
+  spent: number;
+  carry: number;
+  /** The day spending went past the limit, for one that went over. */
+  overOn?: ISODate;
+  /** Months in a row, this one included, the budget ended the same way: held, or over. */
+  streak: number;
+};
+/** One budget across a year's recap: how each of the twelve months ended for it (null: it didn't exist yet). */
+export type RecapBudgetYearRow = { id: string; name: string; months: ("held" | "over" | null)[]; held: number; over: number; overBy: number; run: number };
 
 /** The month's colour signature: the top three categories by share, in Stats order; everything else is the grey rest. */
 export type RecapStrip = { id: string; name: string; pct: number }[];
@@ -104,6 +120,8 @@ export type RecapSummary = {
   repeat?: { text: string; count: number };
   /** The year only: the spending personality for the poster's last row. */
   personality?: Archetype;
+  /** A month: its budgets held, of all it had. A year: the months every monthly budget held, of the months that had one. */
+  budgets?: { held: number; total: number };
 };
 
 /** Which story a shared card belongs to, where the copy differs. Absent means a month. */
@@ -118,8 +136,20 @@ export type MonthCard =
   | { kind: "days"; perDay: { date: ISODate; amount: number; count: number }[]; busiest: ISODate; busiestNotes: string[]; noSpend: number; weekendShare: number; entriesPerDay: number }
   | { kind: "repeat"; note?: { text: string; count: number; amount: number }; nextNotes: { text: string; count: number }[]; account?: { id: string; name: string; share: number }; scheduled?: { amount: number; count: number } }
   | { kind: "changes"; scope?: RecapScope; prevLabel: string; movers: { id: string; name: string; before: number; after: number; pct?: number }[]; threshold: number }
-  | { kind: "inout"; scope?: RecapScope; income: number; spent: number; keptPct: number; prevKeptPct?: number; budgets?: RecapBudgets; bestMonth?: { month: MonthKey; keptPct: number }; budgetMonths?: { held: number; total: number } }
-  | { kind: "budgets"; scope?: RecapScope; budgets: RecapBudgets }
+  | { kind: "inout"; scope?: RecapScope; income: number; spent: number; keptPct: number; prevKeptPct?: number; bestMonth?: { month: MonthKey; keptPct: number } }
+  | {
+    kind: "budgets"; scope?: RecapScope; budgets: RecapBudgets;
+    /** The month's budgets, the ones that went over first. */
+    rows?: RecapBudgetRow[];
+    /** The month before, when it had budgets. */
+    prev?: { held: number; total: number };
+    /** The month's last day: how early a budget ran out is counted to it. */
+    end?: ISODate;
+    /** The year's monthly budgets, month by month. */
+    yearRows?: RecapBudgetYearRow[];
+    /** The year's annual budgets, as a month's rows (their run counts years). */
+    annual?: RecapBudgetRow[];
+  }
   | { kind: "closer"; scope?: RecapScope; summary: RecapSummary };
 
 /** The cards only a year has (spec §5). */
@@ -149,23 +179,100 @@ export function recapQualifies(snap: Snapshot, month: MonthKey): boolean {
 
 const localDate = (ms: number) => { const d = new Date(ms); return make(d.getFullYear(), d.getMonth() + 1, d.getDate()); };
 
-function budgetsOf(snap: Snapshot, month: MonthKey): RecapBudgets | undefined {
-  const status = budgetStatus(snap, "monthly", month);
+type BudgetPeriod = "monthly" | "yearly";
+const TOTAL_NAME: Record<BudgetPeriod, string> = { monthly: "Monthly budget", yearly: "Annual budget" };
+/** The period before `key`: the month before, or the year before. */
+const prevPeriod = (period: BudgetPeriod, key: string) => (period === "monthly" ? shiftMonthKey(key, -1) : String(Number(key) - 1));
+
+/**
+ * The monthly (or annual) budgets that already existed in the period `key` (made by its end, or with
+ * that period's own limit or carry-over set: a restored budget is new, but its overrides show it was
+ * there), each with its name. Undefined when there were none.
+ */
+function periodBudgets(snap: Snapshot, period: BudgetPeriod, key: string) {
+  const status = budgetStatus(snap, period, key);
   if (!status) return undefined;
-  // only budgets that already existed in that month: made by its end, or with that month's own
-  // limit or carry-over set (a restored budget is new, but its overrides show it was there)
   const existed = (b: (typeof status.perCategory)[number]["budget"]) =>
-    localDate(b._creationTime) <= status.range.to || b.overrides[month] !== undefined || (!!b.rolloverFrom && b.rolloverFrom <= month);
-  const items = [...(status.total ? [status.total] : []), ...status.perCategory].filter((i) => existed(i.budget));
-  if (!items.length) return undefined;
+    localDate(b._creationTime) <= status.range.to || b.overrides[key] !== undefined || (!!b.rolloverFrom && b.rolloverFrom <= key);
   const catName = new Map(snap.categories.map((c) => [c._id as string, c.name]));
-  const over = items.filter((i) => i.remaining < 0).sort((a, b) => a.remaining - b.remaining);
+  const items = [...(status.total ? [status.total] : []), ...status.perCategory].filter((i) => existed(i.budget))
+    .map((i) => ({ ...i, id: (i.budget.categoryId ?? "total") as string, name: i.budget.categoryId ? catName.get(i.budget.categoryId) ?? "Uncategorised" : TOTAL_NAME[period] }));
+  return items.length ? { range: status.range, items } : undefined;
+}
+const monthBudgets = (snap: Snapshot, month: MonthKey) => periodBudgets(snap, "monthly", month);
+
+function budgetsOf(snap: Snapshot, month: MonthKey): RecapBudgets | undefined {
+  const m = monthBudgets(snap, month);
+  if (!m) return undefined;
+  const over = m.items.filter((i) => i.remaining < 0).sort((a, b) => a.remaining - b.remaining);
   const worst = over[0];
-  return {
-    held: items.length - over.length,
-    total: items.length,
-    worst: worst ? { name: worst.budget.categoryId ? catName.get(worst.budget.categoryId) ?? "Uncategorised" : "Monthly budget", over: -worst.remaining } : undefined,
-  };
+  return { held: m.items.length - over.length, total: m.items.length, worst: worst ? { name: worst.name, over: -worst.remaining } : undefined };
+}
+
+/** The first day in `range` the budget's spending went past `limit`: a pass over the entries, as budgetStatus counts them. */
+function overDay(snap: Snapshot, range: Range, categoryId: string | undefined, limit: number): ISODate | undefined {
+  const ledger = ledgerOf(snap);
+  const parentOf = new Map(snap.categories.map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
+  const perDay = new Map<ISODate, number>();
+  for (const t of snap.transactions) {
+    if (t.date < range.from || t.date > range.to) continue;
+    if (categoryId && (!t.categoryId || (parentOf.get(t.categoryId) ?? t.categoryId) !== categoryId)) continue;
+    const e = kindsOf(t, ledger).expense;
+    if (e) perDay.set(t.date, (perDay.get(t.date) ?? 0) + e);
+  }
+  let spent = 0;
+  for (const d of [...perDay.keys()].sort()) {
+    spent += perDay.get(d)!;
+    if (spent > limit) return d;
+  }
+  return undefined;
+}
+
+/**
+ * A month's (or a year's annual) budgets for its card: over ones first (most over first), then the
+ * rest fullest first, each with the day it went over and how many periods in a row it has ended the
+ * same way.
+ */
+function budgetRows(snap: Snapshot, key: string, period: BudgetPeriod = "monthly"): RecapBudgetRow[] | undefined {
+  const m = periodBudgets(snap, period, key);
+  if (!m) return undefined;
+  const rows = m.items.map((i): RecapBudgetRow => ({
+    id: i.id, name: i.name, limit: i.limit, spent: i.spent, carry: i.carry, streak: 1,
+    overOn: i.remaining < 0 ? overDay(snap, m.range, i.budget.categoryId, i.limit) : undefined,
+  }));
+  // walk back a period at a time while any budget is still on a run, not into periods before the first entry
+  const open = new Set(rows.map((r) => r.id));
+  const first = trackedFrom(snap, { from: "0000-01-01", to: m.range.to });
+  for (let k = prevPeriod(period, key), guard = 0; open.size && guard < 24; k = prevPeriod(period, k), guard++) {
+    const before = periodBudgets(snap, period, k);
+    if (!before || before.range.to < first) break;
+    const wasOver = new Map(before.items.map((i) => [i.id, i.remaining < 0]));
+    for (const r of rows) {
+      if (!open.has(r.id)) continue;
+      if (wasOver.get(r.id) === (r.spent > r.limit)) r.streak += 1; else open.delete(r.id);
+    }
+  }
+  const ratio = (r: RecapBudgetRow) => r.spent / Math.max(1, r.limit);
+  return rows.sort((a, b) => Number(b.spent > b.limit) - Number(a.spent > a.limit) || (a.spent > a.limit ? (b.spent - b.limit) - (a.spent - a.limit) : ratio(b) - ratio(a)));
+}
+
+/** The year's budgets month by month: which months each held or went over, by how much in all, and its longest run of held months. */
+function budgetYearRows(snap: Snapshot, months: MonthKey[]): RecapBudgetYearRow[] {
+  const rows = new Map<string, RecapBudgetYearRow>();
+  months.forEach((k, i) => {
+    for (const it of monthBudgets(snap, k)?.items ?? []) {
+      let r = rows.get(it.id);
+      if (!r) rows.set(it.id, (r = { id: it.id, name: it.name, months: months.map(() => null), held: 0, over: 0, overBy: 0, run: 0 }));
+      const over = it.remaining < 0;
+      r.months[i] = over ? "over" : "held";
+      if (over) { r.over += 1; r.overBy -= it.remaining; } else r.held += 1;
+    }
+  });
+  for (const r of rows.values()) {
+    let run = 0;
+    for (const o of r.months) { run = o === "held" ? run + 1 : 0; r.run = Math.max(r.run, run); }
+  }
+  return [...rows.values()].sort((a, b) => b.over - a.over || b.overBy - a.overBy || a.name.localeCompare(b.name));
 }
 
 type Entry = ReturnType<typeof statsEntries>[number];
@@ -338,20 +445,24 @@ function buildMonthRecap(snap: Snapshot, month: MonthKey): Recap | null {
     if (movers.length) cards.push({ kind: "changes", prevLabel, movers, threshold });
   }
 
-  // 8 · in vs out, with budgets; or budgets on their own when nothing came in
-  const income = statsByCategory(snap, range.from, range.to, "income").total;
+  // 8 · budgets: each one's month, the day it went over, its run of months
   const budgets = budgetsOf(snap, month);
+  if (budgets) {
+    const prev = budgetsOf(snap, prevKey);
+    cards.push({ kind: "budgets", budgets, rows: budgetRows(snap, month), prev: prev ? { held: prev.held, total: prev.total } : undefined, end: range.to });
+  }
+
+  // 9 · in vs out
+  const income = statsByCategory(snap, range.from, range.to, "income").total;
   let keptPct: number | undefined;
   if (income > 0) {
     keptPct = Math.round(((income - total) / income) * 100);
     const prevIncome = prevCat ? statsByCategory(snap, prevRange.from, prevRange.to, "income").total : 0;
     const prevKeptPct = prevIncome > 0 ? Math.round(((prevIncome - prevCat!.total) / prevIncome) * 100) : undefined;
-    cards.push({ kind: "inout", income, spent: total, keptPct, prevKeptPct, budgets });
-  } else if (budgets) {
-    cards.push({ kind: "budgets", budgets });
+    cards.push({ kind: "inout", income, spent: total, keptPct, prevKeptPct });
   }
 
-  // 9 · closer
+  // 10 · closer
   const summary: RecapSummary = {
     range, days, entries: entries.length, strip,
     spent: total, change, prevLabel: prevCat ? prevLabel : undefined,
@@ -359,6 +470,7 @@ function buildMonthRecap(snap: Snapshot, month: MonthKey): Recap | null {
     biggest: { note: label(biggest), amount: biggest.amount },
     keptPct, noSpend,
     repeat: topNote ? { text: topNote.text, count: topNote.count } : undefined,
+    budgets: budgets ? { held: budgets.held, total: budgets.total } : undefined,
   };
   cards.push({ kind: "closer", summary });
 
@@ -610,12 +722,21 @@ function buildYearRecap(snap: Snapshot, year: number): Recap | null {
     if (items.length) cards.push({ kind: "new", items: items.slice(0, 3) });
   }
 
-  // 12 · in vs out, with the best month and the months within budget; or budgets on their own
+  // 12 · budgets, month by month; and in vs out, with the best month
   const incomeEntries = statsEntries(snap, range.from, range.to, "income");
   const income = incomeEntries.reduce((s, e) => s + e.amount, 0);
-  const monthBudgets = months.map((k) => budgetsOf(snap, k));
+  const byMonth = months.map((k) => budgetsOf(snap, k));
   // out of the months that had a budget, not twelve: budgets set in October are three months, not "3 of 12"
-  const budgetMonths = monthBudgets.some(Boolean) ? { held: monthBudgets.filter((b) => b && b.held === b.total).length, total: monthBudgets.filter(Boolean).length } : undefined;
+  const budgetMonths = byMonth.some(Boolean) ? { held: byMonth.filter((b) => b && b.held === b.total).length, total: byMonth.filter(Boolean).length } : undefined;
+  const annual = budgetRows(snap, String(year), "yearly");
+  if (budgetMonths || annual) {
+    cards.push({
+      kind: "budgets", scope: "year",
+      // with annual budgets alone, the headline counts those
+      budgets: budgetMonths ?? { held: annual!.filter((r) => r.spent <= r.limit).length, total: annual!.length },
+      yearRows: budgetMonths ? budgetYearRows(snap, months) : [], annual, end: range.to,
+    });
+  }
   let keptPct: number | undefined;
   if (income > 0) {
     keptPct = Math.round(((income - total) / income) * 100);
@@ -629,9 +750,7 @@ function buildYearRecap(snap: Snapshot, year: number): Recap | null {
       const k = Math.round(((incomeByMonth[i] - m.amount) / incomeByMonth[i]) * 100);
       if (!bestMonth || k > bestMonth.keptPct) bestMonth = { month: m.month, keptPct: k };
     });
-    cards.push({ kind: "inout", scope: "year", income, spent: total, keptPct, prevKeptPct, bestMonth, budgetMonths });
-  } else if (budgetMonths) {
-    cards.push({ kind: "budgets", scope: "year", budgets: { held: budgetMonths.held, total: budgetMonths.total } });
+    cards.push({ kind: "inout", scope: "year", income, spent: total, keptPct, prevKeptPct, bestMonth });
   }
 
   // 13 · spending personality: fixed rules on figures computed once (spec §4.3)
@@ -671,6 +790,7 @@ function buildYearRecap(snap: Snapshot, year: number): Recap | null {
     keptPct, noSpend,
     repeat: byCount[0] ? { text: byCount[0].text, count: byCount[0].count } : undefined,
     personality: archetype,
+    budgets: budgetMonths,
   };
   cards.push({ kind: "closer", scope: "year", summary });
 
@@ -792,11 +912,11 @@ export function recapText(s: RecapSummary, label: string, fmt: (minor: number) =
   const noSpend = `${s.noSpend} no-spend ${s.noSpend === 1 ? "day" : "days"}`;
   if (scope === "year") {
     const line3 = [top, biggest, s.repeat ? `Most logged: "${s.repeat.text}" ×${s.repeat.count}` : ""].filter(Boolean).join(" · ");
-    const line4 = [kept, noSpend, s.personality ?? ""].filter(Boolean).join(" · ");
+    const line4 = [kept, noSpend, s.budgets ? `${s.budgets.held} of ${s.budgets.total} months within budget` : "", s.personality ?? ""].filter(Boolean).join(" · ");
     return `${label} · UnMoney\n${spent}\n${line3}\n${line4}`;
   }
   const line2 = [spent, top, biggest].filter(Boolean).join(" · ");
-  const line3 = [kept, noSpend, s.repeat ? `"${s.repeat.text}" ×${s.repeat.count}` : ""].filter(Boolean).join(" · ");
+  const line3 = [kept, noSpend, s.budgets ? `Budgets ${s.budgets.held} of ${s.budgets.total} held` : "", s.repeat ? `"${s.repeat.text}" ×${s.repeat.count}` : ""].filter(Boolean).join(" · ");
   return `${label} · UnMoney\n${line2}\n${line3}`;
 }
 

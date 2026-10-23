@@ -26,6 +26,7 @@ What to hold to:
 | Ledger row tap | A bottom sheet: what, when, how much, how often; Add now / Skip this one / Edit schedule. |
 | More › Look ahead › Bills & subscriptions (`/upcoming`) | The three lists above. Rows open the same sheet; a suggestion row opens its last entry. |
 | More › Set up › Repeats | Unchanged (Edit schedule goes there). |
+| Bills & subscriptions, Budget page | What the bills still due do to the budgets running now (docs/specs/budget-signals.md). |
 
 States:
 

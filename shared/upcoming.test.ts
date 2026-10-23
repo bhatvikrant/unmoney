@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "./ops";
 import { firstDateAfter } from "./repeat";
-import { monthlyCost, next30Days, recurringSuggestions, subscriptionsList, upcomingOccurrences } from "./upcoming";
+import { billsAgainstBudgets, monthlyCost, next30Days, recurringSuggestions, subscriptionsList, upcomingOccurrences } from "./upcoming";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -184,4 +184,26 @@ test("catching up never adds a date the schedule already has an entry for", () =
   expect(again.result).toBe(0);
   expect(again.snap.transactions.length).toBe(n);
   expect(again.snap.repeats[0].nextDate).toBe("2026-10-26");
+});
+
+test("bills still due count against the budgets running today, not the next period's", () => {
+  // weekly Netflix (₹649) from 14 Sep: after catching up to 21 Oct, 26 Oct is still due this month; November's are not
+  const { s, food } = withRepeat("2026-09-14", "weekly");
+  let snap = run(s, "repeats.catchUp", { today: "2026-10-21" }).snap;
+  snap = run(snap, "budgets.upsert", { period: "monthly", categoryId: food, amount: 300000 }).snap;
+  snap = run(snap, "budgets.upsert", { period: "monthly", amount: 500000 }).snap;
+  const other = snap.categories.find((c) => c.type === "expense" && c._id !== food && !c.parentId)!._id;
+  snap = run(snap, "budgets.upsert", { period: "monthly", categoryId: other, amount: 100000 }).snap;
+  const out = billsAgainstBudgets(snap, "2026-10-21");
+  // Oct entries: 5, 12, 19 Oct = 3 × 649 spent; the 26th is due. A budget no bill touches is left out
+  const food_ = out.find((o) => o.item.budget.categoryId === food)!;
+  expect(food_).toMatchObject({ adds: 64900, after: 300000 - 4 * 64900 });
+  expect(food_.bills.map((b) => b.date)).toEqual(["2026-10-26"]);
+  expect(out.find((o) => !o.item.budget.categoryId)).toMatchObject({ adds: 64900 });
+  expect(out.some((o) => o.item.budget.categoryId === other)).toBe(false);
+  // a small budget goes over once the bill is in, and sorts first
+  snap = run(snap, "budgets.upsert", { id: food_.item.budget._id, period: "monthly", categoryId: food, amount: 200000 }).snap;
+  const tight = billsAgainstBudgets(snap, "2026-10-21");
+  expect(tight[0].item.budget.categoryId).toBe(food);
+  expect(tight[0].after).toBe(200000 - 4 * 64900);
 });
