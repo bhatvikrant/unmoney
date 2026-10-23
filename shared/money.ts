@@ -19,7 +19,8 @@ export type DecimalMark = "." | ",";
 export function parseNumber(raw: string, decimal: DecimalMark = "."): number | null {
   let s = raw.trim();
   const negative = /^\(.*\)$/.test(s) || /^[^0-9]*-/.test(s) || /-\s*$/.test(s);
-  s = s.replace(/[^0-9.,]/g, "");
+  // "Rs." and "Dr." end in a dot that is not a decimal point
+  s = s.replace(/\p{L}+\./gu, "").replace(/[^0-9.,]/g, "");
   if (!/\d/.test(s)) return null;
   const marks = s.replace(/\d/g, "");
   if (marks.includes(".") && marks.includes(",")) {

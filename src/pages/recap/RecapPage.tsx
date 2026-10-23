@@ -59,7 +59,7 @@ function Recap({ month }: { month: string }) {
   useShortcuts({ ArrowRight: next, ArrowLeft: prev, Escape: close });
   const swipe = useSwipe(next, prev);
 
-  if (!recap) {
+  if (!recap || !n) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center bg-background">
         {year !== null
@@ -70,7 +70,7 @@ function Recap({ month }: { month: string }) {
   }
 
   const transition: Transition = still ? { duration: 0 } : { duration: 0.22, ease: "easeOut" };
-  const card = recap.cards[at];
+  const card = recap.cards[Math.min(at, n - 1)];
   const segments = (
     <div className="flex flex-1 gap-[3px]" role="progressbar" aria-valuemin={1} aria-valuemax={n} aria-valuenow={at + 1} aria-label={`Card ${at + 1} of ${n}`}>
       {recap.cards.map((c, i) => (
