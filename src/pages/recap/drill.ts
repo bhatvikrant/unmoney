@@ -9,6 +9,9 @@ import type { RecapCard, RecapDrill } from "../../../shared/recap";
 /** What the cards call to open a drill; the recap page provides it. */
 export const DrillContext = createContext<(d: RecapDrill) => void>(() => {});
 export const useDrill = () => useContext(DrillContext);
+/** Whether to point at a card's tappable parts with a pulsing dot: until the user first opens a drawer. */
+export const HintContext = createContext(false);
+export const useHints = () => useContext(HintContext);
 
 /** "c:<id>", "d:2026-09-14", "n:coffee", "top:10"… for the URL. */
 export function encodeDrill(d: RecapDrill): string {

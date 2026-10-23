@@ -11,10 +11,14 @@
  * goes; the last card waits. Holding the card down (finger or mouse) pauses it, and letting go
  * carries on from where it was, without the release counting as a tap. It also waits while the
  * drawer is open, while the tab is in the background, and while paused with the button (or Space).
+ *
+ * On a phone, pulling the story down closes it, the way a story does: it follows the finger,
+ * shrinking and rounding its corners over a darkening backdrop, and goes on a long enough pull or
+ * a flick; anything less springs back. A pull is never also a tap.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router";
-import { AnimatePresence, motion, useReducedMotion, type Transition } from "framer-motion";
+import { animate, AnimatePresence, motion, useMotionValue, useReducedMotion, useTransform, type Transition } from "framer-motion";
 import { ChevronLeft, ChevronRight, Pause, Play, X } from "lucide-react";
 import { useStore, useView } from "@/lib/store";
 import { useGoBack } from "@/lib/nav";
@@ -31,13 +35,18 @@ import { monthRecap, yearRecap, RECAP_MIN_ENTRIES, RECAP_YEAR_MIN_MONTHS, type R
 import { settingsOf, statsEntries } from "../../../shared/views";
 import { RecapCardView } from "./cards";
 import { RecapDrawer } from "./RecapDrawer";
-import { decodeDrill, DrillContext, encodeDrill } from "./drill";
+import { decodeDrill, DrillContext, encodeDrill, HintContext } from "./drill";
 
 const SLIDE = 16;
 /** How long each card stays before the next one comes in by itself. */
 const CARD_MS = 5000;
 /** A press held this long is a pause, not a tap: letting go does not step. */
 const HOLD_MS = 300;
+/** A pull down past this many px, or faster than PULL_FLICK px/ms, closes the story. */
+const PULL_CLOSE = 140;
+const PULL_FLICK = 0.6;
+/** Off once the user has opened a drawer from a card: the dots that point at tappable parts have done their job. */
+const HINTS_KEY = "unmoney:recap-hints";
 const variants = {
   enter: (dir: number) => ({ opacity: 0, x: dir * SLIDE }),
   center: { opacity: 0.999, x: 0 },
@@ -70,6 +79,14 @@ function Recap({ month }: { month: string }) {
   const [stopped, setStopped] = useState(false);
   const [hidden, setHidden] = useState(() => document.hidden);
   const press = useRef({ at: 0, long: false });
+  // the pull to close: where the finger went down, whether it is a pull or a sideways swipe, its speed
+  const pull = useRef<{ x: number; y: number; mode?: "pull" | "side"; lastY: number; lastT: number; vy: number } | null>(null);
+  const pulled = useRef(false);
+  const pullY = useMotionValue(0);
+  const pullScale = useTransform(pullY, [0, 600], [1, 0.82]);
+  const pullRadius = useTransform(pullY, [0, 60], [0, 28]);
+  const backdrop = useTransform(pullY, [0, 1, 500], [0, 1, 0.4]);
+  const [hints, setHints] = useState(() => { try { return localStorage.getItem(HINTS_KEY) !== "off"; } catch { return true; } });
   useEffect(() => {
     const h = () => setHidden(document.hidden);
     document.addEventListener("visibilitychange", h);
@@ -86,7 +103,10 @@ function Recap({ month }: { month: string }) {
 
   const card = recap?.cards[Math.min(at, n - 1)];
   const drill = decodeDrill(params.get("drill"), card);
-  const openDrill = (d: RecapDrill | null) => setParams({ ...(at ? { card: String(at) } : {}), ...(d ? { drill: encodeDrill(d) } : {}) }, { replace: true });
+  const openDrill = (d: RecapDrill | null) => {
+    if (d && hints) { setHints(false); try { localStorage.setItem(HINTS_KEY, "off"); } catch { /* storage unavailable: the dots go for this visit */ } }
+    setParams({ ...(at ? { card: String(at) } : {}), ...(d ? { drill: encodeDrill(d) } : {}) }, { replace: true });
+  };
 
   const close = () => goBack(year !== null ? `/stats?period=yearly&year=${year}` : `/stats?month=${month}`);
   const go = (i: number) => { setDir(i > at ? 1 : -1); setParams(i ? { card: String(i) } : {}, { replace: true }); };
@@ -105,13 +125,42 @@ function Recap({ month }: { month: string }) {
     onPointerDown: (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       window.getSelection()?.removeAllRanges();
-      press.current = { at: Date.now(), long: false };
+      press.current = { at: e.timeStamp, long: false };
+      pulled.current = false;
+      pull.current = !wide && e.pointerType === "touch" ? { x: e.clientX, y: e.clientY, lastY: e.clientY, lastT: e.timeStamp, vy: 0 } : null;
       setHeld(true);
     },
-    onPointerUp: () => { press.current.long = Date.now() - press.current.at >= HOLD_MS; setHeld(false); },
-    onPointerCancel: () => setHeld(false),
+    onPointerMove: (e: React.PointerEvent) => {
+      const p = pull.current;
+      if (!p) return;
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      // decided once, on the first 10 px: mostly down is a pull, anything else is left to the swipe
+      if (!p.mode && Math.hypot(dx, dy) > 10) p.mode = dy > 0 && dy > Math.abs(dx) * 1.2 ? "pull" : "side";
+      if (p.mode !== "pull") return;
+      pulled.current = true;
+      if (e.timeStamp > p.lastT) p.vy = (e.clientY - p.lastY) / (e.timeStamp - p.lastT);
+      p.lastY = e.clientY;
+      p.lastT = e.timeStamp;
+      pullY.set(Math.max(0, dy));
+    },
+    onPointerUp: (e: React.PointerEvent) => { press.current.long = e.timeStamp - press.current.at >= HOLD_MS; setHeld(false); endPull(); },
+    onPointerCancel: () => { setHeld(false); endPull(); },
     onPointerLeave: () => setHeld(false),
+    // a pull ends in a click on whatever it started on; it was not one
+    onClickCapture: (e: React.MouseEvent) => { if (pulled.current) { e.stopPropagation(); e.preventDefault(); pulled.current = false; } },
   };
+  function endPull() {
+    const p = pull.current;
+    pull.current = null;
+    if (p?.mode !== "pull") return;
+    setTimeout(() => { pulled.current = false; }, 100);
+    if (pullY.get() > PULL_CLOSE || p.vy > PULL_FLICK) {
+      setStopped(true);
+      void animate(pullY, window.innerHeight, still ? { duration: 0 } : { duration: 0.22, ease: "easeIn" }).then(close);
+    } else {
+      void animate(pullY, 0, still ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 40 });
+    }
+  }
   const tap = (step: () => void) => () => {
     if (press.current.long) { press.current.long = false; return; }
     step();
@@ -190,9 +239,22 @@ function Recap({ month }: { month: string }) {
 
   // outside the story, so a drag in the drawer is not a swipe to the next card
   const drawer = <RecapDrawer drill={drill} recapKey={month} range={recap.range} onDrill={openDrill} onClose={() => openDrill(null)} />;
-  if (!wide) return <DrillContext.Provider value={openDrill}><div className="h-dvh safe-bottom bg-background">{story}</div>{drawer}</DrillContext.Provider>;
+  if (!wide) {
+    return (
+      <DrillContext.Provider value={openDrill}>
+        <HintContext.Provider value={hints}>
+          <div className="relative h-dvh safe-bottom bg-background">
+            <motion.div aria-hidden="true" className="pointer-events-none fixed inset-0 bg-black" style={{ opacity: backdrop }} />
+            <motion.div className="relative h-full overflow-hidden" style={{ y: pullY, scale: pullScale, borderRadius: pullRadius }}>{story}</motion.div>
+          </div>
+          {drawer}
+        </HintContext.Provider>
+      </DrillContext.Provider>
+    );
+  }
   return (
     <DrillContext.Provider value={openDrill}>
+    <HintContext.Provider value={hints}>
     <div className="relative flex min-h-dvh items-center justify-center gap-6 bg-background px-4">
       <div className="absolute top-3 right-3 flex items-center gap-2"><div className="w-36">{segments}</div>{closeButton}</div>
       <Button variant="outline" size="icon-lg" className="rounded-full" aria-label="Previous card" title="Previous (←)" disabled={at === 0} onClick={prev}><ChevronLeft className="size-5" /></Button>
@@ -201,6 +263,7 @@ function Recap({ month }: { month: string }) {
       <div className="absolute inset-x-0 bottom-3 text-center text-[11px] text-muted-foreground"><kbd className="rounded border px-1">←</kbd> <kbd className="rounded border px-1">→</kbd> step · <kbd className="rounded border px-1">Space</kbd> pauses · <kbd className="rounded border px-1">Esc</kbd> closes</div>
     </div>
     {drawer}
+    </HintContext.Provider>
     </DrillContext.Provider>
   );
 }
