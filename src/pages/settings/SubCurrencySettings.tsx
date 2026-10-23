@@ -75,8 +75,13 @@ export default function SubCurrencySettings() {
   async function addStandard(code: string) {
     const info = CURRENCIES.find((c) => c.code === code)!;
     setBusy(true);
-    const rate = (await refreshRates())?.rates[code] ?? 1;
-    try { await add({ code, name: info.name, symbol: info.symbol, rate, decimals: info.decimals, symbolPosition: info.position ?? "before", isCustom: false }); setAdding(false); }
+    const rate = (await refreshRates())?.rates[code];
+    try {
+      // no rate (offline, or a code the feed lacks) must not become a silent 1:1 that every entry until the next refresh keeps
+      if (!rate) throw new Error(`No rate for ${code} right now. Try again online, or add it as a custom currency and type the rate.`);
+      await add({ code, name: info.name, symbol: info.symbol, rate, decimals: info.decimals, symbolPosition: info.position ?? "before", isCustom: false });
+      setAdding(false);
+    }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
     setBusy(false);
   }

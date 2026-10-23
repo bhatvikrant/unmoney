@@ -69,7 +69,7 @@ function Recap({ month }: { month: string }) {
   const swipe = useSwipe(next, prev);
 
   if (!finished) return <Navigate to="/recaps" replace />;
-  if (!recap) {
+  if (!recap || !n) {
     const entries = year === null ? statsEntries(view, range.from, range.to, "expense").length : 0;
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center bg-background">
@@ -81,7 +81,7 @@ function Recap({ month }: { month: string }) {
   }
 
   const transition: Transition = still ? { duration: 0 } : { duration: 0.22, ease: "easeOut" };
-  const card = recap.cards[at];
+  const card = recap.cards[Math.min(at, n - 1)];
   // one button per card: the done ones solid, the current one half, with a taller hit area than its 3 px
   const segments = (
     <div className="flex flex-1 gap-[3px]" role="group" aria-label={`Card ${at + 1} of ${n}`}>

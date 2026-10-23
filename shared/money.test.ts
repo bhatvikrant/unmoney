@@ -63,3 +63,12 @@ test("the first guess at a main currency comes from the time zone, then the brow
   expect(guessCurrency(["hi"])).toBe("INR");
   expect(guessCurrency(["xx"])).toBeNull();
 });
+
+test("currency words and Dr/Cr marks around a number are not read as decimal points", () => {
+  expect(parseNumber("Rs.1,500")).toBe(1500);
+  expect(parseNumber("Rs. 1,234.00")).toBe(1234);
+  expect(parseNumber("1,500.00 Dr.")).toBe(1500);
+  expect(parseNumber("1.234,56")).toBe(1234.56);
+  expect(parseNumber("12,50")).toBe(12.5);
+  expect(parseNumber("(500.00)")).toBe(-500);
+});

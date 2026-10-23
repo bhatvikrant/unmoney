@@ -212,6 +212,26 @@ function notesByCount(entries: Entry[]): { text: string; count: number; amount: 
 
 /** The recap for a logical month, or null when the month has fewer than RECAP_MIN_ENTRIES expense entries. */
 export function monthRecap(snap: Snapshot, month: MonthKey): Recap | null {
+  return remembered(snap, `m:${month}`, () => buildMonthRecap(snap, month));
+}
+
+/**
+ * Recaps are built from scratch, and the Recaps index asks for every finished month's and year's.
+ * Each is kept while the tables it reads are the same ones (an op copies only the tables it
+ * touches), so a note saved or a sync elsewhere does not rebuild three years of recaps.
+ */
+const RECAP_TABLES = ["settings", "transactions", "categories", "accounts", "accountGroups", "budgets"] as const;
+const recapCache = new Map<string, { deps: unknown[]; recap: Recap | null }>();
+function remembered(snap: Snapshot, key: string, build: () => Recap | null): Recap | null {
+  const deps = RECAP_TABLES.map((t) => snap[t]);
+  const hit = recapCache.get(key);
+  if (hit && hit.deps.every((d, i) => d === deps[i])) return hit.recap;
+  const recap = build();
+  recapCache.set(key, { deps, recap });
+  return recap;
+}
+
+function buildMonthRecap(snap: Snapshot, month: MonthKey): Recap | null {
   const settings = settingsOf(snap);
   if (!settings) return null;
   const range = monthRange(month, settings.monthStartDay);
@@ -394,6 +414,10 @@ const pctText = (n: number) => `${Math.round(n * 100)}%`;
  * RECAP_YEAR_MIN_MONTHS of its months qualify for a monthly recap. Spec §4.2 lists the cards.
  */
 export function yearRecap(snap: Snapshot, year: number): Recap | null {
+  return remembered(snap, `y:${year}`, () => buildYearRecap(snap, year));
+}
+
+function buildYearRecap(snap: Snapshot, year: number): Recap | null {
   const settings = settingsOf(snap);
   if (!settings) return null;
   const msd = settings.monthStartDay;
@@ -590,7 +614,8 @@ export function yearRecap(snap: Snapshot, year: number): Recap | null {
   const incomeEntries = statsEntries(snap, range.from, range.to, "income");
   const income = incomeEntries.reduce((s, e) => s + e.amount, 0);
   const monthBudgets = months.map((k) => budgetsOf(snap, k));
-  const budgetMonths = monthBudgets.some(Boolean) ? { held: monthBudgets.filter((b) => b && b.held === b.total).length, total: 12 } : undefined;
+  // out of the months that had a budget, not twelve: budgets set in October are three months, not "3 of 12"
+  const budgetMonths = monthBudgets.some(Boolean) ? { held: monthBudgets.filter((b) => b && b.held === b.total).length, total: monthBudgets.filter(Boolean).length } : undefined;
   let keptPct: number | undefined;
   if (income > 0) {
     keptPct = Math.round(((income - total) / income) * 100);
@@ -751,6 +776,7 @@ export function recapIndex(snap: Snapshot, today: ISODate): RecapIndexRow[] {
   byMonth.set(current, { entries: 0, spent: 0 });
   for (const e of statsEntries(snap, "0000-00-00", "9999-99-99", "expense")) {
     const k = monthKeyForDate(e.t.date, settings.monthStartDay);
+    if (k > current) continue; // later installments: not a month to recap yet
     const m = byMonth.get(k) ?? { entries: 0, spent: 0 };
     m.entries += 1;
     m.spent += e.amount;

@@ -58,7 +58,7 @@ export default function SettingsPage() {
           <InstallRow />
         </Section>
         <Section title="Set up">
-          {link(<Tags />, "Categories", "/settings/categories", { value: `${categories.filter((c) => !c.parentId && !c.archivedAt).length}` })}
+          {link(<Tags />, "Categories", "/settings/categories", { value: `${categories.filter((c) => !c.parentId && !c.archivedAt && !c.deletedAt).length}` })}
           {link(<WalletCards />, "Payment methods", "/settings/payment-methods", { value: `${visibleAccounts.length}`, hint: "Defaults, groups, order, deleted", under: ["/settings/groups", "/settings/transfer-expense", "/settings/deleted-payment-methods", "/payment-methods/order"] })}
           {link(<Coins />, "Currencies", "/settings/currency", { value: s.mainCurrency, under: ["/settings/sub-currencies"] })}
           {link(<Repeat />, "Repeats", "/settings/repeats", { hint: "Rent, salary, subscriptions" })}
@@ -80,7 +80,7 @@ export default function SettingsPage() {
           {link(<HardDriveDownload />, "Backup & export", "/settings/backup")}
           {link(<FileInput />, "Import", "/import", { hint: "Money Manager or a bank statement" })}
           {/* with drafts waiting, the row goes straight to them; their page links to the settings */}
-          {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && gmail.open ? "/gmail" : "/settings/gmail", { value: gmail?.connected ? gmail.status === "reauth" ? "Reconnect" : gmail.open ? `${gmail.open} to review` : "On" : "Off", hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
+          {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && gmail.open ? "/gmail" : "/settings/gmail", { value: gmail === undefined ? undefined : gmail?.connected ? gmail.status === "reauth" ? "Reconnect" : gmail.open ? `${gmail.open} to review` : "On" : "Off", hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
         </Section>
         <Section>
           <DeleteAccountRow />

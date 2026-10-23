@@ -7,13 +7,14 @@
  */
 import { Fragment, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { ArrowDown, ArrowUp, Check, ChevronRight, Copy } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronRight, Copy, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { useApp } from "@/lib/app";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Money } from "@/components/shell/Money";
-import { colorAt } from "@/pages/stats/charts";
+import { colorAt } from "@/lib/theme";
+import { longMonth } from "@/lib/format";
 import { diffDays, MONTH_LONG, MONTH_SHORT, WEEKDAY_SHORT, parts, weekday, type ISODate } from "../../../shared/dates";
 import { parseMonthKey, type MonthKey, type Range } from "../../../shared/period";
 import { pctChange, recapText, type RecapBudgets, type RecapCard, type RecapStrip } from "../../../shared/recap";
@@ -31,7 +32,7 @@ const ON_CHART = "oklch(0.145 0 0)";
 const ON_SIGNAL = "oklch(0.985 0 0)";
 const REST = "var(--chart-rest)";
 
-export const longMonth = (k: MonthKey) => MONTH_LONG[parseMonthKey(k).m - 1];
+export { longMonth };
 const dayLabel = (d: ISODate) => `${WEEKDAY_SHORT[weekday(d)]} ${parts(d).d} ${MONTH_SHORT[parts(d).m - 1]}`;
 const shortDay = (d: ISODate) => `${parts(d).d} ${MONTH_SHORT[parts(d).m - 1]}`;
 /** "1–30 Sep", or "25 Sep – 24 Oct" when the logical month straddles two calendar months. */
@@ -498,6 +499,12 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
       toast.error("Couldn't copy. Your browser may not allow it here.");
     }
   }
+  // the phone's share sheet (Messages, WhatsApp…) where there is one; Copy stays for the rest
+  const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  async function share() {
+    try { await navigator.share({ text: year ? recapText(s, month, fmt, "year") : recapText(s, `${name} ${y}`, fmt) }); }
+    catch (e) { if (!(e instanceof DOMException && e.name === "AbortError")) toast.error("Couldn't share it"); }
+  }
   const change = s.change !== undefined && s.prevLabel ? pctChange(s.change) : undefined;
   // on a wide screen the card is 560 px tall, so the poster's rows and title tighten a little to fit without scrolling
   const row = (label: string, value: ReactNode, key: string) => (
@@ -533,7 +540,8 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
         </div>
         <div className="pointer-events-auto mt-3.5 flex gap-2 lg:mt-3">
           <Button size="lg" className="h-10 flex-1 lg:h-9" onClick={() => nav(statsPath(month))}>{year ? `Open ${month} in Stats` : "Open in Stats"}</Button>
-          <Button size="lg" variant="outline" className="h-10 flex-1 lg:h-9" onClick={copy}>{copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy summary"}</Button>
+          {canShare ? <Button size="lg" variant="outline" className="h-10 flex-1 lg:h-9" onClick={() => void share()}><Share2 />Share</Button> : null}
+          <Button size="lg" variant="outline" className={cn("h-10 lg:h-9", canShare ? "px-3" : "flex-1")} aria-label="Copy summary" title="Copy summary" onClick={copy}>{copied ? <Check /> : <Copy />}{canShare ? null : copied ? "Copied" : "Copy summary"}</Button>
         </div>
       </Vis>
       <Foot><span>Every {year ? "year's recap stays on Recaps" : "month's recap stays on Stats"}</span><FootLink onClick={onClose}>Done</FootLink></Foot>
