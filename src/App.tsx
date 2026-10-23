@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigationType } from "react-router";
 import { useConvexAuth } from "@convex-dev/auth/react";
 import { AppDataProvider } from "@/lib/app";
@@ -19,44 +19,59 @@ import { SplitLayout } from "@/components/shell/SplitLayout";
 // Only the ledger, the entry form and the shell load with the app. Every other screen is fetched the
 // first time it is opened (from the service worker's cache once installed), so a cold start parses a
 // fraction of the code. The other tabs' screens are fetched a moment after the ledger is up.
+/**
+ * A screen loaded on first use. When its chunk cannot be fetched (a deploy between the app's load and
+ * the first visit to that screen renamed the files), the app reloads once into the new version instead
+ * of showing the error screen; the second failure in a row is a real one and is left to the boundary.
+ */
+function screen<T extends ComponentType<object>>(load: () => Promise<{ default: T }>) {
+  const RETRIED = "unmoney:chunkRetried";
+  return lazy(() => load().then((m) => { sessionStorage.removeItem(RETRIED); return m; }, (e: unknown) => {
+    if (sessionStorage.getItem(RETRIED)) throw e;
+    sessionStorage.setItem(RETRIED, "1");
+    window.location.reload();
+    return new Promise<{ default: T }>(() => {});
+  }));
+}
+
 const loadStats = () => import("@/pages/stats/StatsPage");
 const loadAccounts = () => import("@/pages/accounts/AccountsPage");
 const loadSettings = () => import("@/pages/settings/SettingsPage");
-const SignIn = lazy(() => import("@/pages/auth/SignIn"));
-const RecapPage = lazy(() => import("@/pages/recap/RecapPage"));
-const RecapsPage = lazy(() => import("@/pages/recap/RecapsPage"));
-const SearchPage = lazy(() => import("@/pages/transactions/SearchPage"));
-const BookmarksPage = lazy(() => import("@/pages/transactions/BookmarksPage"));
-const NotesPage = lazy(() => import("@/pages/transactions/NotesPage"));
-const UnsplitReturn = lazy(() => import("@/pages/transactions/UnsplitReturn"));
-const StatsPage = lazy(loadStats);
-const CategoryDetail = lazy(() => import("@/pages/stats/CategoryDetail"));
-const BudgetPage = lazy(() => import("@/pages/stats/BudgetPage"));
-const BudgetSettings = lazy(() => import("@/pages/stats/BudgetSettings"));
-const AccountsPage = lazy(loadAccounts);
-const AccountDetail = lazy(() => import("@/pages/accounts/AccountDetail"));
-const AccountEditor = lazy(() => import("@/pages/accounts/AccountEditor"));
-const AccountOrder = lazy(() => import("@/pages/accounts/AccountOrder"));
-const SettingsPage = lazy(loadSettings);
-const CategoriesSettings = lazy(() => import("@/pages/settings/CategoriesSettings"));
-const CategoryTidyUp = lazy(() => import("@/pages/settings/CategoryTidyUp"));
-const CurrencySettings = lazy(() => import("@/pages/settings/CurrencySettings"));
-const SubCurrencySettings = lazy(() => import("@/pages/settings/SubCurrencySettings"));
-const RepeatSettings = lazy(() => import("@/pages/settings/RepeatSettings"));
-const PasscodeSettings = lazy(() => import("@/pages/settings/PasscodeSettings"));
-const PeriodSettings = lazy(() => import("@/pages/settings/PeriodSettings"));
-const StyleSettings = lazy(() => import("@/pages/settings/StyleSettings"));
-const BackupSettings = lazy(() => import("@/pages/settings/BackupSettings"));
-const ImportPage = lazy(() => import("@/pages/settings/ImportPage"));
-const AccountGroupSettings = lazy(() => import("@/pages/settings/AccountGroupSettings"));
-const DeletedAccounts = lazy(() => import("@/pages/settings/DeletedAccounts"));
-const TransferExpenseSettings = lazy(() => import("@/pages/settings/TransferExpenseSettings"));
-const PaymentMethodsSettings = lazy(() => import("@/pages/settings/PaymentMethodsSettings"));
-const PreferencesSettings = lazy(() => import("@/pages/settings/PreferencesSettings"));
-const GmailSettings = lazy(() => import("@/pages/settings/GmailSettings"));
-const GmailReviewPage = lazy(() => import("@/pages/transactions/GmailReviewPage"));
-const UpcomingPage = lazy(() => import("@/pages/transactions/UpcomingPage"));
-const PrivacyPage = lazy(() => import("@/pages/legal/PrivacyPage"));
+const SignIn = screen(() => import("@/pages/auth/SignIn"));
+const RecapPage = screen(() => import("@/pages/recap/RecapPage"));
+const RecapsPage = screen(() => import("@/pages/recap/RecapsPage"));
+const SearchPage = screen(() => import("@/pages/transactions/SearchPage"));
+const BookmarksPage = screen(() => import("@/pages/transactions/BookmarksPage"));
+const NotesPage = screen(() => import("@/pages/transactions/NotesPage"));
+const UnsplitReturn = screen(() => import("@/pages/transactions/UnsplitReturn"));
+const StatsPage = screen(loadStats);
+const CategoryDetail = screen(() => import("@/pages/stats/CategoryDetail"));
+const BudgetPage = screen(() => import("@/pages/stats/BudgetPage"));
+const BudgetSettings = screen(() => import("@/pages/stats/BudgetSettings"));
+const AccountsPage = screen(loadAccounts);
+const AccountDetail = screen(() => import("@/pages/accounts/AccountDetail"));
+const AccountEditor = screen(() => import("@/pages/accounts/AccountEditor"));
+const AccountOrder = screen(() => import("@/pages/accounts/AccountOrder"));
+const SettingsPage = screen(loadSettings);
+const CategoriesSettings = screen(() => import("@/pages/settings/CategoriesSettings"));
+const CategoryTidyUp = screen(() => import("@/pages/settings/CategoryTidyUp"));
+const CurrencySettings = screen(() => import("@/pages/settings/CurrencySettings"));
+const SubCurrencySettings = screen(() => import("@/pages/settings/SubCurrencySettings"));
+const RepeatSettings = screen(() => import("@/pages/settings/RepeatSettings"));
+const PasscodeSettings = screen(() => import("@/pages/settings/PasscodeSettings"));
+const PeriodSettings = screen(() => import("@/pages/settings/PeriodSettings"));
+const StyleSettings = screen(() => import("@/pages/settings/StyleSettings"));
+const BackupSettings = screen(() => import("@/pages/settings/BackupSettings"));
+const ImportPage = screen(() => import("@/pages/settings/ImportPage"));
+const AccountGroupSettings = screen(() => import("@/pages/settings/AccountGroupSettings"));
+const DeletedAccounts = screen(() => import("@/pages/settings/DeletedAccounts"));
+const TransferExpenseSettings = screen(() => import("@/pages/settings/TransferExpenseSettings"));
+const PaymentMethodsSettings = screen(() => import("@/pages/settings/PaymentMethodsSettings"));
+const PreferencesSettings = screen(() => import("@/pages/settings/PreferencesSettings"));
+const GmailSettings = screen(() => import("@/pages/settings/GmailSettings"));
+const GmailReviewPage = screen(() => import("@/pages/transactions/GmailReviewPage"));
+const UpcomingPage = screen(() => import("@/pages/transactions/UpcomingPage"));
+const PrivacyPage = screen(() => import("@/pages/legal/PrivacyPage"));
 
 /**
  * Shown while there is nothing to show yet. The text waits a moment: a warm start is over before it
