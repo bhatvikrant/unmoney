@@ -6,6 +6,7 @@
 import { mutation } from "./_generated/server";
 import { getAuthSessionId } from "@convex-dev/auth/server";
 import { requireUser } from "./lib/auth";
+import { patchSynced } from "./lib/changes";
 
 async function settingsOf(ctx: Parameters<typeof requireUser>[0], userId: Awaited<ReturnType<typeof requireUser>>) {
   return ctx.db.query("settings").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
@@ -17,7 +18,7 @@ export const requestReset = mutation({
   handler: async (ctx) => {
     const userId = await requireUser(ctx);
     const s = await settingsOf(ctx, userId);
-    if (s?.passcodeHash) await ctx.db.patch(s._id, { passcodeResetRequestedAt: Date.now() });
+    if (s?.passcodeHash) await patchSynced(ctx, userId, s._id, { passcodeResetRequestedAt: Date.now() });
   },
 });
 
@@ -31,7 +32,7 @@ export const resetAfterSignIn = mutation({
     const sessionId = await getAuthSessionId(ctx);
     const session = sessionId ? await ctx.db.get(sessionId) : null;
     if (!session || session._creationTime <= s.passcodeResetRequestedAt) return "not-yet";
-    await ctx.db.patch(s._id, { passcodeHash: undefined, passcodeSalt: undefined, passcodeResetRequestedAt: undefined });
+    await patchSynced(ctx, userId, s._id, { passcodeHash: undefined, passcodeSalt: undefined, passcodeResetRequestedAt: undefined });
     return "reset";
   },
 });
@@ -42,6 +43,6 @@ export const cancelReset = mutation({
   handler: async (ctx) => {
     const userId = await requireUser(ctx);
     const s = await settingsOf(ctx, userId);
-    if (s?.passcodeResetRequestedAt) await ctx.db.patch(s._id, { passcodeResetRequestedAt: undefined });
+    if (s?.passcodeResetRequestedAt) await patchSynced(ctx, userId, s._id, { passcodeResetRequestedAt: undefined });
   },
 });

@@ -161,6 +161,11 @@ function describe(parsed: Parsed): string {
 
 export type Resolved = { proposal: Proposal; confidence: Confidence };
 
+/** The note a draft of this mail gets: the merchant, cleaned. */
+export function noteOf(parsed: Pick<Parsed, "merchantRaw">): string {
+  return cleanMerchant(parsed.merchantRaw) || parsed.merchantRaw.trim();
+}
+
 /**
  * A draft's proposal from a parsed mail. Debits are expenses, credits income, refunds money back
  * on an expense (a negative expense in the purchase's category, see refundOf), and a
@@ -172,7 +177,7 @@ export function resolveParsed(parsed: Parsed, mail: { from: string }, ctx: Resol
   const hint: AccountHint = { bankName: parsed.bankName, last4: parsed.last4, channel: parsed.channel as Channel | undefined };
   const hintClean = Object.fromEntries(Object.entries(hint).filter(([, v]) => v !== undefined)) as AccountHint;
   let confidence: Confidence = parsed.dateSource === "mail" ? "high" : "medium";
-  const note = cleanMerchant(parsed.merchantRaw) || parsed.merchantRaw.trim();
+  const note = noteOf(parsed);
   const descriptionBits = [describe(parsed)];
 
   // amount in the main currency
