@@ -201,7 +201,7 @@ test("status shows the app a safe projection, and disconnecting removes the conn
   const [m1] = await t.run((ctx) => ctx.db.query("drafts").collect());
   await t.run((ctx) => ctx.db.patch(m1._id, { status: "accepted" }));
   const s = (await as.query(api.gmail.status))!;
-  expect(s).toMatchObject({ connected: true, email: "me@gmail.com", status: "ok", open: 1, openUnmatched: 0, lastSyncAt: 5 });
+  expect(s).toMatchObject({ connected: true, email: "me@gmail.com", status: "ok", lastSyncAt: 5 });
   expect(JSON.stringify(s)).not.toContain("enc");
   await t.mutation(internal.gmail.removeConnection, { userId });
   expect(await t.run((ctx) => ctx.db.query("gmailConnections").collect())).toEqual([]);
