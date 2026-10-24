@@ -89,6 +89,67 @@ describe("a ledger past Convex's read limit", () => {
   }, 120_000);
 });
 
+describe("devices follow what changed, not whole tables", () => {
+  const create = (accountId: Id<"accounts">, categoryId: Id<"categories">, note: string) =>
+    ({ type: "expense", date: "2026-10-18", accountId, categoryId, amount: 4200, note, tags: [], photoIds: [] });
+
+  test("a save sends only what it wrote, a delete sends its id, and nothing changed sends nothing", async () => {
+    const { as, apply, accounts, food, seed } = await setup();
+    await seed(500);
+    const start = (await as.query(api.sync.head))!;
+    expect(await as.query(api.sync.changes, { since: start })).toEqual({ rev: start, docs: {}, deleted: [] });
+
+    const created = await apply("transactions.create", create(accounts[0]._id, food._id, "Lunch"));
+    if (created.status !== "applied") throw new Error("not applied");
+    const id = Object.values(created.idMap)[0];
+    // the outcome says how far a device must have followed to have the save
+    expect(created.rev).toBe(start + 1);
+    const after = await as.query(api.sync.changes, { since: start });
+    if (!after || after.reset) throw new Error("expected changes");
+    expect(after.rev).toBe(start + 1);
+    expect(Object.keys(after.docs)).toEqual(["transactions"]);
+    expect(after.docs.transactions!.map((d) => [d._id, d.note])).toEqual([[id, "Lunch"]]);
+
+    expect((await apply("transactions.remove", { id })).status).toBe("applied");
+    const gone = await as.query(api.sync.changes, { since: start + 1 });
+    if (!gone || gone.reset) throw new Error("expected changes");
+    expect(gone.docs).toEqual({});
+    expect(gone.deleted).toEqual([{ table: "transactions", id }]);
+  });
+
+  test("ops that change nothing hand out no number", async () => {
+    const { as, apply } = await setup();
+    const before = (await as.query(api.sync.head))!;
+    const r = await apply("transactions.remove", { id: "kd7000000000000000000000000000000" });
+    expect(r.status).toBe("rejected");
+    expect(await as.query(api.sync.head)).toBe(before);
+  });
+
+  test("a device ahead of the server, or behind the deletes still kept, is told to load everything", async () => {
+    const { t, as, apply, accounts, food } = await setup();
+    const created = await apply("transactions.create", create(accounts[0]._id, food._id, "Tea"));
+    if (created.status !== "applied") throw new Error("not applied");
+    await apply("transactions.remove", { id: Object.values(created.idMap)[0] });
+    const now = (await as.query(api.sync.head))!;
+    expect(await as.query(api.sync.changes, { since: now + 5 })).toEqual({ rev: now, reset: true });
+    // the tombstone is dropped: a device that last looked before it cannot hear about the delete
+    await t.mutation(internal.sync.pruneTombstones, { cutoff: Date.now() + 1000 });
+    expect(await as.query(api.sync.changes, { since: 1 })).toEqual({ rev: now, reset: true });
+    expect(await as.query(api.sync.changes, { since: now })).toEqual({ rev: now, docs: {}, deleted: [] });
+  });
+
+  test("writes from the server's own jobs reach devices too", async () => {
+    const { t, as, userId, apply, accounts, food } = await setup();
+    await apply("transactions.create", { ...create(accounts[0]._id, food._id, "Rent"), date: "2026-01-01", repeat: { frequency: "monthly" } });
+    const before = (await as.query(api.sync.head))!;
+    await t.mutation(internal.repeats.materialiseUser, { userId, today: "2026-03-15" });
+    const got = await as.query(api.sync.changes, { since: before });
+    if (!got || got.reset) throw new Error("expected changes");
+    expect(got.docs.transactions?.length).toBeGreaterThan(0);
+    expect(got.docs.repeats?.length).toBe(1);
+  });
+});
+
 describe("scoped ops behave as before", () => {
   test("editing 'this and future' changes only the later entries of that series", async () => {
     const { apply, accounts, food, all } = await setup();

@@ -28,11 +28,13 @@ const STEPS: { name: string; take: (ctx: MutationCtx, userId: Id<"users">) => Pr
   { name: "notes", take: (ctx, u) => ctx.db.query("notes").withIndex("by_user_date", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "categories", take: (ctx, u) => ctx.db.query("categories").withIndex("by_user_type", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "syncOps", take: (ctx, u) => ctx.db.query("syncOps").withIndex("by_user_op", (q) => q.eq("userId", u)).take(BATCH) },
+  { name: "tombstones", take: (ctx, u) => ctx.db.query("tombstones").withIndex("by_user_rev", (q) => q.eq("userId", u)).take(BATCH) },
+  { name: "gmailSeen", take: (ctx, u) => ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "pendingImports", take: (ctx, u) => ctx.db.query("pendingImports").withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH),
     also: async (ctx, d) => { if (d.storageId) await deleteFile(ctx, d.storageId); } },
   { name: "fileOwners", take: (ctx, u) => ctx.db.query("fileOwners").withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH),
     also: async (ctx, d) => { if (d.storageId) await deleteFile(ctx, d.storageId); } },
-  ...(["settings", "accountGroups", "accounts", "repeats", "bookmarks", "budgets", "currencies", "importLinks", "categoryCleanups", "history", "gmailConnections", "gmailPending", "drafts", "aiUsage"] as const).map((t) => ({
+  ...(["settings", "accountGroups", "accounts", "repeats", "bookmarks", "budgets", "currencies", "importLinks", "categoryCleanups", "history", "gmailConnections", "gmailPending", "drafts", "aiUsage", "syncState"] as const).map((t) => ({
     name: t, take: (ctx: MutationCtx, u: Id<"users">) => ctx.db.query(t).withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH),
   })),
   { name: "authAccounts", take: (ctx, u) => ctx.db.query("authAccounts").withIndex("userIdAndProvider", (q) => q.eq("userId", u)).take(BATCH),
