@@ -63,14 +63,16 @@ const syncing = (c: Pick<Connection, "syncingSince">, now: number) => c.syncingS
 
 // ---------- what the app sees ----------
 
-/** The connection without its secrets, plus how many drafts wait; null when Gmail is not connected. */
+/**
+ * The connection without its secrets; null when Gmail is not connected. How many drafts wait the
+ * app counts in its own copy (shared/views waitingDrafts), so this never reads them.
+ */
 export const status = query({
   args: {},
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) return null;
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
-    const open = await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect();
     const month = monthOf(Date.now());
     return {
       connected: !!c,
@@ -89,8 +91,6 @@ export const status = query({
       log: c?.log ?? [],
       aiCalls: c && c.aiMonth === month ? c.aiCalls : 0,
       aiCap: AI_MONTHLY_CAP,
-      open: open.length,
-      openUnmatched: open.filter((d) => !d.matchedTransactionId).length,
     };
   },
 });

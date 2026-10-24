@@ -75,6 +75,11 @@ export function draftMatches(snap: Snapshot): Map<Id<"drafts">, Id<"transactions
 }
 let matchesCache: { drafts: Doc<"drafts">[]; transactions: Tx[]; accounts: Doc<"accounts">[]; out: Map<Id<"drafts">, Id<"transactions">> } | null = null;
 
+/** How many drafts from Gmail wait to be saved or dismissed. */
+export function waitingDrafts(snap: Snapshot): number {
+  return snap.drafts.filter((d) => d.status === "open").length;
+}
+
 /** Open drafts from Gmail dated in the range, for the ledger's faded rows. Ones matched to an entry the user already has are left out. */
 export function draftsRange(snap: Snapshot, from: string, to: string): Doc<"drafts">[] {
   const matched = draftMatches(snap);

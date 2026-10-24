@@ -5,6 +5,7 @@ import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { ReactNode } from "react";
 import { useStore } from "@/lib/store";
+import { waitingDrafts } from "../../../shared/views";
 import { SyncBadge } from "@/components/shell/SyncStatus";
 import { InstallRow } from "./InstallRow";
 import { DeleteAccountRow } from "./DeleteAccount";
@@ -26,8 +27,9 @@ export default function SettingsPage() {
   const { pathname } = useLocation();
   const { settings: s, user, accounts, categories } = useApp();
   const visibleAccounts = accounts.filter((a) => !a.hidden && !a.archivedAt);
-  const { status, clearLocal } = useStore();
+  const { status, clearLocal, view } = useStore();
   const gmail = useQuery(api.gmail.status);
+  const waiting = waitingDrafts(view);
   const { signOut } = useAuthActions();
   const confirm = useConfirm();
   // changes that cannot reach the server would be lost with this device's copy: no signing out until they can
@@ -53,7 +55,7 @@ export default function SettingsPage() {
     : !gmail?.connected ? "Off"
     : gmail.status === "reauth" ? "Reconnect"
     : gmail.status === "paused" ? "Paused"
-    : gmail.open ? `${gmail.open} to review` : "On";
+    : waiting ? `${waiting} to review` : "On";
   return (
     <>
       <PageHeader title="More" />
@@ -92,7 +94,7 @@ export default function SettingsPage() {
           {link(<HardDriveDownload />, "Backup & export", "/settings/backup")}
           {link(<FileInput />, "Import", "/import", { hint: "Money Manager or a bank statement" })}
           {/* with drafts waiting, the row goes straight to them; their page links to the settings */}
-          {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && gmail.open ? "/gmail" : "/settings/gmail", { value: gmailValue, hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
+          {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && waiting ? "/gmail" : "/settings/gmail", { value: gmailValue, hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
         </Section>
         <Section title="Account">
           <Row label="Sign out"
