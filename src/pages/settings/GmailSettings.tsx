@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useStore } from "@/lib/store";
+import { waitingDrafts } from "../../../shared/views";
 import { cn } from "@/lib/utils";
 
 /** "just now", "12 min ago", "3 h ago", "2 days ago". */
@@ -43,7 +44,8 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message.replace(/^.*Un
 export default function GmailSettings() {
   const nav = useNavigate();
   const s = useQuery(api.gmail.status);
-  const { status: { offline } } = useStore();
+  const { status: { offline }, view } = useStore();
+  const toReview = waitingDrafts(view);
   const connectUrl = useAction(api.gmail.connectUrl);
   const disconnect = useAction(api.gmail.disconnect);
   const syncNow = useAction(api.gmail.syncNow);
@@ -105,7 +107,8 @@ export default function GmailSettings() {
     if (!firstCheck) return;
     handled.current = true;
     if (firstCheck.error) toast.error(`The first check failed: ${firstCheck.error}`);
-    else if (s.open) nav("/gmail");
+    // the check's own count: it arrives with the log, before its drafts reach this device's copy
+    else if (firstCheck.found) nav("/gmail");
     else toast(`No money mail found in the last ${s.lookbackDays} days. New mail is checked every hour.`);
   }, [waitingSince, firstCheck, s, nav]);
 
@@ -277,11 +280,11 @@ export default function GmailSettings() {
                 )}
               </div>
               <Row
-                label={s.open ? `${s.open} ${s.open === 1 ? "draft" : "drafts"} waiting` : "Nothing waiting"}
-                hint={s.open ? "Faded rows in the ledger, or review them all" : "New money mail shows up here to pick from"}
+                label={toReview ? `${toReview} ${toReview === 1 ? "draft" : "drafts"} waiting` : "Nothing waiting"}
+                hint={toReview ? "Faded rows in the ledger, or review them all" : "New money mail shows up here to pick from"}
                 className="border-t"
-                onClick={s.open ? () => nav("/gmail") : undefined}
-                right={s.open ? <span className="flex items-center gap-1 text-sm font-medium">Review<ChevronRight className="size-4 text-muted-foreground" /></span> : null}
+                onClick={toReview ? () => nav("/gmail") : undefined}
+                right={toReview ? <span className="flex items-center gap-1 text-sm font-medium">Review<ChevronRight className="size-4 text-muted-foreground" /></span> : null}
               />
             </Section>
 
