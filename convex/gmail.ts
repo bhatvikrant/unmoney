@@ -8,22 +8,23 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ConvexError, v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { action, httpAction, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type MutationCtx } from "./_generated/server";
+import { action, httpAction, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { FunctionReturnType } from "convex/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { requireUser } from "./lib/auth";
+import { currentRev, deleteSynced, insertSynced, patchSynced } from "./lib/changes";
 import { decryptText, encryptText, hasTokenKey, sign, verify } from "./lib/gmailCrypto";
 import * as gmailApi from "./lib/gmailApi";
 import { GmailAuthError, GmailSetupError, SCOPE } from "./lib/gmailApi";
-import { addDays, todayISO } from "../shared/dates";
+import { addDays } from "../shared/dates";
 import { clean } from "../shared/ops";
 import type { Mail } from "../shared/gmail/mail";
 import { triage } from "../shared/gmail/triage";
 import { parseMail } from "../shared/gmail/rules";
 import { latestRates } from "./lib/fxFeed";
-import { accountMapKey, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
+import { accountMapKey, noteOf, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
 import { foldDrafts, laterMatches, matchEntry, samePayment, type DraftCandidate } from "../shared/gmail/dedup";
 import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, matchesSender, normaliseSender, readsFromFor, spanMs, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
 import { applyMerchantMemory, learnMerchants, mergeMerchants, type MerchantMemory } from "../shared/gmail/learn";
@@ -43,8 +44,12 @@ const PAUSE_AFTER_FAILURES = 3;
 const MANUAL_EVERY_MS = 60 * 1000;
 /** The OAuth state is good for this long. */
 const STATE_TTL_MS = 10 * 60 * 1000;
-/** Entries this far back are read for "already added?" matching and for the category a merchant had last time. */
-const HISTORY_DAYS = 365;
+/** Past entries with a mail's merchant as their note that a check looks at: for the category it had last time, and the purchase a refund returns. */
+const SAME_NOTE_MAX = 50;
+/** Saved drafts this far before a check's window are looked at for the other mail of a payment already saved. */
+const SAVED_SLACK_MS = 7 * 24 * 60 * 60 * 1000;
+/** gmailSeen rows this far before the start of the next check's window are dropped: past the longest look-back, with room to spare. */
+const SEEN_KEEP_MS = 120 * 24 * 60 * 60 * 1000;
 const MAX_SENDERS = 100;
 /** Mails fetched in parallel, and the least time each such batch takes: 3 per 300 ms is 50 quota units a second. */
 const FETCH_AT_ONCE = 3;
@@ -309,7 +314,9 @@ export const removeConnection = internalMutation({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
     for (const c of await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).collect()) await ctx.db.delete(c._id);
-    for (const d of await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect()) await ctx.db.delete(d._id);
+    for (const d of await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect()) await deleteSynced(ctx, userId, "drafts", d._id);
+    // a new connection fills this again from the drafts left (seenFilled), so the waiting ones just removed are read again
+    await ctx.scheduler.runAfter(0, internal.gmail.forgetAllSeen, { userId, before: Date.now() });
   },
 });
 
@@ -361,19 +368,96 @@ export const claimSync = internalMutation({
   handler: async (ctx, { userId, startedAt }): Promise<boolean> => {
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!c || c.status !== "ok" || syncing(c, startedAt)) return false;
-    await ctx.db.patch(c._id, { syncingSince: startedAt });
+    if (!c.seenFilled) {
+      // once per connection: what the drafts and the old `processed` list knew, as gmailSeen rows
+      const rows: SeenRow[] = (c.processed ?? []).map((p) => ({ messageId: p.id, receivedAt: p.receivedAt, processed: true }));
+      for (const d of await ctx.db.query("drafts").withIndex("by_user", (q) => q.eq("userId", userId)).collect()) rows.push(...seenOfDraft(d));
+      await markSeen(ctx, userId, rows);
+    }
+    await ctx.db.patch(c._id, { syncingSince: startedAt, ...(c.seenFilled ? {} : { seenFilled: true, processed: undefined }) });
     return true;
   },
 });
 
-/** Everything one check needs, read in one consistent query. */
+type SeenRow = { messageId: string; receivedAt: number; processed?: boolean };
+
+/** A draft's mails: its own and the ones folded into it. */
+function seenOfDraft(d: Pick<Doc<"drafts">, "messageId" | "extraMessageIds" | "receivedAt">): SeenRow[] {
+  return [d.messageId, ...d.extraMessageIds].map((messageId) => ({ messageId, receivedAt: d.receivedAt }));
+}
+
+/** Remember these mails as dealt with; ones already remembered are left as they are. */
+async function markSeen(ctx: MutationCtx, userId: Id<"users">, rows: SeenRow[]) {
+  const done = new Set<string>();
+  for (const r of rows) {
+    if (done.has(r.messageId)) continue;
+    done.add(r.messageId);
+    const had = await ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", r.messageId)).first();
+    if (!had) await ctx.db.insert("gmailSeen", { userId, ...r });
+  }
+}
+
+/** Forget these mails, so the next check reads them again. */
+async function forgetSeen(ctx: MutationCtx, userId: Id<"users">, messageIds: string[]) {
+  for (const messageId of new Set(messageIds)) {
+    for (const r of await ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", messageId)).collect()) await ctx.db.delete(r._id);
+  }
+}
+
+/**
+ * Forget every mail of a user's (or only those that made no draft) remembered before `before`, a
+ * page at a time: a user's rows can outgrow one mutation. Rows written after `before` (a new
+ * connection filling them again) are kept.
+ */
+export const forgetAllSeen = internalMutation({
+  args: { userId: v.id("users"), before: v.number(), processedOnly: v.optional(v.boolean()), cursor: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, { userId, before, processedOnly, cursor = null }): Promise<number> => {
+    const res = await ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", userId)).paginate({ numItems: 1000, cursor });
+    let forgotten = 0;
+    for (const r of res.page) {
+      if (r._creationTime >= before || (processedOnly && !r.processed)) continue;
+      await ctx.db.delete(r._id);
+      forgotten++;
+    }
+    if (!res.isDone) await ctx.scheduler.runAfter(0, internal.gmail.forgetAllSeen, { userId, before, processedOnly, cursor: res.continueCursor });
+    return forgotten;
+  },
+});
+
+/**
+ * What every check needs: the connection, and the drafts saved since the last check learned (with
+ * the entries they became) to learn from, by the server's change number rather than the device's
+ * clock, so a draft saved offline is not missed. Small on purpose: an hour without new mail reads little else.
+ */
 export const prepareSync = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
     const connection = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!connection) return null;
-    const since = addDays(todayISO(), -HISTORY_DAYS);
-    const [settings, accounts, categories, currencies, transactions, openDrafts, accepted] = await Promise.all([
+    const written = await ctx.db.query("drafts").withIndex("by_user_rev", (q) => q.eq("userId", userId).gt("rev", connection.learnedRev ?? 0)).collect();
+    return { connection, rev: await currentRev(ctx, userId), learnFrom: await withEntries(ctx, written.filter((d) => d.status === "accepted")) };
+  },
+});
+
+/** Saved drafts with the entry each became (what the user picked when saving). */
+async function withEntries(ctx: QueryCtx, drafts: Doc<"drafts">[]): Promise<{ draft: Doc<"drafts">; tx: Doc<"transactions"> }[]> {
+  const out: { draft: Doc<"drafts">; tx: Doc<"transactions"> }[] = [];
+  for (const d of drafts) {
+    const tx = d.transactionId ? await ctx.db.get(d.transactionId) : null;
+    if (tx) out.push({ draft: d, tx });
+  }
+  return out;
+}
+
+/**
+ * What reading mail needs, only when there is mail to read or something to learn: the user's
+ * methods, categories and currencies, the drafts waiting, and the drafts saved since `since` (for
+ * the other mail of a payment already saved).
+ */
+export const prepareRead = internalQuery({
+  args: { userId: v.id("users"), since: v.number() },
+  handler: async (ctx, { userId, since }) => {
+    const [settings, accounts, categories, currencies, openDrafts, saved] = await Promise.all([
       ctx.db.query("settings").withIndex("by_user", (q) => q.eq("userId", userId)).unique(),
       ctx.db.query("accounts").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
       Promise.all([
@@ -381,40 +465,44 @@ export const prepareSync = internalQuery({
         ctx.db.query("categories").withIndex("by_user_type", (q) => q.eq("userId", userId).eq("type", "income")).collect(),
       ]).then(([e, i]) => [...e, ...i]),
       ctx.db.query("currencies").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
-      ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId).gte("date", since)).collect(),
       ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect(),
-      ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "accepted")).order("desc").take(200),
+      ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "accepted").gte("_creationTime", since)).collect(),
     ]);
-    // what the user picked when saving: the learning material for accountMap
-    const acceptedWith: { draft: Doc<"drafts">; tx: Doc<"transactions"> }[] = [];
-    for (const d of accepted) {
-      const tx = d.transactionId ? await ctx.db.get(d.transactionId) : null;
-      if (tx) acceptedWith.push({ draft: d, tx });
-    }
     return {
-      connection,
       settings: { mainCurrency: settings?.mainCurrency ?? "INR", decimals: settings?.decimals ?? 2 },
-      accounts, categories, currencies, transactions, openDrafts, accepted: acceptedWith,
+      accounts, categories, currencies, openDrafts, saved: await withEntries(ctx, saved),
     };
   },
 });
 
-/** Which of these Gmail message ids already have a draft (open or resolved, or folded into one), or were read and made none. */
+/**
+ * The past entries reading these mails looks at, through indexes rather than a year of the
+ * ledger: the latest few with each merchant as their note (the category it had last time, the
+ * purchase a refund returns), and every entry on these days ("already added?").
+ */
+export const entriesFor = internalQuery({
+  args: { userId: v.id("users"), notes: v.array(v.string()), dates: v.array(v.string()) },
+  handler: async (ctx, { userId, notes, dates }) => {
+    const found = new Map<string, Doc<"transactions">>();
+    for (const date of new Set(dates)) {
+      for (const t of await ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId).eq("date", date)).collect()) found.set(t._id, t);
+    }
+    for (const note of new Set(notes.map((n) => n.trim()).filter(Boolean))) {
+      const same = await ctx.db.query("transactions").withSearchIndex("search_note", (q) => q.search("note", note).eq("userId", userId)).take(SAME_NOTE_MAX);
+      for (const t of same) found.set(t._id, t);
+    }
+    return [...found.values()];
+  },
+});
+
+/** Which of these Gmail message ids a check has dealt with: a draft's (its own or folded in, open or handled), or read and made none. */
 export const seenMessageIds = internalQuery({
   args: { userId: v.id("users"), ids: v.array(v.string()) },
   handler: async (ctx, { userId, ids }) => {
     const seen: string[] = [];
     for (const id of ids) {
-      const d = await ctx.db.query("drafts").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", id)).first();
-      if (d) seen.push(id);
+      if (await ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", id)).first()) seen.push(id);
     }
-    const connection = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
-    const folded = new Set((connection?.processed ?? []).map((p) => p.id));
-    // A receipt folded into an alert is not its own draft: check the extras of every draft, the
-    // handled ones too, or it comes back as a new draft once the alert's draft is saved or dismissed.
-    // (Handled drafts are pruned after 90 days, long after the receipt left the check's window.)
-    for (const d of await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId)).collect()) for (const x of d.extraMessageIds) folded.add(x);
-    for (const id of ids) if (folded.has(id) && !seen.includes(id)) seen.push(id);
     return seen;
   },
 });
@@ -455,20 +543,22 @@ function candidateOf(mail: Mail, resolved: ReturnType<typeof resolveParsed>, how
   };
 }
 
+type Read = FunctionReturnType<typeof internal.gmail.prepareRead>;
+
 /** What the user picked when saving drafts whose method the mail only hinted at: "domain|last4" → that method. */
-function learnAccounts(prep: Prep): Record<string, Id<"accounts">> {
+function learnAccounts(prep: Prep, read: Read): Record<string, Id<"accounts">> {
   const learned: Record<string, Id<"accounts">> = {};
-  for (const { draft, tx } of prep.accepted) {
+  for (const { draft, tx } of prep.learnFrom) {
     if (tx.type === "transfer") continue;
     const key = accountMapKey(draft.from, draft.proposal.accountHint?.last4);
     if (!key || prep.connection.accountMap[key] === tx.accountId) continue;
-    if (prep.accounts.some((a) => a._id === tx.accountId && !a.deletedAt)) learned[key] = tx.accountId;
+    if (read.accounts.some((a) => a._id === tx.accountId && !a.deletedAt)) learned[key] = tx.accountId;
   }
   return learned;
 }
 
-async function askClaude(mails: Mail[], prep: Prep): Promise<{ reads: AiRead[]; dropped: number }> {
-  const { input, ids } = buildAiInput(mails, { categories: prep.categories, accounts: prep.accounts, mainCurrency: prep.settings.mainCurrency });
+async function askClaude(mails: Mail[], read: Read): Promise<{ reads: AiRead[]; dropped: number }> {
+  const { input, ids } = buildAiInput(mails, { categories: read.categories, accounts: read.accounts, mainCurrency: read.settings.mainCurrency });
   const client = new Anthropic({ timeout: 90_000, maxRetries: 1 });
   const res = await client.messages.create({
     model: AI_MODEL,
@@ -481,8 +571,11 @@ async function askClaude(mails: Mail[], prep: Prep): Promise<{ reads: AiRead[]; 
   if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`model stopped: ${res.stop_reason}`);
   const text = res.content.find((b) => b.type === "text");
   const raw = JSON.parse(text && text.type === "text" ? text.text : "{}").results;
-  return validateAiResults(raw, mails, ids, prep.categories);
+  return validateAiResults(raw, mails, ids, read.categories);
 }
+
+/** A day and the days either side: what "already added?" compares a mail's date with. */
+const around = (date: string) => [addDays(date, -1), date, addDays(date, 1)];
 
 /** Search, fetch, triage, parse, dedup: everything a check does short of writing. Shared by the check and the dry run. */
 async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<Collected> {
@@ -501,6 +594,11 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     const seen = new Set(await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids: page }));
     unread.push(...page.filter((id) => !seen.has(id)));
   }
+  // nothing new and nothing saved to learn from (most hours): nothing more to read
+  if (!unread.length && !prep.learnFrom.length) {
+    return { scanned, inserts: [], updates: [], matches: [], learned: {}, learnedMerchants: {}, processed: [], syncedUpTo: startedAt, aiCalls: 0, aiSkipped: 0, aiDropped: 0, notes: [] };
+  }
+  const read = await ctx.runQuery(internal.gmail.prepareRead, { userId: c.userId, since: afterMs - SAVED_SLACK_MS });
   const fresh = unread.slice(0, SYNC_MAX);
   const waiting = unread.length - fresh.length;
   const mails: Mail[] = [];
@@ -516,33 +614,18 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     if (wait > 0 && i + FETCH_AT_ONCE < fresh.length) await new Promise((r) => setTimeout(r, wait));
   }
 
-  const rctx: ResolveCtx = { accounts: prep.accounts, categories: prep.categories, transactions: prep.transactions, settings: prep.settings, currencies: prep.currencies, accountMap: c.accountMap };
-  const candidates: DraftCandidate[] = [];
   const forAi: Mail[] = [];
   const notes: string[] = [];
   const processed: { id: string; receivedAt: number }[] = [];
   const retry: Mail[] = [];
-  // what the user taught about a merchant wins over the rules' and the model's guesses; the merchant as read is kept to learn under
-  const remember = (mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai") =>
-    candidateOf(mail, { ...resolved, proposal: applyMerchantMemory(resolved.proposal, resolved.proposal.note, c.merchantMap, prep.categories) }, how, resolved.proposal.note);
-  // a currency with no saved rate is converted at today's rate from the public feed, fetched once per check
-  const main = prep.settings.mainCurrency.toUpperCase();
-  const saved = new Set(prep.currencies.filter((x) => x.rate > 0).map((x) => x.code.toUpperCase()));
-  let fetchedRates = false;
-  const ratesFor = async (currencies: string[]) => {
-    if (fetchedRates || !currencies.some((x) => x.toUpperCase() !== main && !saved.has(x.toUpperCase()))) return;
-    fetchedRates = true;
-    rctx.liveRates = (await latestRates(main)) ?? undefined;
-  };
-  const read: { mail: Mail; parsed: NonNullable<ReturnType<typeof parseMail>> }[] = [];
+  /** Each mail read, by a rule or by the model (with the method and category it suggested). */
+  const reads: { mail: Mail; parsed: NonNullable<ReturnType<typeof parseMail>>; ai?: AiRead }[] = [];
   for (const mail of mails) {
     if (!triage(mail).keep || matchesSender(mail.from, muted)) { processed.push({ id: mail.id, receivedAt: mail.receivedAt }); continue; }
     const parsed = parseMail(mail);
-    if (parsed) read.push({ mail, parsed });
+    if (parsed) reads.push({ mail, parsed });
     else forAi.push(mail);
   }
-  await ratesFor(read.map((r) => r.parsed.currency));
-  for (const { mail, parsed } of read) candidates.push(remember(mail, resolveParsed(parsed, mail, rctx), "rule"));
 
   let aiCalls = 0, aiSkipped = 0, aiDropped = 0;
   if (forAi.length && !process.env.ANTHROPIC_API_KEY) {
@@ -556,21 +639,13 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
       if (used + aiCalls >= AI_MONTHLY_CAP) { aiSkipped += batch.length; retry.push(...batch); continue; }
       aiCalls++;
       try {
-        const { reads, dropped } = await askClaude(batch, prep);
+        const { reads: answers, dropped } = await askClaude(batch, read);
         aiDropped += dropped;
         const byId = new Map(batch.map((m) => [m.id, m]));
         // not a payment, or an answer that failed validation: asking again next hour would say the same
-        const answered = new Set(reads.map((r) => r.mailId));
+        const answered = new Set(answers.map((r) => r.mailId));
         for (const m of batch) if (!answered.has(m.id)) processed.push({ id: m.id, receivedAt: m.receivedAt });
-        await ratesFor(reads.map((r) => r.parsed.currency));
-        for (const r of reads) {
-          const mail = byId.get(r.mailId)!;
-          const resolved = resolveParsed(r.parsed, mail, rctx);
-          const p = resolved.proposal;
-          if (!p.accountId && r.accountId && p.type !== "transfer") p.accountId = r.accountId;
-          if (!p.categoryId && r.categoryId && p.type !== "transfer") p.categoryId = r.categoryId;
-          candidates.push(remember(mail, { proposal: p, confidence: lowerConfidence(resolved.confidence, r.confidence) }, "ai"));
-        }
+        for (const r of answers) reads.push({ mail: byId.get(r.mailId)!, parsed: r.parsed, ai: r });
       } catch (e) {
         console.error("gmail-ai failed", e instanceof Error ? e.message : e);
         aiSkipped += batch.length;
@@ -581,25 +656,50 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     if (aiSkipped && used + aiCalls >= AI_MONTHLY_CAP) notes.push(`monthly AI limit reached, ${aiSkipped} mails waiting`);
   }
 
+  // The past entries resolving looks at: the merchant's own (its category last time, the purchase
+  // a refund returns) and those around each mail's day (already added?).
+  const dates = reads.flatMap((r) => around(r.parsed.date));
+  const transactions = reads.length ? await ctx.runQuery(internal.gmail.entriesFor, { userId: c.userId, notes: reads.map((r) => noteOf(r.parsed)), dates }) : [];
+  const rctx: ResolveCtx = { accounts: read.accounts, categories: read.categories, transactions, settings: read.settings, currencies: read.currencies, accountMap: c.accountMap };
+  // a currency with no saved rate is converted at today's rate from the public feed, fetched once per check
+  const main = read.settings.mainCurrency.toUpperCase();
+  const saved = new Set(read.currencies.filter((x) => x.rate > 0).map((x) => x.code.toUpperCase()));
+  if (reads.some((r) => r.parsed.currency.toUpperCase() !== main && !saved.has(r.parsed.currency.toUpperCase()))) rctx.liveRates = (await latestRates(main)) ?? undefined;
+  // what the user taught about a merchant wins over the rules' and the model's guesses; the merchant as read is kept to learn under
+  const remember = (mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai") =>
+    candidateOf(mail, { ...resolved, proposal: applyMerchantMemory(resolved.proposal, resolved.proposal.note, c.merchantMap, read.categories) }, how, resolved.proposal.note);
+  const candidates: DraftCandidate[] = [];
+  for (const { mail, parsed, ai } of reads) {
+    const resolved = resolveParsed(parsed, mail, rctx);
+    if (!ai) { candidates.push(remember(mail, resolved, "rule")); continue; }
+    const p = resolved.proposal;
+    if (!p.accountId && ai.accountId && p.type !== "transfer") p.accountId = ai.accountId;
+    if (!p.categoryId && ai.categoryId && p.type !== "transfer") p.categoryId = ai.categoryId;
+    candidates.push(remember(mail, { proposal: p, confidence: lowerConfidence(resolved.confidence, ai.confidence) }, "ai"));
+  }
+
   // no amount means a currency no rate could be found for: no ₹0 draft; the mail stays unread, so the next check tries again
   const waitingRate = candidates.filter((d) => d.proposal.amount === 0);
   if (waitingRate.length) notes.push(`${waitingRate.length} ${waitingRate.length === 1 ? "mail waits" : "mails wait"} for an exchange rate`);
   if (waiting) notes.push(`${waiting} older ${waiting === 1 ? "mail" : "mails"} waiting`);
-  const { inserts: folded, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), prep.openDrafts, prep.accounts.filter((a) => !a.deletedAt));
+  const { inserts: folded, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), read.openDrafts, read.accounts.filter((a) => !a.deletedAt));
   // The other mail of a purchase whose first mail was already saved (the shop's receipt arriving after
   // the bank's alert was accepted): the entry exists, so this is nothing new. Remembered as read.
   const inserts = folded.filter((d) => {
-    if (!prep.accepted.some(({ draft }) => samePayment(draft, d))) return true;
+    if (!read.saved.some(({ draft }) => samePayment(draft, d))) return true;
     for (const id of [d.messageId, ...d.extraMessageIds]) processed.push({ id, receivedAt: d.receivedAt });
     return false;
   });
+  // waiting drafts are matched only where every day around them was read; the app matches the rest itself (shared/views draftMatches)
+  const covered = new Set(dates);
+  const matchable = read.openDrafts.filter((d) => d.matchedTransactionId || around(d.proposal.date).every((x) => covered.has(x)));
   return {
     scanned,
-    inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, prep.transactions, prep.accounts) })),
+    inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, transactions, read.accounts) })),
     updates,
-    matches: [...laterMatches(prep.openDrafts, prep.transactions, prep.accounts)].map(([id, transactionId]) => ({ id, transactionId })),
-    learned: learnAccounts(prep),
-    learnedMerchants: learnMerchants(prep.accepted, c.merchantMap ?? {}, prep.categories),
+    matches: [...laterMatches(matchable, transactions, read.accounts)].map(([id, transactionId]) => ({ id, transactionId })),
+    learned: learnAccounts(prep, read),
+    learnedMerchants: learnMerchants(prep.learnFrom, c.merchantMap ?? {}, read.categories),
     aiCalls, aiSkipped, aiDropped, notes, processed,
     // a check starts the look-back before syncedUpTo: hold it back so the mail skipped this time is in
     // the next window (where this one started, when older mail still waits)
@@ -622,7 +722,7 @@ export const syncUser = internalAction({
         userId, startedAt,
         inserts: got.inserts, updates: got.updates, matches: got.matches, learned: got.learned, learnedMerchants: got.learnedMerchants,
         aiCalls: got.aiCalls, scanned: got.scanned, note: got.notes.join(" · ") || undefined,
-        processed: got.processed, syncedUpTo: got.syncedUpTo,
+        processed: got.processed, syncedUpTo: got.syncedUpTo, learnedRev: prep.rev,
       });
       return { ran: true, found: got.inserts.length };
     } catch (e) {
@@ -647,12 +747,18 @@ export const releaseFolded = internalMutation({
     const open = await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect();
     let drafts = 0, mails = 0, unpriced = 0;
     for (const d of open) {
-      if (d.proposal.amount === 0) { await ctx.db.delete(d._id); unpriced++; continue; }
+      if (d.proposal.amount === 0) {
+        await deleteSynced(ctx, userId, "drafts", d._id);
+        await forgetSeen(ctx, userId, [d.messageId, ...d.extraMessageIds]);
+        unpriced++;
+        continue;
+      }
       // a paired transfer's other side is folded in on purpose, and pairs again the same way: leave it
       if (!d.extraMessageIds.length || d.proposal.description?.includes(PAIRED_NOTE)) continue;
       mails += d.extraMessageIds.length;
       drafts++;
-      await ctx.db.patch(d._id, { extraMessageIds: [] });
+      await patchSynced(ctx, userId, d._id, { extraMessageIds: [] });
+      await forgetSeen(ctx, userId, d.extraMessageIds);
     }
     return { drafts, mails, unpriced };
   },
@@ -672,12 +778,21 @@ export const rebuildOpenDrafts = internalMutation({
     let removed = 0;
     for (const d of open) {
       if (d.keptNew) continue;
-      await ctx.db.delete(d._id);
+      await deleteSynced(ctx, userId, "drafts", d._id);
+      await forgetSeen(ctx, userId, [d.messageId, ...d.extraMessageIds]);
       removed++;
     }
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
-    const forgotten = c?.processed?.length ?? 0;
-    if (c) await ctx.db.patch(c._id, { processed: [] });
+    let forgotten = c?.processed?.length ?? 0;
+    if (c?.processed) await ctx.db.patch(c._id, { processed: undefined });
+    // the first page here (its count is what is reported), any more scheduled
+    const firstPage = await ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", userId)).paginate({ numItems: 1000, cursor: null });
+    for (const r of firstPage.page) {
+      if (!r.processed) continue;
+      await ctx.db.delete(r._id);
+      forgotten++;
+    }
+    if (!firstPage.isDone) await ctx.scheduler.runAfter(0, internal.gmail.forgetAllSeen, { userId, before: Date.now(), processedOnly: true, cursor: firstPage.continueCursor });
     return { removed, forgotten };
   },
 });
@@ -784,15 +899,19 @@ export const writeSync = internalMutation({
     processed: v.optional(v.array(v.object({ id: v.string(), receivedAt: v.number() }))),
     /** Defaults to startedAt; earlier when some mail is to be retried. */
     syncedUpTo: v.optional(v.number()),
+    /** The change number the check learned up to (prepareSync). */
+    learnedRev: v.optional(v.number()),
   },
-  handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, learnedMerchants = {}, aiCalls, scanned, note, processed = [], syncedUpTo = startedAt }) => {
+  handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, learnedMerchants = {}, aiCalls, scanned, note, processed = [], syncedUpTo = startedAt, learnedRev }) => {
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!c) return;
     let found = 0;
+    const seen: SeenRow[] = processed.map((p) => ({ messageId: p.id, receivedAt: p.receivedAt, processed: true }));
     for (const d of inserts) {
       const dup = await ctx.db.query("drafts").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", d.messageId)).first();
       if (dup) continue;
-      await ctx.db.insert("drafts", { userId, ...d, status: "open" });
+      await insertSynced(ctx, userId, "drafts", { ...d, status: "open" });
+      seen.push(...seenOfDraft(d));
       found++;
     }
     for (const u of updates) {
@@ -806,7 +925,8 @@ export const writeSync = internalMutation({
         Object.assign(proposal, { type: "transfer" as const, accountId: u.transfer.accountId, toAccountId: u.transfer.toAccountId, categoryId: undefined, subcategoryId: undefined });
         if (!proposal.description?.includes(PAIRED_NOTE)) proposal.description = [proposal.description, PAIRED_NOTE].filter(Boolean).join(" · ");
       }
-      await ctx.db.patch(u.id, { extraMessageIds: [...new Set([...d.extraMessageIds, ...u.extraMessageIds])], proposal });
+      await patchSynced(ctx, userId, u.id, { extraMessageIds: [...new Set([...d.extraMessageIds, ...u.extraMessageIds])], proposal });
+      seen.push(...u.extraMessageIds.map((messageId) => ({ messageId, receivedAt: d.receivedAt })));
     }
     // the user may have saved, linked or said "it's new" while the check ran
     for (const m of matches) {
@@ -814,16 +934,16 @@ export const writeSync = internalMutation({
       if (!d || d.userId !== userId || d.status !== "open" || d.matchedTransactionId || d.keptNew) continue;
       const tx = await ctx.db.get(m.transactionId);
       if (!tx || tx.userId !== userId || tx.source) continue;
-      await ctx.db.patch(m.id, { matchedTransactionId: m.transactionId });
+      await patchSynced(ctx, userId, m.id, { matchedTransactionId: m.transactionId });
     }
+    await markSeen(ctx, userId, seen);
+    // rows no window can reach any more: well before where the next one starts, even when held back
+    const reach = Math.min(startedAt, windowStart({ ...c, syncedUpTo }, startedAt)) - SEEN_KEEP_MS;
+    for (const r of await ctx.db.query("gmailSeen").withIndex("by_user_received", (q) => q.eq("userId", userId).lt("receivedAt", reach)).take(200)) await ctx.db.delete(r._id);
     const month = monthOf(startedAt);
     const entry = { at: startedAt, scanned, found, ...(note ? { note } : {}) };
-    // what the next window can no longer reach is forgotten
-    const reach = syncedUpTo - spanMs(c.lookbackDays);
-    const known = new Set(processed.map((p) => p.id));
     await ctx.db.patch(c._id, {
-      lastSyncAt: startedAt, lastError: undefined, syncedUpTo, syncingSince: undefined,
-      processed: [...(c.processed ?? []).filter((p) => !known.has(p.id)), ...processed].filter((p) => p.receivedAt >= reach),
+      lastSyncAt: startedAt, lastError: undefined, syncedUpTo, syncingSince: undefined, ...(learnedRev !== undefined ? { learnedRev } : {}),
       aiMonth: month, aiCalls: (c.aiMonth === month ? c.aiCalls : 0) + aiCalls,
       accountMap: { ...c.accountMap, ...learned },
       ...(Object.keys(learnedMerchants).length ? { merchantMap: mergeMerchants(c.merchantMap ?? {}, learnedMerchants) } : {}),

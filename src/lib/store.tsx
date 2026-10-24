@@ -2,9 +2,13 @@
  * The local store: a replica of the user's documents that every screen renders from, a queue
  * of ops applied locally the moment the user acts, and a loop that sends them to Convex
  * whenever the connection is up. See shared/ops.ts for the model.
+ *
+ * The replica is loaded in full once (a new device, or one too far behind) and from then on kept
+ * up to date by one subscription to what changed since the change number it is up to
+ * (sync.changes, shared/changes.ts). Opening the app, or saving, reads only what changed.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useConvex, useConvexConnectionState, usePaginatedQuery, useQuery } from "convex/react";
+import { useConvex, useConvexConnectionState, useQuery, type ConvexReactClient } from "convex/react";
 import { toast } from "sonner";
 import { opLabel } from "./opLabel";
 import { api } from "../../convex/_generated/api";
@@ -12,6 +16,7 @@ import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
   TABLES, applyOp, emptySnapshot, isTmpId, rewriteIds, tmpIdsIn, type Op, type OpArgs, type OpKind, type OpResult, type Snapshot, type Table,
 } from "../../shared/ops";
+import { applyChanges } from "../../shared/changes";
 import * as local from "./db";
 import { SHARE_CACHE } from "./share";
 import { clearSafetyCopies } from "./safetyCopy";
@@ -25,7 +30,7 @@ export type SyncStatus = {
    * longer than a reconnect takes. False while the app is still connecting after it opens.
    */
   offline: boolean;
-  /** Every table has streamed from the server in this session. */
+  /** The copy has caught up with the server in this session. */
   live: boolean;
   pending: number;
   syncing: boolean;
@@ -54,14 +59,14 @@ type Store = {
 const Ctx = createContext<Store | null>(null);
 
 const BATCH = 25;
-/**
- * Entries per page of the transactions subscription; each page is one bounded server read. A change to
- * one entry re-sends its whole page, so smaller pages mean less to download and parse after every save;
- * more pages mean more round trips before the first load on a device is complete.
- */
+/** Entries per page when a device loads everything; each page is one bounded server read. */
 const TX_PAGE = 1000;
-/** How long after the last change from the server the local copy is written: a save settles in a burst of table updates, and one write covers them. */
+/** How long after the last change from the server the local copy is written: one write covers a burst of them. */
 const WRITE_DELAY_MS = 1000;
+/** How long a sent batch waits for its changes to arrive before it leaves the queue anyway (the subscription may be reloading). */
+const ARRIVE_WAIT_MS = 10_000;
+/** Before trying a failed full load again. */
+const LOAD_RETRY_MS = 5_000;
 /** An import or a tidy-up can write hundreds of documents. */
 const SEND_ALONE = new Set<OpKind>(["transactions.importRows", "categories.applyCleanup", "categories.undoCleanup", "drafts.acceptMany"]);
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
@@ -72,33 +77,32 @@ const isHeavy = (op: QueuedOp) =>
 const RETRY_MS = [2_000, 15_000, 60_000];
 const isAuthError = (e: unknown) => /not signed in|unauthenticated|authentication/i.test(e instanceof Error ? e.message : String(e));
 
-type Live = { [T in Table]: Doc<T>[] | null | undefined };
-
-function useLiveTables(): Live {
-  // One subscription per table, in a fixed order (hooks rule).
-  const settings = useQuery(api.sync.table, { table: "settings" });
-  const accountGroups = useQuery(api.sync.table, { table: "accountGroups" });
-  const accounts = useQuery(api.sync.table, { table: "accounts" });
-  const categories = useQuery(api.sync.table, { table: "categories" });
-  const transactions = useAllTransactions();
-  const repeats = useQuery(api.sync.table, { table: "repeats" });
-  const bookmarks = useQuery(api.sync.table, { table: "bookmarks" });
-  const budgets = useQuery(api.sync.table, { table: "budgets" });
-  const notes = useQuery(api.sync.table, { table: "notes" });
-  const currencies = useQuery(api.sync.table, { table: "currencies" });
-  const categoryCleanups = useQuery(api.sync.table, { table: "categoryCleanups" });
-  const history = useQuery(api.sync.table, { table: "history" });
-  const drafts = useQuery(api.sync.table, { table: "drafts" });
-  return { settings, accountGroups, accounts, categories, transactions, repeats, bookmarks, budgets, notes, currencies, categoryCleanups, history, drafts } as Live;
-}
-
-/** Every page of the user's entries, kept live; undefined until the last page has arrived. */
-function useAllTransactions(): Doc<"transactions">[] | undefined {
-  const { results, status, loadMore } = usePaginatedQuery(api.sync.transactionsPage, {}, { initialNumItems: TX_PAGE });
-  useEffect(() => {
-    if (status === "CanLoadMore") loadMore(TX_PAGE);
-  }, [status, loadMore]);
-  return status === "Exhausted" ? results : undefined;
+/**
+ * Everything of the signed-in user, read once, with the change number to follow `changes` from.
+ * The number is read first: whatever changes while the pages load has a later one, so `changes`
+ * brings it even when a page missed it. Null when signed out.
+ */
+async function loadEverything(convex: ConvexReactClient): Promise<{ rev: number; snapshot: Snapshot } | null> {
+  const rev = await convex.query(api.sync.head, {});
+  if (rev === null) return null;
+  const snapshot = emptySnapshot();
+  const rest = TABLES.filter((t) => t !== "transactions");
+  const tables = await Promise.all(rest.map((table) => convex.query(api.sync.table, { table })));
+  for (const [i, t] of rest.entries()) {
+    if (!tables[i]) return null;
+    (snapshot as Record<Table, unknown[]>)[t] = tables[i] as unknown[];
+  }
+  // An entry whose date changed between two pages can be on both: the later page has the newer copy.
+  const entries = new Map<string, Doc<"transactions">>();
+  let cursor: string | null = null;
+  for (;;) {
+    const res: { page: Doc<"transactions">[]; isDone: boolean; continueCursor: string } = await convex.query(api.sync.transactionsPage, { paginationOpts: { numItems: TX_PAGE, cursor } });
+    for (const t of res.page) entries.set(t._id, t);
+    if (res.isDone) break;
+    cursor = res.continueCursor;
+  }
+  snapshot.transactions = [...entries.values()];
+  return { rev, snapshot };
 }
 
 /** The base snapshot with every queued op replayed on top. Ops that no longer apply are skipped. */
@@ -151,12 +155,11 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const convex = useConvex();
   const conn = useConvexConnectionState();
   const offline = useOffline(conn.isWebSocketConnected);
-  const live = useLiveTables();
   const me = useQuery(api.sync.me);
 
   const [ready, setReady] = useState(false);
   const [base, setBase] = useState<Snapshot | null>(null);
-  const [meta, setMeta] = useState<Meta>({ userId: null, user: null, hasSnapshot: false, idMap: {}, photoUrls: {} });
+  const [meta, setMeta] = useState<Meta>({ userId: null, user: null, hasSnapshot: false, idMap: {}, photoUrls: {}, rev: null });
   const [ops, setOps] = useState<QueuedOp[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -228,38 +231,30 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     check();
   }), []);
 
-  // ---- adopt the live snapshot ----
-  const allLive = ready && me != null && TABLES.every((t) => live[t] != null);
-  const liveSnapshot = useMemo<Snapshot | null>(() => {
-    if (!allLive) return null;
-    const s = emptySnapshot();
-    for (const t of TABLES) (s as Record<Table, unknown[]>)[t] = live[t] as unknown[];
-    return s;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allLive, live.settings, live.accountGroups, live.accounts, live.categories, live.transactions, live.repeats, live.bookmarks, live.budgets, live.notes, live.currencies, live.categoryCleanups, live.history, live.drafts]);
-
-  liveRef.current = allLive;
-  connectedRef.current = conn.isWebSocketConnected;
-
   // ---- the local copy ----
-  // The server re-sends a whole table when one document in it changes (a page of entries, for a
-  // save), so the copy is written one table at a time, only the tables that changed, and a moment
-  // after the last change rather than once per change. Writing the whole ledger on every update
-  // kept the main thread busy right after each save.
-  const written = useRef<Partial<Record<Table, unknown[]>>>({});
+  // Written a moment after the last change from the server rather than once per change, only the
+  // tables that changed, with the change number they are now up to.
   const pendingWrite = useRef<Partial<Snapshot>>({});
+  const pendingRev = useRef<number | undefined>(undefined);
   const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushWrite = useCallback(() => {
     if (writeTimer.current) clearTimeout(writeTimer.current);
     writeTimer.current = null;
     const tables = pendingWrite.current;
+    const rev = pendingRev.current;
     pendingWrite.current = {};
-    if (Object.keys(tables).length) void local.writeTables(tables);
+    pendingRev.current = undefined;
+    if (Object.keys(tables).length || rev !== undefined) void local.writeTables(tables, rev);
   }, []);
-  /** Before the copy is wiped: nothing of it is remembered as written, and nothing waiting goes after the wipe. */
+  const queueWrite = useCallback((tables: Partial<Snapshot>, rev: number) => {
+    Object.assign(pendingWrite.current, tables);
+    pendingRev.current = rev;
+    writeTimer.current ??= setTimeout(flushWrite, WRITE_DELAY_MS);
+  }, [flushWrite]);
+  /** Before the copy is wiped: nothing waiting goes after the wipe. */
   const forgetWritten = useCallback(() => {
-    written.current = {};
     pendingWrite.current = {};
+    pendingRev.current = undefined;
     if (writeTimer.current) clearTimeout(writeTimer.current);
     writeTimer.current = null;
   }, []);
@@ -275,10 +270,40 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     };
   }, [flushWrite]);
 
+  /** Sent batches waiting for what they wrote to arrive (pump), checked whenever the copy moves on. */
+  const arrivals = useRef(new Set<() => void>());
+
+  // ---- loading everything: a new device, another user, or a copy too far behind ----
+  const [reload, setReload] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const loading = useRef(false);
+  /** The user whose copy was just cleared (signing out): nothing of theirs is loaded again until they are signed out. */
+  const [clearedFor, setClearedFor] = useState<string | null>(null);
+  /** Moves on when the copy is cleared, so a load that started before does not land after it. */
+  const generation = useRef(0);
+  // signed out now: whoever signs in next is loaded as usual
+  if (me === null && clearedFor !== null) setClearedFor(null);
+  const mustLoad = ready && me != null && me.userId !== clearedFor && conn.isWebSocketConnected && (!base || meta.rev === null || meta.userId !== me.userId || reload);
   useEffect(() => {
-    if (!liveSnapshot || !me) return;
+    if (!mustLoad || !me || loading.current) return;
+    loading.current = true;
+    const userId = me.userId;
+    const gen = generation.current;
+    let discarded = false;
     (async () => {
-      if (metaRef.current.userId && metaRef.current.userId !== me.userId) {
+      let got: Awaited<ReturnType<typeof loadEverything>>;
+      try {
+        got = await loadEverything(convex);
+      } catch {
+        setTimeout(() => setLoadAttempt((n) => n + 1), LOAD_RETRY_MS);
+        return;
+      }
+      // signed out or cleared meanwhile, or someone else signed in: whoever is signed in now is loaded next
+      if (!got || meRef.current?.userId !== userId || gen !== generation.current) {
+        discarded = true;
+        return;
+      }
+      if (metaRef.current.userId && metaRef.current.userId !== userId) {
         // Someone else signed in on this device: their predecessor's queue must not be replayed.
         for (const op of opsRef.current) settle(op.id, "Discarded: someone else signed in");
         forgetWritten();
@@ -286,32 +311,76 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         opsRef.current = [];
         setOps([]);
         setBlobUrls({});
-        const fresh: Meta = { userId: me.userId, user: me.user, hasSnapshot: true, idMap: {}, photoUrls: {} };
+        const fresh: Meta = { userId, user: meRef.current.user, hasSnapshot: true, idMap: {}, photoUrls: {}, rev: null };
         metaRef.current = fresh;
         setMeta(fresh);
       }
-      setBase(liveSnapshot);
-      const changed: Partial<Snapshot> = {};
-      for (const t of TABLES) {
-        if (written.current[t] === liveSnapshot[t]) continue;
-        written.current[t] = liveSnapshot[t];
-        (changed as Record<Table, unknown[]>)[t] = liveSnapshot[t];
-      }
-      if (Object.keys(changed).length) {
-        Object.assign(pendingWrite.current, changed);
-        writeTimer.current ??= setTimeout(flushWrite, WRITE_DELAY_MS);
-      }
-      if (metaRef.current.userId !== me.userId || JSON.stringify(metaRef.current.user) !== JSON.stringify(me.user)) {
-        const next = { ...metaRef.current, userId: me.userId, user: me.user, hasSnapshot: true };
-        metaRef.current = next;
-        setMeta(next);
-        await local.writeMeta("userId", me.userId);
-        await local.writeMeta("user", me.user);
-      }
-    })();
-  }, [liveSnapshot, me, settle, flushWrite, forgetWritten]);
+      setBase(got.snapshot);
+      queueWrite(got.snapshot, got.rev);
+      const next = { ...metaRef.current, userId, user: meRef.current.user, hasSnapshot: true, rev: got.rev };
+      metaRef.current = next;
+      setMeta(next);
+      setReload(false);
+      for (const check of [...arrivals.current]) check();
+      await local.writeMeta("userId", userId);
+      await local.writeMeta("user", next.user);
+    })().finally(() => {
+      loading.current = false;
+      if (discarded) setLoadAttempt((n) => n + 1);
+    });
+  }, [mustLoad, me, loadAttempt, convex, settle, forgetWritten, queueWrite]);
 
-  const effectiveBase = liveSnapshot ?? base;
+  // the profile (name, picture) as the server has it now
+  useEffect(() => {
+    if (!me || metaRef.current.userId !== me.userId || JSON.stringify(metaRef.current.user) === JSON.stringify(me.user)) return;
+    const next = { ...metaRef.current, user: me.user };
+    metaRef.current = next;
+    setMeta(next);
+    void local.writeMeta("user", me.user);
+  }, [me]);
+
+  // ---- following what changes ----
+  const following = ready && me != null && !!base && meta.rev !== null && meta.userId === me.userId && !reload;
+  const changes = useQuery(api.sync.changes, following ? { since: meta.rev! } : "skip");
+  const merged = useMemo(() => (base && following && changes && changes.rev > (meta.rev ?? 0) ? applyChanges(base, changes) : base), [base, following, changes, meta.rev]);
+  /** The user whose copy has caught up with the server in this session. */
+  const [caughtUpFor, setCaughtUpFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!following || !changes || !merged) return;
+    if (changes.reset) {
+      setReload(true);
+      setCaughtUpFor(null);
+      return;
+    }
+    setCaughtUpFor(metaRef.current.userId);
+    if (changes.rev <= (metaRef.current.rev ?? -1)) {
+      for (const check of [...arrivals.current]) check();
+      return;
+    }
+    // the copy moves on to this number: the next subscription asks only for what comes after it
+    const touched: Partial<Snapshot> = {};
+    for (const t of TABLES) if (merged[t] !== base![t]) (touched as Record<Table, unknown[]>)[t] = merged[t];
+    setBase(merged);
+    queueWrite(touched, changes.rev);
+    const next = { ...metaRef.current, rev: changes.rev };
+    metaRef.current = next;
+    setMeta(next);
+    for (const check of [...arrivals.current]) check();
+  }, [following, changes, merged, base, queueWrite]);
+  /** Resolves once the copy is up to change number `rev` (or after a while regardless). */
+  const arrived = useCallback((rev: number) => new Promise<void>((resolve) => {
+    const done = () => { clearTimeout(timer); arrivals.current.delete(check); resolve(); };
+    const check = () => { if ((metaRef.current.rev ?? -1) >= rev) done(); };
+    const timer = setTimeout(done, ARRIVE_WAIT_MS);
+    arrivals.current.add(check);
+    check();
+  }), []);
+
+  const live = following && caughtUpFor === meta.userId;
+  liveRef.current = live;
+  connectedRef.current = conn.isWebSocketConnected;
+
+  const effectiveBase = merged;
   const view = useMemo(() => (effectiveBase ? replay(effectiveBase, ops, meta.idMap, meta.userId ?? "") : emptySnapshot()), [effectiveBase, ops, meta.idMap, meta.userId]);
   viewRef.current = view;
 
@@ -440,6 +509,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         }
         limit = BATCH;
         for (const b of batch) attempts.current.delete(b.id);
+        // what the batch wrote comes back through `changes`: once it is in the copy, the ops can leave the queue without a flicker
+        await arrived(Math.max(0, ...results.map((r) => ("rev" in r ? r.rev : 0))));
         const idMap: Record<string, string> = {};
         const done: number[] = [];
         const errors: string[] = [];
@@ -452,9 +523,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
           else { errors.push(r.error); firstFailed ??= op; }
           settle(op.id, r.status === "applied" ? null : r.error);
         }
-        await mergeIdMap(idMap);
-        await local.removeOps(done);
+        // in memory first, so no render shows the server's copy and the queued op both; then on disk
+        const idWrite = mergeIdMap(idMap);
         setQueue(opsRef.current.filter((o) => !done.includes(o.seq)));
+        await Promise.all([idWrite, local.removeOps(done)]);
         if (errors.length) {
           setLastError(errors[0]);
           const what = firstFailed ? opLabel(firstFailed.kind, firstFailed.args) : "A change";
@@ -467,7 +539,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       pumping.current = false;
       setSyncing(false);
     }
-  }, [convex, mergeIdMap, setQueue, settle]);
+  }, [convex, mergeIdMap, setQueue, settle, arrived]);
   const pumpRef = useRef(pump);
   pumpRef.current = pump;
   useEffect(() => () => {
@@ -476,8 +548,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (allLive && conn.isWebSocketConnected && ops.length && meta.userId === me?.userId) void pump();
-  }, [allLive, conn.isWebSocketConnected, ops.length, meta.userId, me?.userId, pump]);
+    if (live && conn.isWebSocketConnected && ops.length && meta.userId === me?.userId) void pump();
+  }, [live, conn.isWebSocketConnected, ops.length, meta.userId, me?.userId, pump]);
 
   // ---- misc ----
   const rememberPhotoUrls = useCallback((urls: Record<string, string | null>) => {
@@ -491,9 +563,18 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearLocal = useCallback(async () => {
+    generation.current++;
+    setClearedFor(metaRef.current.userId ?? meRef.current?.userId ?? null);
     // anyone waiting on these changes (an import, a restore) hears that they will not arrive
     for (const op of opsRef.current) settle(op.id, "Discarded: signed out");
+    // the copy goes first, before anything waits: no change from the server lands in it, or on disk, after this
     forgetWritten();
+    setQueue([]);
+    setBase(null);
+    const fresh: Meta = { userId: null, user: null, hasSnapshot: false, idMap: {}, photoUrls: {}, rev: null };
+    metaRef.current = fresh;
+    setMeta(fresh);
+    setBlobUrls({});
     await local.wipe();
     await clearSafetyCopies().catch(() => {});
     // what else this device keeps of the user: cached receipt photos, a file shared in, and preferences
@@ -503,12 +584,6 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     } catch {
       // storage blocked: nothing was kept there either
     }
-    setQueue([]);
-    setBase(null);
-    const fresh: Meta = { userId: null, user: null, hasSnapshot: false, idMap: {}, photoUrls: {} };
-    metaRef.current = fresh;
-    setMeta(fresh);
-    setBlobUrls({});
   }, [setQueue, settle, forgetWritten]);
 
   const value = useMemo<Store>(() => ({
@@ -517,7 +592,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     userId: me?.userId ?? meta.userId,
     user: me?.user ?? meta.user,
     view,
-    status: { connected: conn.isWebSocketConnected, offline, live: allLive, pending: ops.length, syncing, lastError },
+    status: { connected: conn.isWebSocketConnected, offline, live, pending: ops.length, syncing, lastError },
     dispatch,
     dispatchTracked,
     whenSynced,
@@ -526,7 +601,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     rememberPhotoUrls,
     resolveId: (id) => (meta.idMap[id] ?? id) as typeof id,
     clearLocal,
-  }), [ready, effectiveBase, me, meta, view, conn.isWebSocketConnected, offline, allLive, ops.length, syncing, lastError, dispatch, dispatchTracked, whenSynced, enqueueUpload, blobUrls, rememberPhotoUrls, clearLocal]);
+  }), [ready, effectiveBase, me, meta, view, conn.isWebSocketConnected, offline, live, ops.length, syncing, lastError, dispatch, dispatchTracked, whenSynced, enqueueUpload, blobUrls, rememberPhotoUrls, clearLocal]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -6,8 +6,9 @@
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
+import { deleteSynced, insertSynced, patchSynced, replaceSynced } from "./changes";
 import {
-  applyOp, clean, emptySnapshot, isTmpId, mergeTxScopes, OP_TABLES, rewriteIds, tmpIdsIn, txScope, type Op, type OpKind, type Snapshot, type Table, type TxScope,
+  applyOp, emptySnapshot, isTmpId, mergeTxScopes, OP_TABLES, rewriteIds, tmpIdsIn, txScope, type Op, type OpKind, type Snapshot, type Table, type TxScope,
 } from "../../shared/ops";
 
 export async function loadTable<T extends Table>(ctx: QueryCtx | MutationCtx, userId: Id<"users">, table: T): Promise<Doc<T>[]> {
@@ -150,7 +151,8 @@ export async function runOps(ctx: MutationCtx, userId: Id<"users">, ops: Op[]): 
   return outcomes;
 }
 
-const SYSTEM = new Set(["_id", "_creationTime"]);
+/** Left out of what is written and of the comparison: the database's own fields, and the change number the write sets afresh. */
+const SYSTEM = new Set(["_id", "_creationTime", "rev"]);
 
 function fields(doc: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -173,7 +175,7 @@ async function writeDiff(ctx: MutationCtx, userId: Id<"users">, before: Snapshot
       else {
         const old = prev.get(id);
         if (!old) continue; // vanished from the server meanwhile; nothing to replace
-        if (stableJSON(clean(old)) !== stableJSON(clean(d))) replaced.push({ table, id, doc: d });
+        if (stableJSON(fields(old)) !== stableJSON(fields(d))) replaced.push({ table, id, doc: d });
       }
     }
     for (const id of prev.keys()) if (!seen.has(id)) deleted.push({ table, id });
@@ -187,19 +189,18 @@ async function writeDiff(ctx: MutationCtx, userId: Id<"users">, before: Snapshot
     const unresolved = [...refs].some((r) => !(r in idMap));
     const value = rewriteIds(body, idMap) as Record<string, unknown>;
     if (unresolved) for (const [k, v] of Object.entries(value)) if (isTmpId(v)) delete value[k];
-    const real = await ctx.db.insert(table as never, { ...value, userId } as never);
+    const real = await insertSynced(ctx, userId, table, value);
     idMap[id] = real as string;
     if (unresolved) fixups.push({ table, id: real as string, doc: body });
   }
   for (const { table, id, doc } of fixups) {
     const value = rewriteIds(fields(doc), idMap) as Record<string, unknown>;
-    await ctx.db.patch(id as Id<Table>, { ...value, userId } as never);
-    void table;
+    await patchSynced(ctx, userId, id as Id<typeof table>, { ...value, userId });
   }
   for (const { id, doc } of replaced) {
     const value = rewriteIds(fields(doc), idMap) as Record<string, unknown>;
-    await ctx.db.replace(id as Id<Table>, { ...value, userId } as never);
+    await replaceSynced(ctx, userId, id as Id<Table>, value);
   }
-  for (const { id } of deleted) await ctx.db.delete(id as Id<Table>);
+  for (const { table, id } of deleted) await deleteSynced(ctx, userId, table, id as Id<Table>);
   return idMap;
 }

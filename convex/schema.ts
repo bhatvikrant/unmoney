@@ -25,6 +25,12 @@ export const frequency = v.union(
   v.literal("monthly"),
   v.literal("yearly"),
 );
+/**
+ * On every document the app syncs: the user's change number (syncState.rev) when it was last
+ * written, so a device asks only for what changed since it last looked (sync.changes). Unset on
+ * documents not written since this was added; a device loading everything still gets those.
+ */
+const synced = { rev: v.optional(v.number()) };
 export const budgetPeriod = v.union(v.literal("weekly"), v.literal("monthly"), v.literal("yearly"));
 
 /** [categoryId, subcategoryId] of an entry or template, null where unset. */
@@ -49,6 +55,7 @@ export default defineSchema({
 
   settings: defineTable({
     userId: v.id("users"),
+    ...synced,
     onboarded: v.boolean(),
     mainCurrency: v.string(),
     symbol: v.string(),
@@ -77,11 +84,12 @@ export default defineSchema({
     dismissedRecurring: v.optional(v.array(v.string())),
     /** The last imports (newest first, at most 10), so one can be undone: its entries carry its id as importId. */
     recentImports: v.optional(v.array(v.object({ id: v.string(), name: v.string(), at: v.number(), count: v.number(), undoneAt: v.optional(v.number()) }))),
-  }).index("by_user", ["userId"]),
+  }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
 
   /** Folders that organise payment methods. They have no behaviour of their own. */
   accountGroups: defineTable({
     userId: v.id("users"),
+    ...synced,
     name: v.string(),
     /**
      * Legacy: groups used to carry the type of every account in them. The type now lives on each
@@ -91,11 +99,12 @@ export default defineSchema({
     kind: v.optional(accountKind),
     order: v.number(),
     deletedAt: v.optional(v.number()),
-  }).index("by_user", ["userId"]),
+  }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
 
   /** Payment methods. The table keeps its old name to avoid a data migration. */
   accounts: defineTable({
     userId: v.id("users"),
+    ...synced,
     /** Unset when the method sits outside any group. */
     groupId: v.optional(v.id("accountGroups")),
     /** Optional only until every account has been migrated; every write sets it. */
@@ -135,10 +144,12 @@ export default defineSchema({
     system: v.optional(v.literal("adjustments")),
   })
     .index("by_user", ["userId"])
-    .index("by_group", ["groupId"]),
+    .index("by_group", ["groupId"])
+    .index("by_user_rev", ["userId", "rev"]),
 
   categories: defineTable({
     userId: v.id("users"),
+    ...synced,
     type: v.union(v.literal("income"), v.literal("expense")),
     name: v.string(),
     parentId: v.optional(v.id("categories")),
@@ -148,10 +159,12 @@ export default defineSchema({
     deletedAt: v.optional(v.number()),
   })
     .index("by_user_type", ["userId", "type"])
-    .index("by_parent", ["parentId"]),
+    .index("by_parent", ["parentId"])
+    .index("by_user_rev", ["userId", "rev"]),
 
   transactions: defineTable({
     userId: v.id("users"),
+    ...synced,
     type: txType,
     date: v.string(),
     time: v.optional(v.string()),
@@ -184,10 +197,12 @@ export default defineSchema({
     .index("by_user_to_account", ["userId", "toAccountId"])
     .index("by_user_category", ["userId", "categoryId"])
     .index("by_repeat", ["repeatId"])
-    .searchIndex("search_note", { searchField: "note", filterFields: ["userId"] }),
+    .searchIndex("search_note", { searchField: "note", filterFields: ["userId"] })
+    .index("by_user_rev", ["userId", "rev"]),
 
   repeats: defineTable({
     userId: v.id("users"),
+    ...synced,
     kind: v.union(v.literal("repeat"), v.literal("installment")),
     frequency: frequency,
     startDate: v.string(),
@@ -200,32 +215,36 @@ export default defineSchema({
     active: v.boolean(),
   })
     .index("by_user", ["userId"])
-    .index("by_active_next", ["active", "nextDate"]),
+    .index("by_active_next", ["active", "nextDate"])
+    .index("by_user_rev", ["userId", "rev"]),
 
   bookmarks: defineTable({
     userId: v.id("users"),
+    ...synced,
     order: v.number(),
     template: template,
     /** The entry it was bookmarked from, so that entry can show a star. */
     transactionId: v.optional(v.id("transactions")),
-  }).index("by_user", ["userId"]),
+  }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
 
   budgets: defineTable({
     userId: v.id("users"),
+    ...synced,
     categoryId: v.optional(v.id("categories")),
     period: budgetPeriod,
     amount: v.number(),
     overrides: v.record(v.string(), v.number()),
     /** Carrying over is on from this period key: each period's leftover (or overspend) adds to the next one. */
     rolloverFrom: v.optional(v.string()),
-  }).index("by_user", ["userId"]),
+  }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
 
   notes: defineTable({
     userId: v.id("users"),
+    ...synced,
     date: v.string(),
     text: v.string(),
     color: v.string(),
-  }).index("by_user_date", ["userId", "date"]),
+  }).index("by_user_date", ["userId", "date"]).index("by_user_rev", ["userId", "rev"]),
 
   /**
    * The secret link the iPhone "Send to unmoney" shortcut posts files to. Only a SHA-256 of the
@@ -262,6 +281,7 @@ export default defineSchema({
    */
   categoryCleanups: defineTable({
     userId: v.id("users"),
+    ...synced,
     at: v.number(),
     /** One line per change that went through, e.g. "Merged Cafe into Coffee". */
     label: v.array(v.string()),
@@ -283,7 +303,7 @@ export default defineSchema({
     })),
     entries: v.array(v.object({ id: v.id("transactions"), from: catPair, to: catPair })),
     templates: v.array(v.object({ table: v.union(v.literal("repeats"), v.literal("bookmarks")), id: v.string(), from: catPair, to: catPair })),
-  }).index("by_user", ["userId"]),
+  }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
 
   /**
    * The change history shown on the Payment methods and Categories pages: one plain sentence per
@@ -291,10 +311,11 @@ export default defineSchema({
    */
   history: defineTable({
     userId: v.id("users"),
+    ...synced,
     at: v.number(),
     scope: v.union(v.literal("accounts"), v.literal("categories")),
     text: v.string(),
-  }).index("by_user", ["userId"]),
+  }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
 
   /**
    * A user's last AI run for Tidy up: when (runs are limited to one a month), a fingerprint of the
@@ -315,6 +336,25 @@ export default defineSchema({
       confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
     })),
   }).index("by_user", ["userId"]),
+
+  /**
+   * A user's change number: every mutation that writes their synced documents adds one and stamps
+   * what it wrote with it (convex/lib/changes.ts). `prunedRev` is the newest delete whose tombstone
+   * has been dropped; a device that last looked before it has to load everything again.
+   */
+  syncState: defineTable({
+    userId: v.id("users"),
+    rev: v.number(),
+    prunedRev: v.optional(v.number()),
+  }).index("by_user", ["userId"]),
+
+  /** A synced document that was deleted, so devices that hold it hear about it. Dropped after a while (sync.pruneTombstones). */
+  tombstones: defineTable({
+    userId: v.id("users"),
+    table: v.string(),
+    docId: v.string(),
+    rev: v.number(),
+  }).index("by_user_rev", ["userId", "rev"]),
 
   /** Ops the client has synced, for idempotent retries. */
   syncOps: defineTable({
@@ -354,6 +394,10 @@ export default defineSchema({
     /** Per-user monthly cap on model calls. */
     aiMonth: v.string(),
     aiCalls: v.number(),
+    /** Drafts written after this change number (syncState.rev) have not been learned from yet (prepareSync). */
+    learnedRev: v.optional(v.number()),
+    /** gmailSeen holds this user's drafts and `processed` (which then moves there too): set by the first check after it was added. */
+    seenFilled: v.optional(v.boolean()),
     /** The last 10 checks. */
     log: v.array(v.object({ at: v.number(), scanned: v.number(), found: v.number(), error: v.optional(v.string()), note: v.optional(v.string()) })),
     /**
@@ -387,6 +431,7 @@ export default defineSchema({
    */
   drafts: defineTable({
     userId: v.id("users"),
+    ...synced,
     source: v.literal("gmail"),
     /** The primary Gmail message. */
     messageId: v.string(),
@@ -434,10 +479,27 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"])
-    .index("by_user_message", ["userId", "messageId"]),
+    .index("by_user_message", ["userId", "messageId"])
+    .index("by_user_rev", ["userId", "rev"]),
+
+  /**
+   * Every Gmail message a check has dealt with: the mail of a draft (its own and the ones folded
+   * into it) and mail read that made none. A check skips these, so it reads only these small rows,
+   * never the drafts. Kept a little longer than the longest look-back can reach.
+   */
+  gmailSeen: defineTable({
+    userId: v.id("users"),
+    messageId: v.string(),
+    receivedAt: v.number(),
+    /** No draft came of it (triage dropped it, or the AI said it is not a payment): "Read again" forgets these. */
+    processed: v.optional(v.boolean()),
+  })
+    .index("by_user_message", ["userId", "messageId"])
+    .index("by_user_received", ["userId", "receivedAt"]),
 
   currencies: defineTable({
     userId: v.id("users"),
+    ...synced,
     code: v.string(),
     name: v.string(),
     symbol: v.string(),
@@ -446,5 +508,5 @@ export default defineSchema({
     symbolPosition: v.union(v.literal("before"), v.literal("after")),
     isCustom: v.boolean(),
     order: v.number(),
-  }).index("by_user", ["userId"]),
+  }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
 });
