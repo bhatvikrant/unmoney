@@ -5,6 +5,9 @@ import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { decryptText, encryptText, sign, verify } from "./lib/gmailCrypto";
+import { parseMail } from "../shared/gmail/rules";
+import { noteOf } from "../shared/gmail/resolve";
+import { patchSynced } from "./lib/changes";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -22,7 +25,7 @@ type Listing = { messages?: { id: string }[]; nextPageToken?: string };
  * Google as a check sees it: a token for the stored grant, then the mailbox's pages and its mails
  * (each a one-line note that is not about money). `calls` records every request's host and path.
  */
-function fakeGoogle(list: (url: URL) => Listing | Promise<Listing>, receivedAt = 1) {
+function fakeGoogle(list: (url: URL) => Listing | Promise<Listing>, receivedAt = 1, mail = { from: "Someone <hi@example.com>", subject: "Hello", text: "See you tomorrow" }) {
   const real = globalThis.fetch;
   const calls: string[] = [];
   globalThis.fetch = (async (input: string | URL | Request) => {
@@ -31,7 +34,7 @@ function fakeGoogle(list: (url: URL) => Listing | Promise<Listing>, receivedAt =
     if (u.host === "oauth2.googleapis.com") return Response.json({ access_token: "at" });
     if (u.pathname.endsWith("/messages")) return Response.json(await list(u));
     const id = u.pathname.split("/").pop()!;
-    return Response.json({ id, threadId: "t", internalDate: String(receivedAt), payload: { mimeType: "text/plain", headers: [{ name: "From", value: "Someone <hi@example.com>" }, { name: "Subject", value: "Hello" }], body: { data: btoa("See you tomorrow") } } });
+    return Response.json({ id, threadId: "t", internalDate: String(receivedAt), payload: { mimeType: "text/plain", headers: [{ name: "From", value: mail.from }, { name: "Subject", value: mail.subject }], body: { data: btoa(mail.text) } } });
   }) as typeof fetch;
   return { calls, restore: () => { globalThis.fetch = real; } };
 }
@@ -47,7 +50,7 @@ async function setup() {
     aiMonth: "2026-09", aiCalls: 5, log: [], ...extra,
   }));
   const insert = (messageId: string, extra: Record<string, unknown> = {}) => ({
-    source: "gmail" as const, messageId, extraMessageIds: [], threadId: "t", receivedAt: 1, from: "HDFC <alerts@hdfcbank.net>", subject: "Alert",
+    source: "gmail" as const, messageId, extraMessageIds: [], threadId: "t", receivedAt: Date.parse("2026-10-18T10:00:00Z"), from: "HDFC <alerts@hdfcbank.net>", subject: "Alert",
     proposal: { type: "expense" as const, date: "2026-10-18", amount: 48500, note: "Swiggy", accountId: accounts[0]._id }, confidence: "high" as const, how: "rule" as const, ...extra,
   });
   return { t, as, userId, accounts, connect, insert };
@@ -116,10 +119,12 @@ test("mail that made no draft is not read again, and mail the AI skipped holds t
   let c = (await t.run((ctx) => ctx.db.get(cid)))!;
   expect(c.syncedUpTo).toBe(held);
   expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["shipped", "other"] })).toEqual(["shipped"]);
-  // 31 days on, no window reaches it: forgotten
+  // kept as a small gmailSeen row, not on the connection, until no window can reach it any more
   await write(at + 31 * 24 * hour, []);
   c = (await t.run((ctx) => ctx.db.get(cid)))!;
-  expect([c.syncedUpTo, c.processed]).toEqual([at + 31 * 24 * hour, []]);
+  expect([c.syncedUpTo, c.processed]).toEqual([at + 31 * 24 * hour, undefined]);
+  await write(at + 181 * 24 * hour, []);
+  expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["shipped"] })).toEqual([]);
 });
 
 test("a check matches open drafts to entries typed in since, but never undoes \"no, it's new\"", async () => {
@@ -468,4 +473,80 @@ test("rebuilding removes waiting drafts and forgets \"not money\" mail, keeping 
   });
   expect(await t.mutation(internal.gmail.rebuildOpenDrafts, { userId })).toEqual({ removed: 1, forgotten: 1 });
   expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["a", "b", "c", "otp"] })).toEqual(["b", "c"]);
+});
+
+test("the first check after the change remembers what the drafts and the old processed list knew, once", async () => {
+  const { t, userId, connect, insert } = await setup();
+  const at = Date.parse("2026-10-20T10:00:00Z");
+  const cid = await connect({ processed: [{ id: "otp", receivedAt: at - 1000 }] });
+  // drafts written before gmailSeen existed
+  await t.run(async (ctx) => {
+    await ctx.db.insert("drafts", { userId, ...insert("alert", { extraMessageIds: ["receipt"] }), status: "accepted" });
+    await ctx.db.insert("drafts", { userId, ...insert("open"), status: "open" });
+  });
+  const seen = () => t.query(internal.gmail.seenMessageIds, { userId, ids: ["alert", "receipt", "open", "otp", "new"] });
+  expect(await seen()).toEqual([]);
+  expect(await t.mutation(internal.gmail.claimSync, { userId, startedAt: at })).toBe(true);
+  expect(await seen()).toEqual(["alert", "receipt", "open", "otp"]);
+  const c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect([c.seenFilled, c.processed]).toEqual([true, undefined]);
+});
+
+test("reading mail looks up past entries by the merchant and the days around it, not the whole ledger", async () => {
+  const { t, userId, accounts } = await setup();
+  const entry = (date: string, note: string) => t.run((ctx) => ctx.db.insert("transactions", { userId, type: "expense", date, accountId: accounts[0]._id, amount: 100, note, tags: [], photoIds: [] }));
+  const swiggyOld = await entry("2025-01-03", "Swiggy");
+  const sameDay = await entry("2026-10-18", "Rent");
+  await entry("2026-05-01", "Zomato");
+  const got = await t.query(internal.gmail.entriesFor, { userId, notes: ["Swiggy"], dates: ["2026-10-17", "2026-10-18", "2026-10-19"] });
+  expect(got.map((d) => d._id).sort()).toEqual([swiggyOld, sameDay].sort());
+});
+
+test("a new alert still takes the category its merchant had and finds the entry already typed in that day", async () => {
+  const { t, as, userId, accounts, connect } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const { enc, iv } = await encryptText("1//refresh-token");
+  const now = Date.now();
+  await connect({ refreshTokenEnc: enc, iv, syncedUpTo: now - 60 * 60 * 1000 });
+  const mail = { from: "KVB <alerts@kvb.bank.in>", subject: "Alert", text: "INR 120.00 debited from A/c XX3344 on 21-10-2026. Info: UPI/P2M/529712345602/BOOK HOUSE." };
+  const note = noteOf(parseMail({ id: "m", threadId: "t", receivedAt: now, ...mail })!);
+  const books = ((await as.query(api.sync.table, { table: "categories" })) as Doc<"categories">[]).find((c) => c.type === "expense" && c.name === "Education")!._id;
+  const entry = (date: string, extra: Partial<Doc<"transactions">>) => t.run((ctx) => ctx.db.insert("transactions", { userId, type: "expense", date, accountId: accounts[0]._id, amount: 100, note: "", tags: [], photoIds: [], ...extra }));
+  // months ago, the user filed this shop under Education; today they typed the payment in themselves
+  await entry("2026-02-02", { note, categoryId: books });
+  const typed = await entry("2026-10-21", { amount: 12000, note: "Books" });
+  const g = fakeGoogle(() => ({ messages: [{ id: "m1" }] }), now, mail);
+  try {
+    expect(await t.action(internal.gmail.syncUser, { userId })).toEqual({ ran: true, found: 1 });
+  } finally { g.restore(); }
+  const [draft] = await t.run((ctx) => ctx.db.query("drafts").collect());
+  expect([draft.proposal.note, draft.proposal.categoryId, draft.matchedTransactionId]).toEqual([note, books, typed]);
+});
+
+test("a draft saved offline, with an old time on it, is still learned from", async () => {
+  const { t, userId, accounts, connect, insert } = await setup();
+  await connect();
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: 5, inserts: [insert("m1")], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 1 });
+  const learnedRev = (await t.query(internal.gmail.prepareSync, { userId }))!.rev;
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: 10, inserts: [], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 0, learnedRev });
+  expect((await t.query(internal.gmail.prepareSync, { userId }))!.learnFrom).toEqual([]);
+  // saved on a phone that was offline: the time it carries is before the last check
+  const txId = await t.run((ctx) => ctx.db.insert("transactions", { userId, type: "expense", date: "2026-10-18", accountId: accounts[0]._id, amount: 48500, note: "Swiggy", tags: [], photoIds: [] }));
+  await t.run(async (ctx) => {
+    const d = (await ctx.db.query("drafts").collect())[0];
+    await patchSynced(ctx, userId, d._id, { status: "accepted", transactionId: txId, resolvedAt: 1 });
+  });
+  expect((await t.query(internal.gmail.prepareSync, { userId }))!.learnFrom.map((l) => l.tx._id)).toEqual([txId]);
+});
+
+test("disconnecting forgets what was seen, but not what a new connection filled in since", async () => {
+  const { t, userId, connect, insert } = await setup();
+  await connect();
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: 5, inserts: [insert("old")], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 1 });
+  const before = Date.now() + 1;
+  await new Promise((r) => setTimeout(r, 5));
+  await t.run((ctx) => ctx.db.insert("gmailSeen", { userId, messageId: "new", receivedAt: 1 }));
+  await t.mutation(internal.gmail.forgetAllSeen, { userId, before });
+  expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["old", "new"] })).toEqual(["new"]);
 });

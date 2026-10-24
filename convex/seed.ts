@@ -2,6 +2,7 @@
 import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import { insertSynced } from "./lib/changes";
 import { addDays, addMonths, make, parts, todayISO } from "../shared/dates";
 
 export const demo = internalMutation({
@@ -20,7 +21,7 @@ export const demo = internalMutation({
     const existing = await ctx.db.query("accounts").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
     const byName = (n: string) => existing.find((a) => a.name === n)?._id;
     const acc = async (name: string, kind: string, groupId: Id<"accountGroups"> | undefined, extra: Record<string, unknown> = {}, initial = 0) =>
-      byName(name) ?? (await ctx.db.insert("accounts", { userId, groupId, kind, name, initialBalance: initial, includeInTotals: true, hidden: false, order: existing.length + 10, transferAsExpense: false, ...extra } as never));
+      byName(name) ?? (await insertSynced(ctx, userId, "accounts", { groupId, kind, name, initialBalance: initial, includeInTotals: true, hidden: false, order: existing.length + 10, transferAsExpense: false, ...extra } as never));
     const cash = await acc("Cash", "cash", g("Cash"), {}, 12000);
     const bank = await acc("Bank", "bank", g("Bank accounts"), {}, 250000);
     const hibd = await acc("HIBD", "bank", g("Bank accounts"), {}, 480000);
@@ -31,14 +32,14 @@ export const demo = internalMutation({
     const loan = await acc("Car loan", "loan", undefined, {}, -1200000);
     await acc("GPay", "upi", g("UPIs"), { linkedAccountId: hibd });
     // subcategories
-    const eating = await ctx.db.insert("categories", { userId, type: "expense", name: "Eating out", parentId: c("Food"), order: 100 });
-    await ctx.db.insert("categories", { userId, type: "expense", name: "Groceries", parentId: c("Food"), order: 101 });
-    const fuel = await ctx.db.insert("categories", { userId, type: "expense", name: "Fuel", parentId: c("Transport"), order: 102 });
-    await ctx.db.insert("currencies", { userId, code: "EUR", name: "Euro", symbol: "€", rate: 0.92, decimals: 2, symbolPosition: "before", isCustom: false, order: 0 });
+    const eating = await insertSynced(ctx, userId, "categories", { type: "expense", name: "Eating out", parentId: c("Food"), order: 100 });
+    await insertSynced(ctx, userId, "categories", { type: "expense", name: "Groceries", parentId: c("Food"), order: 101 });
+    const fuel = await insertSynced(ctx, userId, "categories", { type: "expense", name: "Fuel", parentId: c("Transport"), order: 102 });
+    await insertSynced(ctx, userId, "currencies", { code: "EUR", name: "Euro", symbol: "€", rate: 0.92, decimals: 2, symbolPosition: "before", isCustom: false, order: 0 });
 
     const today = todayISO();
     const { y, m } = parts(today);
-    const tx = (t: Record<string, unknown>) => ctx.db.insert("transactions", { userId, tags: [], photoIds: [], note: "", ...t } as never);
+    const tx = (t: Record<string, unknown>) => insertSynced(ctx, userId, "transactions", { tags: [], photoIds: [], note: "", ...t } as never);
     let seed = 7;
     const rnd = (n: number) => { seed = (seed * 9301 + 49297) % 233280; return Math.floor((seed / 233280) * n); };
     const notes = ["Coffee", "Lunch", "Groceries", "Uber", "Netflix", "Pharmacy", "Gym", "Books", "Dinner with Sam", "Haircut", "Shoes", "Train"];
@@ -70,17 +71,17 @@ export const demo = internalMutation({
     await tx({ type: "expense", date: today, accountId: cash, categoryId: c("Food"), amount: -1250, note: "Split bill refund", description: "Negative = rebate" });
     // installment: 3 months from last month
     const start = addMonths(today, -1);
-    const repId = await ctx.db.insert("repeats", { userId, kind: "installment", frequency: "monthly", startDate: start, nextDate: addMonths(start, 2), installmentCount: 3, template: { type: "expense", accountId: card, categoryId: c("Household"), amount: 30000, note: "IKEA wardrobe", tags: [] }, active: false });
+    const repId = await insertSynced(ctx, userId, "repeats", { kind: "installment", frequency: "monthly", startDate: start, nextDate: addMonths(start, 2), installmentCount: 3, template: { type: "expense", accountId: card, categoryId: c("Household"), amount: 30000, note: "IKEA wardrobe", tags: [] }, active: false });
     for (let k = 0; k < 3; k++) await tx({ type: "expense", date: addMonths(start, k), accountId: card, categoryId: c("Household"), amount: 10000, note: "IKEA wardrobe", repeatId: repId, installmentIndex: k + 1, installmentCount: 3, installmentTotal: 30000 });
-    await ctx.db.insert("repeats", { userId, kind: "repeat", frequency: "monthly", startDate: make(y, m, 20), nextDate: make(y, m, 20) > today ? make(y, m, 20) : make(y, m + 1 > 12 ? 1 : m + 1, 20), template: { type: "expense", accountId: card, categoryId: c("Culture"), amount: 1599, note: "Spotify", tags: ["subscription"] }, active: true });
-    await ctx.db.insert("bookmarks", { userId, order: 0, template: { type: "expense", accountId: cash, categoryId: c("Food"), subcategoryId: eating, amount: 450, note: "Coffee", tags: ["coffee"] } });
-    await ctx.db.insert("bookmarks", { userId, order: 1, template: { type: "transfer", accountId: bank, toAccountId: cash, amount: 20000, note: "ATM", tags: [], feeAmount: 150 } });
-    await ctx.db.insert("budgets", { userId, period: "monthly", amount: 250000, overrides: {} });
-    await ctx.db.insert("budgets", { userId, categoryId: c("Food"), period: "monthly", amount: 40000, overrides: {} });
-    await ctx.db.insert("budgets", { userId, categoryId: c("Transport"), period: "monthly", amount: 15000, overrides: {} });
-    await ctx.db.insert("budgets", { userId, categoryId: c("Culture"), period: "monthly", amount: 5000, overrides: {} });
-    await ctx.db.insert("notes", { userId, date: today, text: "Payday next week, keep eating out low.", color: "#3b82f6" });
-    await ctx.db.insert("notes", { userId, date: addDays(today, -6), text: "Dentist", color: "#ef4444" });
+    await insertSynced(ctx, userId, "repeats", { kind: "repeat", frequency: "monthly", startDate: make(y, m, 20), nextDate: make(y, m, 20) > today ? make(y, m, 20) : make(y, m + 1 > 12 ? 1 : m + 1, 20), template: { type: "expense", accountId: card, categoryId: c("Culture"), amount: 1599, note: "Spotify", tags: ["subscription"] }, active: true });
+    await insertSynced(ctx, userId, "bookmarks", { order: 0, template: { type: "expense", accountId: cash, categoryId: c("Food"), subcategoryId: eating, amount: 450, note: "Coffee", tags: ["coffee"] } });
+    await insertSynced(ctx, userId, "bookmarks", { order: 1, template: { type: "transfer", accountId: bank, toAccountId: cash, amount: 20000, note: "ATM", tags: [], feeAmount: 150 } });
+    await insertSynced(ctx, userId, "budgets", { period: "monthly", amount: 250000, overrides: {} });
+    await insertSynced(ctx, userId, "budgets", { categoryId: c("Food"), period: "monthly", amount: 40000, overrides: {} });
+    await insertSynced(ctx, userId, "budgets", { categoryId: c("Transport"), period: "monthly", amount: 15000, overrides: {} });
+    await insertSynced(ctx, userId, "budgets", { categoryId: c("Culture"), period: "monthly", amount: 5000, overrides: {} });
+    await insertSynced(ctx, userId, "notes", { date: today, text: "Payday next week, keep eating out low.", color: "#3b82f6" });
+    await insertSynced(ctx, userId, "notes", { date: addDays(today, -6), text: "Dentist", color: "#ef4444" });
     return "ok";
   },
 });

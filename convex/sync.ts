@@ -3,8 +3,11 @@ import { paginationOptsValidator } from "convex/server";
 import { currentUserId } from "./lib/auth";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { loadTable, runOps, type OpOutcome } from "./lib/snapshot";
-import { TABLES, type Op, type OpKind } from "../shared/ops";
+import { currentRev, deleteSynced } from "./lib/changes";
+import { TABLES, type Op, type OpKind, type Table } from "../shared/ops";
+import type { ChangedDocs, Changes } from "../shared/changes";
 
 const tableArg = v.union(...TABLES.map((t) => v.literal(t)));
 
@@ -30,8 +33,8 @@ export const table = query({
 });
 
 /**
- * The signed-in user's entries, a page at a time. The client loads every page and keeps each one
- * subscribed, so no single query reads more than a page and an edit re-sends only its own page.
+ * The signed-in user's entries, a page at a time, for a device loading everything (no local copy
+ * yet, or one too old for `changes`). It reads them once and from then on follows `changes`.
  */
 export const transactionsPage = query({
   args: { paginationOpts: paginationOptsValidator },
@@ -42,12 +45,56 @@ export const transactionsPage = query({
   },
 });
 
+/** The user's change number now: a device loading everything starts following `changes` from here. */
+export const head = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await currentUserId(ctx);
+    if (!userId) return null;
+    return currentRev(ctx, userId);
+  },
+});
+
+/** More than this many changed documents and the device is better off loading everything again. */
+const CHANGES_MAX = 5000;
+
+/**
+ * Every synced document of the signed-in user written after change number `since`, and the ids of
+ * those deleted since. A device keeps its own copy and subscribes to this with the number it has
+ * seen, so a save sends only what it wrote and opening the app reads nothing when nothing changed.
+ * `reset` asks the device to load everything again: it is ahead of the server (the data was
+ * replaced), behind the tombstones still kept, or so far behind that a full load is smaller.
+ */
+export const changes = query({
+  args: { since: v.number() },
+  handler: async (ctx, { since }): Promise<Changes | null> => {
+    const userId = await currentUserId(ctx);
+    if (!userId) return null;
+    const state = await ctx.db.query("syncState").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    const rev = state?.rev ?? 0;
+    if (since > rev || since < (state?.prunedRev ?? 0)) return { rev, reset: true };
+    if (since === rev) return { rev, docs: {}, deleted: [] };
+    const docs: ChangedDocs = {};
+    let budget = CHANGES_MAX;
+    for (const table of TABLES) {
+      const got = await ctx.db.query(table).withIndex("by_user_rev", (q) => q.eq("userId", userId).gt("rev", since)).take(budget + 1);
+      if (got.length > budget) return { rev, reset: true };
+      budget -= got.length;
+      if (got.length) (docs as Record<Table, unknown[]>)[table] = got;
+    }
+    const gone = await ctx.db.query("tombstones").withIndex("by_user_rev", (q) => q.eq("userId", userId).gt("rev", since)).take(budget + 1);
+    if (gone.length > budget) return { rev, reset: true };
+    return { rev, docs, deleted: gone.map((t) => ({ table: t.table as Table, id: t.docId })) };
+  },
+});
+
 const opArg = v.object({ id: v.string(), kind: v.string(), args: v.any(), at: v.number() });
 
 /**
  * Apply a batch of queued ops, in order. Idempotent: an op id that was seen before returns its
  * recorded outcome and is not applied again, so a client may safely resend after losing the
- * reply.
+ * reply. Each outcome carries the user's change number after the batch: once `changes` has
+ * brought the device that far, what the batch wrote is in its copy.
  */
 export const apply = mutation({
   args: { ops: v.array(opArg) },
@@ -75,7 +122,8 @@ export const apply = mutation({
         });
       }
     }
-    return results;
+    const rev = await currentRev(ctx, userId);
+    return results.map((r) => ({ ...r, rev }));
   },
 });
 
@@ -88,7 +136,7 @@ export const sweepEntries = internalMutation({
   args: { userId: v.id("users"), before: v.number(), cursor: v.optional(v.union(v.string(), v.null())) },
   handler: async (ctx, { userId, before, cursor = null }) => {
     const res = await ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).paginate({ numItems: 1000, cursor });
-    for (const t of res.page) if (t._creationTime < before) await ctx.db.delete(t._id);
+    for (const t of res.page) if (t._creationTime < before) await deleteSynced(ctx, userId, "transactions", t._id);
     if (!res.isDone) await ctx.scheduler.runAfter(0, internal.sync.sweepEntries, { userId, before, cursor: res.continueCursor });
   },
 });
@@ -121,7 +169,29 @@ export const pruneDrafts = internalMutation({
   handler: async (ctx, args) => {
     const cutoff = args.cutoff ?? Date.now() - DRAFT_TTL_MS;
     const res = await ctx.db.query("drafts").withIndex("by_creation_time", (q) => q.lt("_creationTime", cutoff)).paginate({ numItems: PRUNE_BATCH, cursor: args.cursor ?? null });
-    for (const d of res.page) if (d.status !== "open" && (d.resolvedAt ?? d._creationTime) < cutoff) await ctx.db.delete(d._id);
+    for (const d of res.page) if (d.status !== "open" && (d.resolvedAt ?? d._creationTime) < cutoff) await deleteSynced(ctx, d.userId, "drafts", d._id);
     if (!res.isDone) await ctx.scheduler.runAfter(0, internal.sync.pruneDrafts, { cutoff, cursor: res.continueCursor });
+  },
+});
+
+/** A device that has not looked for this long loads everything again rather than replaying deletes. */
+const TOMBSTONE_TTL_MS = 60 * 24 * 60 * 60 * 1000;
+
+/** Daily cron: drop old tombstones, a batch at a time, and record per user how far the drops reach. */
+export const pruneTombstones = internalMutation({
+  args: { cutoff: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const cutoff = args.cutoff ?? Date.now() - TOMBSTONE_TTL_MS;
+    const old = await ctx.db.query("tombstones").withIndex("by_creation_time", (q) => q.lt("_creationTime", cutoff)).take(PRUNE_BATCH);
+    const reach = new Map<Id<"users">, number>();
+    for (const t of old) {
+      await ctx.db.delete(t._id);
+      reach.set(t.userId, Math.max(reach.get(t.userId) ?? 0, t.rev));
+    }
+    for (const [userId, rev] of reach) {
+      const state = await ctx.db.query("syncState").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+      if (state && rev > (state.prunedRev ?? 0)) await ctx.db.patch(state._id, { prunedRev: rev });
+    }
+    if (old.length === PRUNE_BATCH) await ctx.scheduler.runAfter(0, internal.sync.pruneTombstones, { cutoff });
   },
 });

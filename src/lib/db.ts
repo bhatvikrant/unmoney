@@ -10,6 +10,8 @@ export type Meta = {
   hasSnapshot: boolean;
   idMap: Record<string, string>;
   photoUrls: Record<string, string>;
+  /** The server's change number the copy is up to (sync.changes); null until the first full load. */
+  rev: number | null;
 };
 
 interface Schema extends DBSchema {
@@ -60,7 +62,7 @@ export function runInMemory(): void {
   memory = { seq: 0, blobs: new Map() };
 }
 
-const defaultMeta = (): Meta => ({ userId: null, user: null, hasSnapshot: false, idMap: {}, photoUrls: {} });
+const defaultMeta = (): Meta => ({ userId: null, user: null, hasSnapshot: false, idMap: {}, photoUrls: {}, rev: null });
 
 export async function readAll(): Promise<{ snapshot: Snapshot | null; meta: Meta; ops: QueuedOp[] }> {
   return withDb(async (d) => {
@@ -85,13 +87,17 @@ export async function readAll(): Promise<{ snapshot: Snapshot | null; meta: Meta
   });
 }
 
-/** Write these tables (a whole snapshot, or only the ones that changed) and note that a copy exists. */
-export async function writeTables(tables: Partial<Snapshot>): Promise<void> {
+/**
+ * Write these tables (a whole snapshot, or only the ones that changed) and note that a copy exists,
+ * with the change number they are up to in the same transaction, so the two never disagree.
+ */
+export async function writeTables(tables: Partial<Snapshot>, rev?: number): Promise<void> {
   if (memory) return;
   await withDb(async (d) => {
     const tx = d.transaction(["tables", "meta"], "readwrite");
     for (const [t, docs] of Object.entries(tables)) if (docs) void tx.objectStore("tables").put(docs, t as Table);
     void tx.objectStore("meta").put(true, "hasSnapshot");
+    if (rev !== undefined) void tx.objectStore("meta").put(rev, "rev");
     await tx.done;
   });
 }

@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
+import { patchSynced } from "./lib/changes";
 
 const BATCH = 200;
 
@@ -28,7 +29,7 @@ export const accountKinds = internalMutation({
         if (!groups.has(a.groupId)) groups.set(a.groupId, await ctx.db.get(a.groupId));
         group = groups.get(a.groupId) ?? null;
       }
-      await ctx.db.patch(a._id, { kind: group?.kind ?? "other" });
+      await patchSynced(ctx, a.userId, a._id, { kind: group?.kind ?? "other" });
       updated++;
     }
     if (!page.isDone) await ctx.scheduler.runAfter(0, internal.migrations.accountKinds, { cursor: page.continueCursor, updated });
