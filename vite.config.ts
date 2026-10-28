@@ -38,6 +38,10 @@ export default defineConfig({
         display: "standalone",
         start_url: "/",
         scope: "/",
+        // Coming back from UnSplit (/unsplit/return) lands in the UnMoney window that is already
+        // open, not a second one, where the browser captures links into installed apps
+        // (desktop Chrome 139+; iOS always uses its in-app browser for links that leave an app).
+        launch_handler: { client_mode: "navigate-existing" },
         categories: ["finance", "productivity"],
         // icons in public/ come from `npm run icons` (pwa-assets.config.ts)
         icons: [
