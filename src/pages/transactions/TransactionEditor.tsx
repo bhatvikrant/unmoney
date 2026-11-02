@@ -21,6 +21,7 @@ import { offerUndo, useUndoableDelete } from "@/lib/undo";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
 import { RepeatSheet, repeatLabel, type RepeatChoice } from "@/components/tx/RepeatSheet";
+import { SipToggle } from "@/components/tx/SipToggle";
 import { PhotoField, TagInput } from "@/components/tx/fields";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 import { Button } from "@/components/ui/button";
@@ -651,6 +652,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
 
         {saved?.type === "expense" ? (
           <div className="mt-3 border-y bg-card">
+            <SipToggle tx={saved} />
             {saved.split ? (
               <div className="flex items-center gap-2 px-4 py-2.5 text-sm">
                 <Users className="size-4 text-muted-foreground shrink-0" />

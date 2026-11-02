@@ -63,6 +63,7 @@ export async function loadTransactions(ctx: QueryCtx | MutationCtx, userId: Id<"
     add(from);
     add(to);
   }
+  for (const docs of await Promise.all((scope.sipIds ?? []).map((sipId) => ctx.db.query("transactions").withIndex("by_sip", (q) => q.eq("sipId", sipId)).collect()))) add(docs);
   for (const docs of await Promise.all((scope.dates ?? []).map((date) => ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId).eq("date", date)).collect()))) add(docs);
   const byCategory = (categoryId: Id<"categories">) => ctx.db.query("transactions").withIndex("by_user_category", (q) => q.eq("userId", userId).eq("categoryId", categoryId)).collect();
   const categories = new Set<string>();
