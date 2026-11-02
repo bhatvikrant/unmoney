@@ -20,7 +20,7 @@ import { cardColorOf } from "../../../shared/defaults";
 import { SwipeToDelete } from "@/components/shell/SwipeToDelete";
 import { DeletePaymentMethodDialog } from "./DeletePaymentMethodDialog";
 import { MergePaymentMethodsDialog } from "./MergePaymentMethodsDialog";
-import { HistorySection } from "@/components/HistorySection";
+import { ArchivedHistoryTabs, type BottomTab } from "@/components/ArchivedHistoryTabs";
 import { CardBills } from "./CardBills";
 import { reconciledLabel, dateLabel } from "@/lib/format";
 import { useToday } from "@/lib/today";
@@ -36,7 +36,7 @@ export default function AccountsPage() {
   const today = useToday();
   const move = useOp("accounts.move");
   const setArchived = useOp("accounts.setArchived");
-  const [showArchived, setShowArchived] = useState(false);
+  const [bottomTab, setBottomTab] = useState<BottomTab | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /** Groups whose hidden methods are shown (dimmed) under the rest. */
   const [showHidden, setShowHidden] = useState<Set<string>>(new Set());
@@ -55,7 +55,7 @@ export default function AccountsPage() {
   const exit = () => { setSelecting(false); setSelected(new Set()); };
   const startSelecting = () => { setSwiped(null); setSelecting(true); };
   // What can be ticked: the methods on screen, archived ones included while that section is open.
-  const shown = [...accountGroups.flatMap((g) => g.accounts.filter((a) => !a.hidden)), ...(showArchived ? archivedAccounts : [])];
+  const shown = [...accountGroups.flatMap((g) => g.accounts.filter((a) => !a.hidden)), ...(bottomTab === "archived" ? archivedAccounts : [])];
   const chosen = shown.filter((a) => selected.has(a._id));
   // Tick the group in the sheet only when every chosen method is already in it.
   const where = new Set(chosen.map((a) => a.groupId ?? null));
@@ -181,23 +181,12 @@ export default function AccountsPage() {
             </div>
           );
         })}
-        {archivedAccounts.length ? (
-          <div className="mt-6 border-y">
-            <button type="button" onClick={() => setShowArchived(!showArchived)} aria-expanded={showArchived} className={sectionHead}>
-              <ChevronDown className={cn("size-4 mr-1 transition-transform", !showArchived && "-rotate-90")} />
-              <Archive className="size-3.5 mr-1.5" />
-              <span className="flex-1 text-left">Archived</span>
-              <span className="text-xs tabular">{archivedAccounts.length}</span>
-            </button>
-            {showArchived ? (
-              <>
-                <div className="bg-card border-t">{archivedAccounts.map((a) => renderRow(a, { dim: true }))}</div>
-                <p className="border-t px-4 py-2 text-xs text-muted-foreground">Not offered when adding entries. Their entries and balances are kept and still count. Open one to unarchive it.</p>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-        <HistorySection scope="accounts" />
+        <ArchivedHistoryTabs scope="accounts" open={bottomTab} onOpenChange={setBottomTab} archivedCount={archivedAccounts.length} archived={
+          <>
+            {archivedAccounts.map((a) => renderRow(a, { dim: true }))}
+            <p className="border-t px-4 py-2 text-xs text-muted-foreground">Not offered when adding entries. Their entries and balances are kept and still count. Open one to unarchive it.</p>
+          </>
+        } />
       </Page>
       {selecting ? (
         <div className={cn(bar, "z-30 bg-background border-t md:safe-bottom")}>
