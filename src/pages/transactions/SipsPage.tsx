@@ -69,7 +69,7 @@ export default function SipsPage() {
         await mark({ id: s.sip.id, ...args, resume: true });
         toast(`${s.sip.name} is running again`, { duration: 8000, action: { label: "Undo", onClick: () => void undo({ sipId: s.sip!.id, created: false, payments: s.payments })() } });
       } else {
-        const sipId = await create({ name: s.name, ...args, rhythm: s.rhythm });
+        const sipId = await create({ name: s.name, ...args, rhythm: s.rhythm, day: s.day });
         toast(`${s.name} is a SIP now. Its payments, and later ones from Gmail, stay off the daily list.`, {
           duration: 8000, action: { label: "Undo", onClick: () => void undo({ sipId, created: true, payments: s.payments })() },
         });
@@ -188,7 +188,7 @@ export default function SipsPage() {
       </Page>
       {/* keyed by the SIP, so its name field starts from that SIP's name */}
       <SipSheet key={open?.sip.id ?? "none"} row={open} onClose={() => setOpenId(null)} />
-      {review ? <MarkSipSheet key={review.id} picked={[{ note: review.payments[0].note, amount: review.amount }]} open onOpenChange={(o) => { if (!o) setReview(null); }} /> : null}
+      {review ? <MarkSipSheet key={review.id} picked={[{ note: review.payments[0].note, amount: review.amount, date: review.payments[0].date }]} open onOpenChange={(o) => { if (!o) setReview(null); }} /> : null}
     </>
   );
 }
