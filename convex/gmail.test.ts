@@ -601,7 +601,9 @@ test("reading back to a year walks the mailbox in slices on the server, fetches 
   const lists = g.calls.filter((c) => c.includes("/messages?")).map((c) => new URL(`https://${c}`).searchParams.get("q")!);
   for (const q of lists) expect(Number(q.match(/after:(\d+)/)![1]) * 1000).toBeGreaterThanOrEqual(from - 1000);
   const c = (await t.run((ctx) => ctx.db.get(cid)))!;
-  expect(c.backfill).toMatchObject({ state: "done", total: inYear.length, read: inYear.length, found: 0 });
+  expect(c.backfill).toMatchObject({ state: "done", total: inYear.length, read: inYear.length, found: 0, timedRead: inYear.length });
+  // the reading and the pauses between steps, never less than those pauses
+  expect(c.backfill!.timedMs).toBeGreaterThan(0);
   expect(c.backfill!.cursor).toBeLessThanOrEqual(from);
   expect(c.log[0]).toMatchObject({ scanned: inYear.length, found: 0, note: "Read back to 1 Jan 2025" });
   expect([c.syncingSince, c.readsFrom, c.lookbackDays]).toEqual([undefined, from, 30]);
@@ -646,6 +648,16 @@ test("a backfill waits for next month's AI reads, an older chain stops, and the 
   await as.mutation(api.gmail.updateSettings, { lookbackDays: 7 });
   c = (await t.run((ctx) => ctx.db.get(cid)))!;
   expect([c.backfill, c.lookbackDays]).toEqual([undefined, 7]);
+});
+
+test("which ids were seen comes back in the order asked, from one query however many there are", async () => {
+  const { t, userId, insert } = await setup();
+  await t.run((ctx) => ctx.db.insert("gmailConnections", { userId, email: "me@gmail.com", refreshTokenEnc: "e", iv: "i", status: "ok", lookbackDays: 30, senders: [], scanPurchases: true, accountMap: {}, aiMonth: "2026-10", aiCalls: 0, log: [] }));
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: 1, inserts: [insert("a"), insert("c")], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 2, processed: [{ id: "e", receivedAt: 1 }] });
+  const ids = Array.from({ length: 500 }, (_, i) => `x${i}`);
+  ids.splice(10, 0, "e", "c");
+  ids.push("a");
+  expect(await t.query(internal.gmail.seenMessageIds, { userId, ids })).toEqual(["e", "c", "a"]);
 });
 
 test("the estimate counts money mail since the year that no check has read, without fetching any", async () => {

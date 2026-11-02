@@ -30,23 +30,25 @@ test("slices grow while they come back light and shrink when one holds more than
   expect(nextSpanDays(200, 0, 300)).toBeGreaterThanOrEqual(MAX_SPAN_DAYS);
 });
 
-test("time left: the estimate at first, the backfill's own pace once it has some", () => {
+test("time left: the estimate at first, then the pace of the time spent reading", () => {
   const b = { from: now - 1000 * 86400_000, cursor: now, startedAt: now };
-  expect(remainingMs({ ...b, total: null, read: 0 }, now)).toBeNull();
-  expect(remainingMs({ ...b, total: 1000, read: 0 }, now)).toBe(450_000);
-  // 100 read in 1 minute: 900 more take 9
-  expect(remainingMs({ ...b, total: 1000, read: 100, startedAt: now - 60_000 }, now)).toBe(540_000);
-  expect(remainingMs({ ...b, total: 100, read: 120, startedAt: now - 60_000 }, now)).toBe(0);
+  expect(remainingMs({ ...b, total: null, read: 0 })).toBeNull();
+  expect(remainingMs({ ...b, total: 1000, read: 0 })).toBe(450_000);
+  // 100 read in 1 minute of reading: 900 more take 9, however long it has been since starting (the count, a wait for AI)
+  expect(remainingMs({ ...b, total: 1000, read: 100, startedAt: now - 3 * 3600_000, timedMs: 60_000, timedRead: 100 })).toBe(540_000);
+  // too few timed yet (a backfill from before the pace was kept): the usual pace
+  expect(remainingMs({ ...b, total: 1000, read: 900, timedMs: 1000, timedRead: 10 })).toBe(45_000);
+  expect(remainingMs({ ...b, total: 100, read: 120, timedMs: 60_000, timedRead: 120 })).toBe(0);
   expect(progressOf({ ...b, total: 1000, read: 250 })).toBe(0.25);
   expect(progressOf({ ...b, total: 0, read: 0 })).toBe(1);
 });
 
-test("past the count's limit, progress and time left go by how much of the years is covered", () => {
+test("past the count's limit, progress goes by how much of the years is covered, and so does the mail left", () => {
   const startedAt = now - 60 * 60_000;
-  const b = { from: startedAt - 1000 * 86400_000, cursor: startedAt - 250 * 86400_000, startedAt, total: COUNT_MAX, read: COUNT_MAX + 500 };
+  const b = { from: startedAt - 1000 * 86400_000, cursor: startedAt - 250 * 86400_000, startedAt, total: COUNT_MAX, read: COUNT_MAX + 4000, timedMs: 24_000 * 100, timedRead: 24_000 };
   expect(progressOf(b)).toBe(0.25);
-  // a quarter in an hour: three more
-  expect(remainingMs(b, now)).toBe(3 * 60 * 60_000);
+  // 24,000 in a quarter of the years: about 72,000 more at 100 ms each
+  expect(remainingMs(b)).toBe(72_000 * 100);
 });
 
 test("durations read as people say them", () => {
