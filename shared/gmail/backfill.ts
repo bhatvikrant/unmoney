@@ -65,7 +65,7 @@ export function aiShortfall(mails: number, aiLeft: number, batch: number): boole
   return Math.ceil((mails * AI_SHARE) / batch) > Math.max(0, aiLeft);
 }
 
-type Progress = { total?: number | null; read: number; startedAt: number; from: number; cursor: number };
+type Progress = { total?: number | null; read: number; startedAt: number; from: number; cursor: number; timedMs?: number; timedRead?: number };
 
 /** Whether the count stopped at COUNT_MAX, so there is more mail than it says. */
 export const countCapped = (total: number | null | undefined) => (total ?? 0) >= COUNT_MAX;
@@ -81,19 +81,17 @@ export function progressOf(b: Progress): number {
 }
 
 /**
- * Time left for a running backfill: its own pace once it has read enough mail, the estimate until
- * then. Null while it is still counting.
+ * Time left for a running backfill: the mails left at its own pace (time spent reading, so not the
+ * count at the start or a wait for AI reads) once it has read enough, at MS_PER_MAIL until then.
+ * Past the count's limit, the mails left are guessed from how much of the years is covered. Null
+ * while it is still counting.
  */
-export function remainingMs(b: Progress, now: number): number | null {
+export function remainingMs(b: Progress): number | null {
   if (b.total === undefined || b.total === null) return null;
-  if (countCapped(b.total)) {
-    const done = progressOf(b);
-    // too early to tell how dense the rest is: the count's worth at the usual pace
-    return done < 0.05 ? estimateMs(Math.max(0, b.total - b.read)) : Math.round(((now - b.startedAt) / done) * (1 - done));
-  }
-  const left = Math.max(0, b.total - b.read);
-  if (b.read < MEASURE_AFTER) return estimateMs(left);
-  return Math.round(((now - b.startedAt) / b.read) * left);
+  const done = progressOf(b);
+  const left = countCapped(b.total) && done >= 0.05 ? (b.read * (1 - done)) / done : Math.max(0, b.total - b.read);
+  const pace = b.timedMs && b.timedRead && b.timedRead >= MEASURE_AFTER ? b.timedMs / b.timedRead : MS_PER_MAIL;
+  return Math.round(pace * left);
 }
 
 /** "under a minute", "about 5 minutes", "about 1 hour 20 minutes", "about 6 hours". */
