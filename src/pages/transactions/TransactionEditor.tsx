@@ -21,6 +21,7 @@ import { offerUndo, useUndoableDelete } from "@/lib/undo";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
 import { AmountKeypad } from "@/components/tx/AmountKeypad";
 import { RepeatSheet, repeatLabel, type RepeatChoice } from "@/components/tx/RepeatSheet";
+import { SipToggle } from "@/components/tx/SipToggle";
 import { PhotoField, TagInput } from "@/components/tx/fields";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ import { useQuickSave } from "@/components/tx/QuickAdd";
 import { useToday } from "@/lib/today";
 import { useEntryBudgets } from "@/components/tx/entryBudgets";
 import { BudgetPill } from "@/components/BudgetBars";
+import { MergedFrom } from "@/components/tx/MergedFrom";
 
 /** Links already acted on (by history entry), so a re-render or React's double effect never saves twice. */
 const savedLinks = new Set<string>();
@@ -193,7 +195,9 @@ export default function TransactionEditor(props: { panel?: boolean }) {
   }, [id, existing, bookmarks, sp, draftId, draft, link]);
 
   if (!initial) return <div className="p-8 text-center text-sm text-muted-foreground">{id ? "Entry not found" : draftId ? "This draft was already saved or dismissed." : "Loading…"}</div>;
-  return <Editor key={realId ?? (draftId ? `draft:${draftId}` : "new")} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} draft={draftId && draft ? draft : undefined} panel={panel} />;
+  // a merge or an unmerge rewrites the entry under the open form: start the form again from what it is now
+  const mergedAt = (existing?.merged as { at: number } | undefined)?.at ?? "";
+  return <Editor key={realId ? `${realId}:${mergedAt}` : draftId ? `draft:${draftId}` : "new"} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} draft={draftId && draft ? draft : undefined} panel={panel} />;
 }
 
 /**
@@ -644,8 +648,13 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
           <div className="px-4 py-3"><PhotoField photoIds={f.photoIds} onChange={(ids) => set("photoIds", ids)} /></div>
         </div>
 
+        {saved?.merged ? <MergedFrom tx={saved} /> : null}
+
+        {/* a draft read from Gmail can be marked as a SIP before it is saved: its earlier payments come with it */}
+        {draft && !saved ? <div className="mt-3 border-t bg-card"><SipToggle draft={draft} onDone={() => closeEntry()} /></div> : null}
         {saved?.type === "expense" ? (
           <div className="mt-3 border-y bg-card">
+            <SipToggle tx={saved} />
             {saved.split ? (
               <div className="flex items-center gap-2 px-4 py-2.5 text-sm">
                 <Users className="size-4 text-muted-foreground shrink-0" />

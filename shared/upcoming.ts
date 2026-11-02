@@ -124,7 +124,7 @@ export function recurringSuggestions(snap: Snapshot, today: string): RecurringSu
   const since = addDays(today, -LOOKBACK_DAYS);
   const byNote = new Map<string, Doc<"transactions">[]>();
   for (const t of snap.transactions) {
-    if (t.type !== "expense" || t.repeatId || t.installmentIndex || t.date <= since || t.date > today) continue;
+    if (t.type !== "expense" || t.repeatId || t.installmentIndex || t.sipId || t.date <= since || t.date > today) continue;
     const key = normNote(t.note);
     if (!key || dismissed.has(key) || scheduled.has(key)) continue;
     const list = byNote.get(key);

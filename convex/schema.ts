@@ -31,6 +31,28 @@ export const frequency = v.union(
  * documents not written since this was added; a device loading everything still gets those.
  */
 const synced = { rev: v.optional(v.number()) };
+/**
+ * A SIP (or other regular investment) the user accepted (docs/specs/sips.md). An expense whose note is
+ * one of `keys` and whose amount is near `amount` is filed under it as it is saved. Kept on settings
+ * rather than in a table of its own, so a device still running an older version of the app, which
+ * knows no such table, is never sent one.
+ */
+export const sip = v.object({
+  /** Made from the id of the op that created it, so the device and the server agree on it. */
+  id: v.string(),
+  name: v.string(),
+  /** Normalised notes (shared/sips.ts sipKey) its payments are saved with. */
+  keys: v.array(v.string()),
+  /** What one payment usually is, in minor units; follows the latest payment (a yearly step-up). */
+  amount: v.number(),
+  /** Date of the latest payment filed under it: only a payment on or after it moves `amount`. */
+  lastDate: v.optional(v.string()),
+  accountId: v.optional(v.id("accounts")),
+  /** How often it is debited (shared/sips.ts rhythmOf); monthly when unset. */
+  rhythm: v.optional(v.union(v.literal("weekly"), v.literal("fortnightly"), v.literal("twiceMonthly"), v.literal("monthly"), v.literal("quarterly"))),
+  /** When the user marked it cancelled: it keeps its payments and takes no new ones. A pause needs nothing: the next payment just goes in. */
+  stoppedAt: v.optional(v.number()),
+});
 export const budgetPeriod = v.union(v.literal("weekly"), v.literal("monthly"), v.literal("yearly"));
 
 /** [categoryId, subcategoryId] of an entry or template, null where unset. */
@@ -82,6 +104,10 @@ export default defineSchema({
     defaultAccountId: v.optional(v.id("accounts")),
     /** Notes (normalised) the user said are not bills, so the Bills & subscriptions page stops suggesting them. */
     dismissedRecurring: v.optional(v.array(v.string())),
+    /** Merchants (normalised notes) the user said are not SIPs, so the SIPs page stops suggesting them. */
+    dismissedSips: v.optional(v.array(v.string())),
+    /** The user's SIPs, oldest first. */
+    sips: v.optional(v.array(sip)),
     /** The last imports (newest first, at most 10), so one can be undone: its entries carry its id as importId. */
     recentImports: v.optional(v.array(v.object({ id: v.string(), name: v.string(), at: v.number(), count: v.number(), undoneAt: v.optional(v.number()) }))),
   }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
@@ -191,12 +217,32 @@ export default defineSchema({
     importId: v.optional(v.string()),
     /** The mail this entry was read from (Gmail sync), so its detail screen can link back to it. */
     source: v.optional(v.object({ app: v.literal("gmail"), messageId: v.string() })),
+    /**
+     * Set when this entry was made by merging (transactions.merge, or drafts.link with a Gmail draft): what it
+     * was made of, shown on the entry, and what transactions.unmerge puts back. `kept` and `removed` are whole
+     * entries without their ids (shared/ops.ts EntrySnapshot), each with its own `merged` when it was merged before.
+     */
+    merged: v.optional(v.object({
+      at: v.number(),
+      /** This entry just before the merge. */
+      kept: v.any(),
+      /** The entry merged into it, which the merge deleted. */
+      removed: v.optional(v.any()),
+      /** Or the Gmail draft it was merged with, which the merge closed. */
+      draftId: v.optional(v.id("drafts")),
+      /** Bookmarks and drafts that pointed at `removed` and point here now, so an unmerge points them back. */
+      bookmarkIds: v.optional(v.array(v.id("bookmarks"))),
+      draftIds: v.optional(v.array(v.id("drafts"))),
+    })),
+    /** The SIP this expense pays into: it leaves the ledger and every spending total, but still leaves its payment method (docs/specs/sips.md). */
+    sipId: v.optional(v.string()),
   })
     .index("by_user_date", ["userId", "date"])
     .index("by_user_account", ["userId", "accountId"])
     .index("by_user_to_account", ["userId", "toAccountId"])
     .index("by_user_category", ["userId", "categoryId"])
     .index("by_repeat", ["repeatId"])
+    .index("by_sip", ["sipId"])
     .searchIndex("search_note", { searchField: "note", filterFields: ["userId"] })
     .index("by_user_rev", ["userId", "rev"]),
 
@@ -409,6 +455,29 @@ export default defineSchema({
     merchantMap: v.optional(v.record(v.string(), v.object({ note: v.string(), categoryId: v.optional(v.id("categories")), subcategoryId: v.optional(v.id("categories")) }))),
     /** Senders the user said send no money mail: left out of the search and never read. */
     muted: v.optional(v.array(v.string())),
+    /**
+     * Reading back to a year the user picked (shared/gmail/backfill.ts): the mailbox from `from` to
+     * `cursor` is still to read, newest first, a slice at a time (gmail.ts backfillStep). Kept once
+     * done, to say how far back the mailbox was read.
+     */
+    backfill: v.optional(v.object({
+      year: v.number(),
+      /** 1 January of `year`, midnight on the device that chose it. */
+      from: v.number(),
+      /** The chain of steps this belongs to: a step from an older one stops. */
+      run: v.string(),
+      state: v.union(v.literal("running"), v.literal("waiting-ai"), v.literal("done")),
+      startedAt: v.number(),
+      cursor: v.number(),
+      spanDays: v.number(),
+      /** Unread money mail between `from` and when it started, counted by the first step (at most COUNT_MAX). */
+      total: v.optional(v.number()),
+      /** Mails fetched and read so far, and the drafts they made. */
+      read: v.number(),
+      found: v.number(),
+      lastStepAt: v.optional(v.number()),
+      finishedAt: v.optional(v.number()),
+    })),
   }).index("by_user", ["userId"]),
 
   /**
@@ -423,6 +492,8 @@ export default defineSchema({
     refreshTokenEnc: v.string(),
     iv: v.string(),
     lookbackDays: v.number(),
+    /** Read back to this year once attached (1 January, on the device that asked). */
+    backfillFrom: v.optional(v.object({ year: v.number(), from: v.number() })),
   }).index("by_claim", ["claim"]).index("by_user", ["userId"]),
 
   /**

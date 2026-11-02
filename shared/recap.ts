@@ -9,6 +9,7 @@ import { addDays, diffDays, make, MONTH_LONG, weekday, type ISODate } from "./da
 import { monthKey, monthKeyForDate, monthRange, parseMonthKey, shiftMonthKey, yearRange, type MonthKey, type Range } from "./period";
 import { budgetStatus, ledgerOf, settingsOf, statsByCategory, statsEntries, type Tx } from "./views";
 import { kindsOf } from "./ledger";
+import { isSip, sipsInRange } from "./sips";
 
 /** A month needs this many expense entries before it gets a recap. */
 export const RECAP_MIN_ENTRIES = 5;
@@ -117,6 +118,8 @@ export type RecapSummary = {
   biggest?: { note: string; amount: number };
   keptPct?: number;
   noSpend: number;
+  /** What went into SIPs: not spending, so not in `spent` (docs/specs/sips.md). */
+  invested?: number;
   repeat?: { text: string; count: number };
   /** The year only: the spending personality for the poster's last row. */
   personality?: Archetype;
@@ -150,6 +153,8 @@ export type MonthCard =
     /** The year's annual budgets, as a month's rows (their run counts years). */
     annual?: RecapBudgetRow[];
   }
+  /** What went into SIPs: kept out of spending, so it has a card of its own. */
+  | { kind: "invested"; scope?: RecapScope; total: number; count: number; sips: { id: string; name: string; amount: number; count: number }[]; prev?: number; prevLabel?: string; perMonth?: number }
   | { kind: "closer"; scope?: RecapScope; summary: RecapSummary };
 
 /** The cards only a year has (spec §5). */
@@ -452,6 +457,13 @@ function buildMonthRecap(snap: Snapshot, month: MonthKey): Recap | null {
     cards.push({ kind: "budgets", budgets, rows: budgetRows(snap, month), prev: prev ? { held: prev.held, total: prev.total } : undefined, end: range.to });
   }
 
+  // 8½ · invested: SIPs left spending, so what went into them is told here
+  const invested = sipsInRange(snap, range.from, range.to);
+  if (invested.total > 0) {
+    const prevInvested = sipsInRange(snap, prevRange.from, prevRange.to).total;
+    cards.push({ kind: "invested", total: invested.total, count: invested.count, sips: invested.bySip, prev: prevInvested || undefined, prevLabel: prevInvested ? prevLabel : undefined });
+  }
+
   // 9 · in vs out
   const income = statsByCategory(snap, range.from, range.to, "income").total;
   let keptPct: number | undefined;
@@ -471,6 +483,7 @@ function buildMonthRecap(snap: Snapshot, month: MonthKey): Recap | null {
     keptPct, noSpend,
     repeat: topNote ? { text: topNote.text, count: topNote.count } : undefined,
     budgets: budgets ? { held: budgets.held, total: budgets.total } : undefined,
+    invested: invested.total || undefined,
   };
   cards.push({ kind: "closer", summary });
 
@@ -737,6 +750,15 @@ function buildYearRecap(snap: Snapshot, year: number): Recap | null {
       yearRows: budgetMonths ? budgetYearRows(snap, months) : [], annual, end: range.to,
     });
   }
+  // invested: what went into SIPs over the year, kept out of spending
+  const invested = sipsInRange(snap, range.from, range.to);
+  if (invested.total > 0) {
+    const prevInvested = sipsInRange(snap, prevRange.from, prevRange.to).total;
+    cards.push({
+      kind: "invested", scope: "year", total: invested.total, count: invested.count, sips: invested.bySip,
+      prev: prevInvested || undefined, prevLabel: prevInvested ? prevLabel : undefined, perMonth: Math.round(invested.total / 12),
+    });
+  }
   let keptPct: number | undefined;
   if (income > 0) {
     keptPct = Math.round(((income - total) / income) * 100);
@@ -791,6 +813,7 @@ function buildYearRecap(snap: Snapshot, year: number): Recap | null {
     repeat: byCount[0] ? { text: byCount[0].text, count: byCount[0].count } : undefined,
     personality: archetype,
     budgets: budgetMonths,
+    invested: invested.total || undefined,
   };
   cards.push({ kind: "closer", scope: "year", summary });
 
@@ -844,6 +867,8 @@ export type RecapDrill =
   | { kind: "hour"; hour: number }
   | { kind: "scheduled" }
   | { kind: "income" }
+  /** Payments into SIPs: one SIP's, or every SIP's. They are not spending, so they are not in the other drills. */
+  | { kind: "sip"; id?: string }
   /** The `count` largest single entries, largest first. */
   | { kind: "largest"; count: number };
 
@@ -859,6 +884,11 @@ export function recapDrill(snap: Snapshot, range: Range, drill: RecapDrill): { t
   if (from < range.from) from = range.from;
   if (to > range.to) to = range.to;
   if (from > to) return { txs: [], amount: 0 };
+  if (drill.kind === "sip") {
+    const txs = snap.transactions.filter((t) => isSip(t) && t.date >= from && t.date <= to && (!drill.id || t.sipId === drill.id))
+      .sort((a, b) => b.date.localeCompare(a.date) || b._creationTime - a._creationTime);
+    return { txs, amount: txs.reduce((s, t) => s + t.amount, 0) };
+  }
   const all = statsEntries(snap, from, to, drill.kind === "income" ? "income" : "expense");
   let picked: Entry[];
   switch (drill.kind) {
@@ -909,14 +939,15 @@ export function recapText(s: RecapSummary, label: string, fmt: (minor: number) =
   const biggest = s.biggest ? `Biggest: ${s.biggest.note} ${fmt(s.biggest.amount)}` : "";
   // more out than in reads as "Spent 120% of income", never as a negative share kept
   const kept = s.keptPct === undefined ? "" : s.keptPct < 0 ? `Spent ${100 - s.keptPct}% of income` : `Kept ${s.keptPct}% of income`;
+  const invested = s.invested ? `Invested ${fmt(s.invested)}` : "";
   const noSpend = `${s.noSpend} no-spend ${s.noSpend === 1 ? "day" : "days"}`;
   if (scope === "year") {
     const line3 = [top, biggest, s.repeat ? `Most logged: "${s.repeat.text}" ×${s.repeat.count}` : ""].filter(Boolean).join(" · ");
-    const line4 = [kept, noSpend, s.budgets ? `${s.budgets.held} of ${s.budgets.total} months within budget` : "", s.personality ?? ""].filter(Boolean).join(" · ");
+    const line4 = [kept, invested, noSpend, s.budgets ? `${s.budgets.held} of ${s.budgets.total} months within budget` : "", s.personality ?? ""].filter(Boolean).join(" · ");
     return `${label} · UnMoney\n${spent}\n${line3}\n${line4}`;
   }
   const line2 = [spent, top, biggest].filter(Boolean).join(" · ");
-  const line3 = [kept, noSpend, s.budgets ? `Budgets ${s.budgets.held} of ${s.budgets.total} held` : "", s.repeat ? `"${s.repeat.text}" ×${s.repeat.count}` : ""].filter(Boolean).join(" · ");
+  const line3 = [kept, invested, noSpend, s.budgets ? `Budgets ${s.budgets.held} of ${s.budgets.total} held` : "", s.repeat ? `"${s.repeat.text}" ×${s.repeat.count}` : ""].filter(Boolean).join(" · ");
   return `${label} · UnMoney\n${line2}\n${line3}`;
 }
 

@@ -116,9 +116,11 @@ test("the ledger sees open, unmatched drafts in its range", () => {
 });
 
 test("the server loads the tables the drafts ops need, and just the linked entry", () => {
-  expect(OP_TABLES["drafts.accept"]).toEqual(["drafts", "transactions", "accounts", "categories"]);
+  // settings: every op that writes entries reads the SIPs on it, so a saved draft is filed under the SIP it pays
+  expect(OP_TABLES["drafts.accept"]).toEqual(["drafts", "transactions", "accounts", "categories", "settings"]);
   expect(OP_TABLES["drafts.dismiss"]).toEqual(["drafts"]);
-  expect(OP_TABLES["drafts.link"]).toEqual(["drafts", "transactions"]);
+  // accounts and categories: linking with the mail's details checks them like any edit
+  expect(OP_TABLES["drafts.link"]).toEqual(["drafts", "transactions", "accounts", "categories", "settings"]);
   expect(OP_TABLES["drafts.unmatch"]).toEqual(["drafts"]);
   expect(txScope({ id: "x", kind: "drafts.link", args: { id: "d1", transactionId: "t9" }, at: 1 })).toEqual({ ids: ["t9"] });
   expect(txScope({ id: "x", kind: "drafts.accept", args: { id: "d1" }, at: 1 })).toEqual({});

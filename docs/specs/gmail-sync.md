@@ -196,6 +196,17 @@ Errors: any step's failure writes `lastError` and a log line and leaves `history
 
 Stored: ids, sender, trimmed subject, timing, the proposal, confidence, the log. Not stored: bodies, attachments, headers beyond sender, anything from mails that triage dropped. Console logs carry counts and token usage only, never subjects.
 
+### 5.4 Reading back to a year
+
+Besides 7/30/90 days, the look-back can be "Since a year": everything from 1 January of a year the user types (2004, Gmail's first, up to this one) to now. That can be years of mail, so it does not ride on the hourly check; `gmailConnections.backfill` holds its own cursor and the server walks it (`gmail.backfillStep`, pure helpers in `shared/gmail/backfill.ts`):
+
+- **Before starting**, `gmail.estimateBackfill` counts the unread money mail since then by listing ids only (one Gmail call per 500, nothing fetched, stops at 20,000) and the settings page shows the count, the time it takes (about 450 ms a mail until a run measures its own pace) and whether the monthly AI reads may run out.
+- **Each step** reads one slice, `[cursor − span, cursor]`, newest first, at most `SYNC_MAX` mails, fetched at the usual pace (3 per 300 ms, about a fifth of Gmail's per-user quota of 250 units a second). A slice that held more than that is read again (what was read is skipped) and the next span halves; light slices double it, up to 90 days, which also bounds how many days' entries one step looks at. The next step follows 5 s later. Steps take the same claim as the hourly check, so only one reads at a time, and a step first runs the hourly check if it is due, so new mail never waits for a backfill.
+- **Runs on the server.** The app can be closed; every screen that shows a backfill says so. A step that dies is restarted by the hourly cron (no step for 15 minutes); a step from a stopped or restarted backfill (`run` mismatch) ends itself.
+- **AI.** A backfill uses at most `AI_MONTHLY_CAP − 60` reads a month, keeping 60 for new mail. When that runs out it waits (`state: "waiting-ai"`) and the hourly cron carries on once a new month gives reads back. Mail the AI could not read stays ahead of the cursor.
+- **Seen rows** are not pruned while a backfill runs (its slices skip what they find there); after it finishes, the usual pruning catches up 200 rows a check.
+- Hourly checks keep reading the usual 30 days; picking 7/30/90 days or "From now", or Stop, ends a backfill. Drafts it made stay. Finishing adds one line to the check log.
+
 ## 6. In the app
 
 ### 6.1 Ledger rows
