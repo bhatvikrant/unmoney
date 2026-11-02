@@ -83,11 +83,11 @@ export function matchesSender(from: string, senders: string[]): boolean {
 }
 
 /**
- * The query: mail newer than `afterSeconds` (a Unix time) from an allowlisted sender, or filed
- * by Gmail under Purchases when that is on, or with a money word in the subject. Spam and trash
- * are left out by Gmail itself.
+ * The query: mail newer than `afterSeconds` (a Unix time), and older than `beforeSeconds` when
+ * given, from an allowlisted sender, or filed by Gmail under Purchases when that is on, or with a
+ * money word in the subject. Spam and trash are left out by Gmail itself.
  */
-export function buildQuery(opts: { senders: string[]; scanPurchases: boolean; afterSeconds: number; muted?: string[] }): string {
+export function buildQuery(opts: { senders: string[]; scanPurchases: boolean; afterSeconds: number; beforeSeconds?: number; muted?: string[] }): string {
   const parts: string[] = [];
   const senders = opts.senders.map(normaliseSender).filter(Boolean);
   if (senders.length) parts.push(`from:(${senders.join(" OR ")})`);
@@ -95,5 +95,6 @@ export function buildQuery(opts: { senders: string[]; scanPurchases: boolean; af
   parts.push(`subject:(${MONEY_SUBJECT_WORDS.join(" OR ")})`);
   const muted = (opts.muted ?? []).map(normaliseSender).filter(Boolean);
   // senders the user muted are never fetched, whatever else matches
-  return `after:${Math.max(0, Math.floor(opts.afterSeconds))} (${parts.join(" OR ")})${muted.length ? ` -from:(${muted.join(" OR ")})` : ""}`;
+  const before = opts.beforeSeconds === undefined ? "" : ` before:${Math.ceil(opts.beforeSeconds)}`;
+  return `after:${Math.max(0, Math.floor(opts.afterSeconds))}${before} (${parts.join(" OR ")})${muted.length ? ` -from:(${muted.join(" OR ")})` : ""}`;
 }

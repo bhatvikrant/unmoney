@@ -11,6 +11,7 @@ import { ChevronRight, Mail } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import { useView } from "@/lib/store";
 import { draftMatches, draftsRange } from "../../../shared/views";
+import { progressOf } from "../../../shared/gmail/backfill";
 import { cn } from "@/lib/utils";
 
 export function GmailNudge({ from, to }: { from: string; to: string }) {
@@ -34,6 +35,12 @@ export function GmailNudge({ from, to }: { from: string; to: string }) {
     return status.lastError
       ? <Strip warn label={`Gmail checks stopped: ${status.lastError}`} action="Resume" onClick={() => void resume()} />
       : <Strip muted label="Gmail checks paused" action="Resume" onClick={() => void resume()} />;
+  }
+  // reading back to a year, with nothing to review here yet: how far it has got
+  const b = status?.backfill;
+  if (!here && !matched && b?.state === "running" && status?.status === "ok") {
+    const pct = b.total === null ? null : Math.min(99, Math.floor(progressOf(b) * 100));
+    return <Strip muted label={`Reading Gmail back to ${b.year}${pct !== null ? ` · ${pct}%` : "…"}`} extra={b.found ? `${b.found} found` : undefined} action="Details" onClick={() => nav("/settings/gmail")} />;
   }
   if (!here && !matched) return null;
   const label = here ? `${here} ${here === 1 ? "entry" : "entries"} found in Gmail` : `Gmail found ${matched} you may already have`;

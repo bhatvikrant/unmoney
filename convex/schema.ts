@@ -455,6 +455,29 @@ export default defineSchema({
     merchantMap: v.optional(v.record(v.string(), v.object({ note: v.string(), categoryId: v.optional(v.id("categories")), subcategoryId: v.optional(v.id("categories")) }))),
     /** Senders the user said send no money mail: left out of the search and never read. */
     muted: v.optional(v.array(v.string())),
+    /**
+     * Reading back to a year the user picked (shared/gmail/backfill.ts): the mailbox from `from` to
+     * `cursor` is still to read, newest first, a slice at a time (gmail.ts backfillStep). Kept once
+     * done, to say how far back the mailbox was read.
+     */
+    backfill: v.optional(v.object({
+      year: v.number(),
+      /** 1 January of `year`, midnight on the device that chose it. */
+      from: v.number(),
+      /** The chain of steps this belongs to: a step from an older one stops. */
+      run: v.string(),
+      state: v.union(v.literal("running"), v.literal("waiting-ai"), v.literal("done")),
+      startedAt: v.number(),
+      cursor: v.number(),
+      spanDays: v.number(),
+      /** Unread money mail between `from` and when it started, counted by the first step (at most COUNT_MAX). */
+      total: v.optional(v.number()),
+      /** Mails fetched and read so far, and the drafts they made. */
+      read: v.number(),
+      found: v.number(),
+      lastStepAt: v.optional(v.number()),
+      finishedAt: v.optional(v.number()),
+    })),
   }).index("by_user", ["userId"]),
 
   /**
@@ -469,6 +492,8 @@ export default defineSchema({
     refreshTokenEnc: v.string(),
     iv: v.string(),
     lookbackDays: v.number(),
+    /** Read back to this year once attached (1 January, on the device that asked). */
+    backfillFrom: v.optional(v.object({ year: v.number(), from: v.number() })),
   }).index("by_claim", ["claim"]).index("by_user", ["userId"]),
 
   /**

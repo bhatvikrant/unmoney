@@ -550,3 +550,119 @@ test("disconnecting forgets what was seen, but not what a new connection filled 
   await t.mutation(internal.gmail.forgetAllSeen, { userId, before });
   expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["old", "new"] })).toEqual(["new"]);
 });
+
+/** A mailbox of money-looking ids spread over time: Gmail's list, honouring after:/before: and paging 500 at a time. */
+function mailbox(dates: Map<string, number>) {
+  return (u: URL): Listing => {
+    const q = u.searchParams.get("q") ?? "";
+    const after = Number(q.match(/after:(\d+)/)?.[1] ?? 0) * 1000;
+    const before = Number(q.match(/before:(\d+)/)?.[1] ?? Infinity) * 1000;
+    // newest first, as Gmail lists
+    const ids = [...dates].filter(([, at]) => at >= after && at < before).sort((a, b) => b[1] - a[1]).map(([id]) => id);
+    const start = Number(u.searchParams.get("pageToken") ?? 0);
+    const page = ids.slice(start, start + 500);
+    return { messages: page.map((id) => ({ id })), ...(start + 500 < ids.length ? { nextPageToken: String(start + 500) } : {}) };
+  };
+}
+
+test("reading back to a year walks the mailbox in slices on the server, fetches each mail once and finishes with one log line", async () => {
+  const { t, as, connect } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const now = Date.parse("2026-11-02T10:00:00Z");
+  const { enc, iv } = await encryptText("1//refresh-token");
+  const cid = await connect({ refreshTokenEnc: enc, iv, lastSyncAt: now, aiMonth: "2026-11", aiCalls: 0 });
+  const day = 24 * 60 * 60 * 1000;
+  const from = new Date(2025, 0, 1).getTime();
+  // a mail a day since then, a burst of 400 on one day (more than a check reads), and some from before the year
+  const dates = new Map<string, number>();
+  for (let i = 0; from + i * day < now; i++) dates.set(`d${i}`, from + i * day + 3600_000);
+  for (let i = 0; i < 400; i++) dates.set(`b${i}`, Date.parse("2025-06-10T08:00:00Z") + i * 1000);
+  for (let i = 0; i < 20; i++) dates.set(`old${i}`, from - (i + 1) * day);
+  const inYear = [...dates.keys()].filter((id) => !id.startsWith("old"));
+
+  // out of range years are refused before anything is read
+  await expect(as.mutation(api.gmail.startBackfill, { year: 2003, from: new Date(2003, 0, 1).getTime() })).rejects.toThrow(/2004/);
+  await expect(as.mutation(api.gmail.startBackfill, { year: 2025, from: from + 2 * day })).rejects.toThrow(/start of the year/);
+
+  const g = fakeGoogle(mailbox(dates), now - day);
+  vi.useFakeTimers({ now });
+  try {
+    await as.mutation(api.gmail.startBackfill, { year: 2025, from });
+    const status = (await as.query(api.gmail.status))!;
+    expect(status.backfill).toMatchObject({ year: 2025, state: "running", total: null, read: 0 });
+    expect(status.syncing).toBe(false);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+  } finally { vi.useRealTimers(); g.restore(); }
+
+  const fetched = g.calls.flatMap((c) => c.match(/\/messages\/([^?]+)/)?.[1] ?? []);
+  // every mail since 1 January once, none from before
+  expect(fetched.sort()).toEqual([...inYear].sort());
+  const lists = g.calls.filter((c) => c.includes("/messages?")).map((c) => new URL(`https://${c}`).searchParams.get("q")!);
+  for (const q of lists) expect(Number(q.match(/after:(\d+)/)![1]) * 1000).toBeGreaterThanOrEqual(from - 1000);
+  const c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect(c.backfill).toMatchObject({ state: "done", total: inYear.length, read: inYear.length, found: 0 });
+  expect(c.backfill!.cursor).toBeLessThanOrEqual(from);
+  expect(c.log[0]).toMatchObject({ scanned: inYear.length, found: 0, note: "Read back to 1 Jan 2025" });
+  expect([c.syncingSince, c.readsFrom, c.lookbackDays]).toEqual([undefined, from, 30]);
+});
+
+test("a backfill waits for next month's AI reads, an older chain stops, and the hourly cron picks it up again", async () => {
+  const { t, as, userId, connect } = await setup();
+  const now = Date.now();
+  const month = new Date(now).toISOString().slice(0, 7);
+  const from = new Date(new Date(now).getFullYear() - 1, 0, 1).getTime();
+  const cid = await connect({ lastSyncAt: now, aiMonth: month, aiCalls: 240 });
+  await as.mutation(api.gmail.startBackfill, { year: new Date(from).getFullYear(), from });
+  const run = (await t.run((ctx) => ctx.db.get(cid)))!.backfill!.run;
+  const g = fakeGoogle(() => ({ messages: [] }));
+  try {
+    // a step from a chain that was replaced does nothing
+    await t.action(internal.gmail.backfillStep, { userId, run: "old" });
+    expect(g.calls).toEqual([]);
+    // what the month leaves is kept for new mail: wait, without reading
+    await t.action(internal.gmail.backfillStep, { userId, run });
+    expect(g.calls).toEqual([]);
+  } finally { g.restore(); }
+  let c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect([c.backfill!.state, c.syncingSince]).toEqual(["waiting-ai", undefined]);
+
+  // still no reads to spare: the cron leaves it waiting
+  await t.mutation(internal.gmail.syncAll, {});
+  expect((await t.run((ctx) => ctx.db.get(cid)))!.backfill!.run).toBe(run);
+  // a new month: it carries on, as a new chain
+  await t.run((ctx) => ctx.db.patch(cid, { aiMonth: "2000-01" }));
+  await t.mutation(internal.gmail.syncAll, {});
+  c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect(c.backfill!.state).toBe("running");
+  expect(c.backfill!.run).not.toBe(run);
+  const scheduled = await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect());
+  expect(scheduled.filter((s) => s.name === "gmail:backfillStep" && s.state.kind === "pending").map((s) => (s.args[0] as { run: string }).run)).toContain(c.backfill!.run);
+
+  // stopping, or picking a look-back in days, ends it
+  await as.mutation(api.gmail.stopBackfill, {});
+  expect((await t.run((ctx) => ctx.db.get(cid)))!.backfill).toBeUndefined();
+  await as.mutation(api.gmail.startBackfill, { year: new Date(from).getFullYear(), from });
+  await as.mutation(api.gmail.updateSettings, { lookbackDays: 7 });
+  c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect([c.backfill, c.lookbackDays]).toEqual([undefined, 7]);
+});
+
+test("the estimate counts money mail since the year that no check has read, without fetching any", async () => {
+  const { t, as, userId, connect, insert } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const { enc, iv } = await encryptText("1//refresh-token");
+  const now = Date.now();
+  await connect({ refreshTokenEnc: enc, iv, aiMonth: new Date(now).toISOString().slice(0, 7), aiCalls: 0 });
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: now, inserts: [insert("m1")], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 1 });
+  const dates = new Map(Array.from({ length: 1200 }, (_, i) => [`m${i}`, now - (i + 1) * 3600_000] as [string, number]));
+  const g = fakeGoogle(mailbox(dates));
+  try {
+    const e = await as.action(api.gmail.estimateBackfill, { from: now - 400 * 24 * 3600_000 });
+    expect(e).toMatchObject({ count: 1199, capped: false });
+    expect(e.ms).toBeGreaterThan(0);
+  } finally { g.restore(); }
+  expect(g.calls.filter((c) => /\/messages\/[^?]/.test(c))).toEqual([]);
+  expect(g.calls.filter((c) => c.includes("/messages?")).length).toBe(3);
+});
