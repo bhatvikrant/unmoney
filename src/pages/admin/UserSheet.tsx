@@ -11,7 +11,7 @@ import { addDays, daySeries, fmtBytes, fmtDuration, fmtNum, inRange, photoBytes,
 
 const FEATURE_LABELS: Record<string, string> = {
   budgets: "Budgets", repeats: "Repeats", installments: "Installments", bookmarks: "Bookmarks", notes: "Notes", subCurrencies: "Sub-currencies",
-  photos: "Photos", imports: "Imports", unsplit: "UnSplit", gmail: "Gmail", aiTidy: "AI tidy-up",
+  photos: "Photos", imports: "Imports", unsplit: "UnSplit", gmail: "Gmail", gmailBackfill: "Gmail read-back", sips: "SIPs", aiTidy: "AI tidy-up",
   tidyUp: "Tidy-up", iphoneShortcut: "iPhone shortcut", passcode: "Passcode", subcategories: "Subcategories", carryOver: "Carry-over", timeInput: "Time input",
 };
 
