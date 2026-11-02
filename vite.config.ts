@@ -26,7 +26,9 @@ export default defineConfig({
       strategies: "injectManifest",
       srcDir: "src",
       filename: "sw.ts",
-      injectManifest: { globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"] },
+      // The superadmin dashboard (src/pages/admin, lazy in App.tsx) is fetched when it is opened, never precached onto
+      // everyone's device. What only it uses lands in its own chunk, named after the page.
+      injectManifest: { globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"], globIgnores: ["**/AdminPage-*.js"] },
       includeAssets: ["icon.svg", "favicon.ico", "apple-touch-icon-180x180.png"],
       manifest: {
         id: "/",
