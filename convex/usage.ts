@@ -7,7 +7,8 @@ import { v } from "convex/values";
 import { internalMutation, mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { currentUserId } from "./lib/auth";
-import { lengthBucket } from "../shared/admin";
+import { dayAt, lengthBucket } from "../shared/admin";
+import { costOf } from "../shared/aiCost";
 
 const counts = { activeMs: v.number(), bytesDown: v.number(), bytesUp: v.number(), photoFetches: v.number(), opsSent: v.number() };
 type Counts = { activeMs: number; bytesDown: number; bytesUp: number; photoFetches: number; opsSent: number };
@@ -94,6 +95,37 @@ export const ping = mutation({
 function max(a: Counts, b: Counts): Counts {
   return Object.fromEntries(COUNT_KEYS.map((k) => [k, Math.max(a[k], Math.round(b[k]))])) as Counts;
 }
+
+/**
+ * One Claude call, added to its user's day (convex/lib/aiSpend.ts records it). The day is the user's
+ * own, by their latest device's clock (India's when none reported one), as for entries created.
+ */
+export const recordAi = internalMutation({
+  args: {
+    userId: v.id("users"),
+    feature: v.union(v.literal("tidy"), v.literal("gmail")),
+    model: v.string(),
+    tokens: v.object({ input: v.number(), output: v.number(), cacheWrite: v.number(), cacheRead: v.number() }),
+  },
+  handler: async (ctx, { userId, feature, model, tokens }) => {
+    // deleted while the call was out: nothing of theirs is written back
+    if (!(await ctx.db.get(userId))) return;
+    const device = (await ctx.db.query("usageDevices").withIndex("by_user_device", (q) => q.eq("userId", userId)).collect())
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0];
+    const day = dayAt(Date.now(), device?.tzOffset ?? 330);
+    const row = await ctx.db.query("aiDaily").withIndex("by_user_day", (q) => q.eq("userId", userId).eq("day", day).eq("feature", feature)).unique();
+    const sums = {
+      calls: (row?.calls ?? 0) + 1,
+      inputTokens: (row?.inputTokens ?? 0) + tokens.input,
+      outputTokens: (row?.outputTokens ?? 0) + tokens.output,
+      cacheWriteTokens: (row?.cacheWriteTokens ?? 0) + tokens.cacheWrite,
+      cacheReadTokens: (row?.cacheReadTokens ?? 0) + tokens.cacheRead,
+      costUsd: (row?.costUsd ?? 0) + costOf(model, tokens),
+    };
+    if (row) await ctx.db.patch(row._id, sums);
+    else await ctx.db.insert("aiDaily", { userId, day, feature, ...sums });
+  },
+});
 
 /** Daily cron: drop sessions older than the TTL. */
 export const pruneSessions = internalMutation({

@@ -86,6 +86,7 @@ test("deleting an account removes its usage rows", async () => {
   vi.useFakeTimers();
   const { t, user, asUser } = await setup();
   await asUser.mutation(api.usage.ping, ping());
+  await t.mutation(internal.usage.recordAi, { userId: user, feature: "gmail", model: "claude-haiku-5-5", tokens: { input: 10, output: 10, cacheWrite: 0, cacheRead: 0 } });
   await t.action(internal.admin.refreshStats, {});
   await asUser.mutation(api.account.deleteMyAccount, { confirm: "DELETE" });
   await t.finishAllScheduledFunctions(vi.runAllTimers);
@@ -94,7 +95,28 @@ test("deleting an account removes its usage rows", async () => {
     daily: await ctx.db.query("usageDaily").collect(),
     devices: await ctx.db.query("usageDevices").collect(),
     stats: (await ctx.db.query("adminStats").collect()).filter((r) => r.userId === user),
+    ai: await ctx.db.query("aiDaily").collect(),
   }));
-  expect(left).toEqual({ sessions: [], daily: [], devices: [], stats: [] });
+  expect(left).toEqual({ sessions: [], daily: [], devices: [], stats: [], ai: [] });
+  vi.useRealTimers();
+});
+
+test("each Claude call adds its tokens and cost to the user's day, per feature", async () => {
+  vi.useFakeTimers({ now: new Date("2026-11-02T20:00:00Z"), toFake: ["Date"] });
+  const { t, user, asUser, asAdmin } = await setup();
+  // a device at UTC+5:30: 20:00 UTC is already the 3rd there
+  await asUser.mutation(api.usage.ping, ping());
+  const call = (feature: "tidy" | "gmail", input: number, output: number) =>
+    t.mutation(internal.usage.recordAi, { userId: user, feature, model: "claude-haiku-5-5", tokens: { input, output, cacheWrite: 0, cacheRead: 0 } });
+  await call("gmail", 1000, 200);
+  await call("gmail", 3000, 400);
+  await call("tidy", 2247, 1113);
+  const o = await asAdmin.query(api.admin.overview, { from: "2026-11-01", to: "2026-11-30" });
+  const gmail = o.ai.find((r) => r.feature === "gmail")!;
+  expect(gmail).toMatchObject({ userId: user, day: "2026-11-03", calls: 2, inputTokens: 4000, outputTokens: 600 });
+  expect(gmail.costUsd).toBeCloseTo((4000 * 0.1 + 600 * 0.5) / 1e6, 12);
+  expect(o.ai.find((r) => r.feature === "tidy")).toMatchObject({ calls: 1, inputTokens: 2247, outputTokens: 1113 });
+  // outside the asked-for days: left out
+  expect((await asAdmin.query(api.admin.overview, { from: "2026-10-01", to: "2026-10-31" })).ai).toEqual([]);
   vi.useRealTimers();
 });

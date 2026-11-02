@@ -12,6 +12,7 @@ import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import schema from "./schema";
 import { loadSnapshot } from "./lib/snapshot";
+import { recordSpend } from "./lib/aiSpend";
 import {
   AI_MODEL, AI_RUN_EVERY_MS, OUTPUT_SCHEMA, SYSTEM_PROMPT, aiEligibility, buildSummary, summaryHash, validateSuggestions, type AiSuggestion,
 } from "../shared/tidyAi";
@@ -84,6 +85,7 @@ export const suggestCategoryCleanup = action({
         messages: [{ role: "user", content: JSON.stringify(prep.summary) }],
       });
       console.log("tidy-ai", { userId, stop: res.stop_reason, input: res.usage.input_tokens, output: res.usage.output_tokens });
+      await recordSpend(ctx, userId, "tidy", res);
       if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`stopped: ${res.stop_reason}`);
       const text = res.content.find((b) => b.type === "text");
       raw = JSON.parse(text && text.type === "text" ? text.text : "{}").suggestions;

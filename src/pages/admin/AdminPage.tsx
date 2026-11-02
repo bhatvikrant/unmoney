@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { BarList, Card, CohortGrid, Columns, DayChart, Group, Heatmap, SLOT, StackedDayBars, Tile } from "./charts";
 import { UserSheet } from "./UserSheet";
 import {
-  ALL, addDays, applyFilters, change, cohorts, dayKey, daySeries, fmtBytes, fmtDuration, fmtNum, fmtPct, hourOfWeek, inRange,
+  ALL, addDays, aiSeries, aiTotals, applyFilters, change, cohorts, dayKey, daySeries, fmtBytes, fmtDuration, fmtNum, fmtPct, fmtUsd, hourOfWeek, inRange,
   photoBytes, sumRecords, tally, totals, userRows, type DayPoint, type Filters, type Overview, type UserRow,
 } from "./metrics";
 
@@ -62,6 +62,8 @@ const KINDS: Record<string, string> = {
 };
 const GMAIL_STATUS: Record<string, string> = { ok: "Working", reauth: "Needs reconnecting", paused: "Paused" };
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+const AI_FEATURES = [{ key: "gmail", label: "Gmail reading" }, { key: "tidy", label: "Category tidy-up" }] as const;
 
 const SOURCES: { key: "manual" | "gmail" | "imported" | "repeat"; label: string }[] = [
   { key: "manual", label: "Typed in" }, { key: "gmail", label: "From Gmail" }, { key: "imported", label: "Imported" }, { key: "repeat", label: "Repeats" },
@@ -164,7 +166,12 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
     const bandwidthPrev = tp.bytesDown + tp.bytesUp + photoBytes(prev, view.stats);
     const docsBytes = view.stats.reduce((s, x) => s + Object.values(x.tables).reduce((n, t) => n + t.bytes, 0), 0);
     const fileBytes = view.stats.reduce((s, x) => s + x.files.bytes, 0);
-    const rows = userRows(view, cur, today);
+    const curAi = view.ai.filter((r) => r.day >= from && r.day <= today);
+    const ai = aiTotals(curAi);
+    const aiPrev = aiTotals(view.ai.filter((r) => r.day >= prevFrom && r.day <= prevTo));
+    const aiDays = aiSeries(curAi, from, today);
+    const aiCalls = Object.fromEntries(AI_FEATURES.map((x) => [x.key, curAi.filter((r) => r.feature === x.key).reduce((n, r) => n + r.calls, 0)]));
+    const rows = userRows(view, cur, today, curAi);
 
     // devices seen in the period, and which build each is on (versions sort as text: YYYY.MM.DD-HH:MM)
     const activeKeys = new Set(cur.map((r) => `${r.userId}|${r.deviceId}`));
@@ -191,7 +198,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
     });
 
     return {
-      view, cur, tc, tp, series, chartSeries, rows, signups, signupsPrev, avgDau, avgDauPrev, entries, entriesPrev, bandwidth, bandwidthPrev,
+      view, cur, tc, tp, ai, aiPrev, aiDays, aiCalls, series, chartSeries, rows, signups, signupsPrev, avgDau, avgDauPrev, entries, entriesPrev, bandwidth, bandwidthPrev,
       docsBytes, fileBytes, activeDevices, latest, behind, sources, gmail, thisMonth, drafts, tableBytes, createdByHour, lengths, screens,
       heat: hourOfWeek(cur),
       cohorts: cohorts(view.users, view.daily, today, 8),
@@ -346,6 +353,22 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
         <Card title="Storage by table" hint={`Across every user · files ${fmtBytes(m.fileBytes)}`}>
           <BarList items={Object.entries(m.tableBytes).filter(([, n]) => n).map(([label, value]) => ({ label: <span className="font-mono text-xs">{label}</span>, value })).sort((a, b) => b.value - a.value)} format={fmtBytes} limit={10} color={SLOT(1)} />
         </Card>
+        <Card title="AI cost" hint={`What Claude cost per day, last ${periodLabel}`} className="lg:col-span-2"
+          info="Each call is priced from the tokens Anthropic reports, at list prices (shared/aiCost.ts), when it is made. Counted from 2 Nov 2026; earlier calls are not in it.">
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Mini label={m.aiPrev.costUsd ? `spent · was ${fmtUsd(m.aiPrev.costUsd)}` : "spent"} value={fmtUsd(m.ai.costUsd)} />
+            <Mini label="calls to Claude" value={fmtNum(m.ai.calls)} />
+            <Mini label="per user who used it" value={m.ai.users ? fmtUsd(m.ai.costUsd / m.ai.users) : "–"} />
+            <Mini label="tokens in · out" value={`${fmtNum(m.ai.inputTokens)} · ${fmtNum(m.ai.outputTokens)}`} />
+          </div>
+          <StackedDayBars data={m.aiDays} series={AI_FEATURES.map((x) => ({ key: x.key, label: x.label }))} format={fmtUsd} />
+        </Card>
+        <Card title="AI cost by user" hint={`Last ${periodLabel} · tap for more`}>
+          <BarList items={m.rows.filter((u) => u.aiCost).sort((a, b) => b.aiCost - a.aiCost).map((u) => ({ key: u.id, label: nameOf(u), value: u.aiCost, hint: `${fmtNum(u.aiCalls)} ${u.aiCalls === 1 ? "call" : "calls"}` }))} format={fmtUsd} of={m.ai.costUsd} onPick={onPick} color={SLOT(3)} empty="No AI calls in the period" />
+        </Card>
+        <Card title="AI cost by feature" hint={`Last ${periodLabel}`}>
+          <BarList items={AI_FEATURES.map((x) => ({ label: x.label, value: m.ai[x.key], hint: `${fmtNum(m.aiCalls[x.key])} ${m.aiCalls[x.key] === 1 ? "call" : "calls"}` })).filter((x) => x.value)} format={fmtUsd} of={m.ai.costUsd} color={SLOT(3)} empty="No AI calls in the period" />
+        </Card>
       </div>
     ),
     users: <UsersTable rows={m.rows} onPick={onPick} period={periodLabel} now={data.now} />,
@@ -487,16 +510,17 @@ function Leaderboards({ rows, onPick, period }: { rows: UserRow[]; onPick: (id: 
   );
 }
 
-type SortKey = "joinedAt" | "lastSeenAt" | "opens" | "activeDays" | "activeMs" | "entries" | "storage" | "bandwidth" | "devices";
+type SortKey = "joinedAt" | "lastSeenAt" | "opens" | "activeDays" | "activeMs" | "entries" | "storage" | "bandwidth" | "aiCost" | "devices";
 const SORTS: Record<SortKey, string> = {
   lastSeenAt: "Last seen", joinedAt: "Joined", opens: "Opens", activeDays: "Days", activeMs: "Time",
-  entries: "Entries", storage: "Storage", bandwidth: "Bandwidth", devices: "Devices",
+  entries: "Entries", storage: "Storage", bandwidth: "Bandwidth", aiCost: "AI cost", devices: "Devices",
 };
 /** The sorted-by value, for a phone row that has no column for it. */
 function sortValue(u: UserRow, key: SortKey): string {
   if (key === "joinedAt") return new Date(u.joinedAt).toLocaleDateString(undefined, { day: "numeric", month: "short" });
   if (key === "activeMs") return fmtDuration(u.activeMs);
   if (key === "bandwidth") return fmtBytes(u.bandwidth);
+  if (key === "aiCost") return fmtUsd(u.aiCost);
   return fmtNum(u[key] ?? 0);
 }
 
@@ -553,7 +577,7 @@ function UsersTable({ rows, onPick, period, now }: { rows: UserRow[]; onPick: (i
         {!shown.length ? <li className="px-4 py-6 text-center text-sm text-muted-foreground">No users match</li> : null}
       </ul>
       <div className="-mx-4 hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[900px] text-sm tabular-nums">
+        <table className="w-full min-w-[980px] text-sm tabular-nums">
           <thead className="border-b text-xs text-muted-foreground">
             <tr>
               <th className="px-4 py-2 text-left font-normal">User</th>
@@ -565,6 +589,7 @@ function UsersTable({ rows, onPick, period, now }: { rows: UserRow[]; onPick: (i
               {th("entries", "Entries")}
               {th("storage", "Storage")}
               {th("bandwidth", "Bandwidth")}
+              {th("aiCost", "AI cost")}
               {th("devices", "Devices")}
               <th className="px-2 py-2 text-left font-normal">Gmail</th>
             </tr>
@@ -589,11 +614,12 @@ function UsersTable({ rows, onPick, period, now }: { rows: UserRow[]; onPick: (i
                 <td className="px-2 py-2 text-right">{fmtNum(u.entries)}</td>
                 <td className="px-2 py-2 text-right">{u.storage ? fmtBytes(u.storage) : "–"}</td>
                 <td className="px-2 py-2 text-right">{u.bandwidth ? fmtBytes(u.bandwidth) : "–"}</td>
+                <td className="px-2 py-2 text-right">{u.aiCost ? fmtUsd(u.aiCost) : "–"}</td>
                 <td className="px-2 py-2 text-right">{u.devices}{u.installed ? <span className="ml-1 text-xs text-muted-foreground">· app</span> : null}</td>
                 <td className="px-2 py-2 text-xs text-muted-foreground">{u.gmail ?? "–"}</td>
               </tr>
             ))}
-            {!shown.length ? <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">No users match</td></tr> : null}
+            {!shown.length ? <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">No users match</td></tr> : null}
           </tbody>
         </table>
       </div>
