@@ -704,13 +704,33 @@ export function budgetsAt(snap: Snapshot, date: string, without?: string): Budge
   if (!settings || !snap.budgets.length) return [];
   const s = without ? { ...snap, transactions: snap.transactions.filter((t) => t._id !== without) } : snap;
   const out: BudgetAlertItem[] = [];
-  for (const period of ["weekly", "monthly", "yearly"] as const) {
+  for (const period of BUDGET_PERIODS) {
     if (!snap.budgets.some((b) => b.period === period)) continue;
-    const status = budgetStatus(s, period, periodKey(period, date, settings.monthStartDay, settings.weekStartDay), date);
-    if (!status) continue;
-    for (const it of [...(status.total ? [status.total] : []), ...status.perCategory]) out.push({ ...it, level: budgetLevel(it), range: status.range, period });
+    out.push(...periodItems(s, period, periodKey(period, date, settings.monthStartDay, settings.weekStartDay), date));
   }
   return out;
+}
+
+const BUDGET_PERIODS = ["weekly", "monthly", "yearly"] as const;
+
+/** Every budget of one period with its level: the total first, then the categories. */
+function periodItems(snap: Snapshot, period: Doc<"budgets">["period"], key: string, today: string): BudgetAlertItem[] {
+  const status = budgetStatus(snap, period, key, today);
+  if (!status) return [];
+  return [...(status.total ? [status.total] : []), ...status.perCategory].map((it) => ({ ...it, level: budgetLevel(it), range: status.range, period }));
+}
+
+/**
+ * The budgets of each period budgetImpact has counted, by "period|key", for the last ledger it was
+ * asked about. Drafts read from a year of mail fall on hundreds of days but only a few dozen weeks
+ * and months, and the review page asks again on every tick: each period is counted once, and only
+ * again when a table it reads changes (an op copies just the tables it touches).
+ */
+let impactCache: { tables: unknown[]; byPeriod: Map<string, BudgetAlertItem[]> } | null = null;
+function periodsOf(snap: Snapshot): Map<string, BudgetAlertItem[]> {
+  const tables = [snap.transactions, snap.budgets, snap.settings, snap.categories, snap.accounts, snap.accountGroups];
+  if (!impactCache || impactCache.tables.some((t, i) => t !== tables[i])) impactCache = { tables, byPeriod: new Map() };
+  return impactCache.byPeriod;
 }
 
 /** An expense that isn't in the ledger yet (a bill still due, a Gmail draft), as budgets would count it. */
@@ -725,8 +745,11 @@ export type BudgetImpact = { item: BudgetAlertItem; adds: number; after: number 
  * The ones left worst off come first.
  */
 export function budgetImpact(snap: Snapshot, pending: PendingExpense[]): BudgetImpact[] {
-  if (!snap.budgets.length || !pending.length) return [];
+  const settings = settingsOf(snap);
+  if (!settings || !snap.budgets.length || !pending.length) return [];
   const ledger = ledgerOf(snap);
+  const periods = BUDGET_PERIODS.filter((period) => snap.budgets.some((b) => b.period === period));
+  const byPeriod = periodsOf(snap);
   const parentOf = new Map(snap.categories.map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
   const atDate = new Map<string, BudgetAlertItem[]>();
   const out = new Map<string, BudgetImpact>();
@@ -734,7 +757,16 @@ export function budgetImpact(snap: Snapshot, pending: PendingExpense[]): BudgetI
     const adds = kindsOf({ _id: "", ...p } as Parameters<typeof kindsOf>[0], ledger).expense;
     if (!adds) continue;
     let items = atDate.get(p.date);
-    if (!items) atDate.set(p.date, (items = budgetsAt(snap, p.date)));
+    if (!items) {
+      items = [];
+      for (const period of periods) {
+        const key = periodKey(period, p.date, settings.monthStartDay, settings.weekStartDay);
+        let got = byPeriod.get(`${period}|${key}`);
+        if (!got) byPeriod.set(`${period}|${key}`, (got = periodItems(snap, period, key, p.date)));
+        items.push(...got);
+      }
+      atDate.set(p.date, items);
+    }
     const main = p.type === "expense" && p.categoryId ? parentOf.get(p.categoryId) ?? p.categoryId : undefined;
     for (const item of items) {
       if (item.budget.categoryId && item.budget.categoryId !== main) continue;

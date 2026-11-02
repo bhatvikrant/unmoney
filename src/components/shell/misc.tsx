@@ -136,3 +136,13 @@ export function Section({ title, children, className }: { title?: ReactNode; chi
     </section>
   );
 }
+
+/** A small pulsing dot: work still going on, out of sight (Gmail being read on the server). Still when motion is reduced. */
+export function LiveDot({ className }: { className?: string }) {
+  return (
+    <span aria-hidden="true" className={cn("relative flex size-2 shrink-0", className)}>
+      <span className="absolute inline-flex size-full rounded-full bg-chart-1 opacity-60 motion-safe:animate-ping" />
+      <span className="relative inline-flex size-2 rounded-full bg-chart-1" />
+    </span>
+  );
+}
