@@ -13,6 +13,7 @@ import { useView } from "@/lib/store";
 import { draftMatches, draftsRange } from "../../../shared/views";
 import { progressOf } from "../../../shared/gmail/backfill";
 import { cn } from "@/lib/utils";
+import { LiveDot } from "@/components/shell/misc";
 
 export function GmailNudge({ from, to }: { from: string; to: string }) {
   const nav = useNavigate();
@@ -40,13 +41,15 @@ export function GmailNudge({ from, to }: { from: string; to: string }) {
   const b = status?.backfill;
   if (!here && !matched && b?.state === "running" && status?.status === "ok") {
     const pct = b.total === null ? null : Math.min(99, Math.floor(progressOf(b) * 100));
-    return <Strip muted label={`Reading Gmail back to ${b.year}${pct !== null ? ` · ${pct}%` : "…"}`} extra={b.found ? `${b.found} found` : undefined} action="Details" onClick={() => nav("/settings/gmail")} />;
+    return <Strip muted live label={`Reading Gmail back to ${b.year}${pct !== null ? ` · ${pct}%` : "…"}`} extra={b.found ? `${b.found} found` : undefined} action="Details" onClick={() => nav("/settings/gmail")} />;
   }
   if (!here && !matched) return null;
   const label = here ? `${here} ${here === 1 ? "entry" : "entries"} found in Gmail` : `Gmail found ${matched} you may already have`;
   // the "may already be added" count rides along, muted, so the strip stays one line
-  const extra = here && matched ? `+${matched} maybe added` : undefined;
-  return <Strip label={label} extra={extra} action="Review" onClick={() => nav("/gmail")} />;
+  // still reading back to a year: more is on its way, so the strip pulses and says so
+  const live = b?.state === "running" && status?.status === "ok";
+  const extra = here && matched ? `+${matched} maybe added` : live ? "still reading" : undefined;
+  return <Strip label={label} extra={extra} live={live} action="Review" onClick={() => nav("/gmail")} />;
 }
 
 const CHECK_AFTER_MS = 15 * 60_000;
@@ -84,10 +87,10 @@ export function useGmailCheckOnFocus() {
  * target. Tinted amber like the other Gmail notices (red when it is a warning, grey when it only
  * reminds), whatever the accent, so it does not read as a day header.
  */
-function Strip({ label, extra, action, warn, muted, onClick }: { label: string; extra?: string; action: string; warn?: boolean; muted?: boolean; onClick: () => void }) {
+function Strip({ label, extra, action, warn, muted, live, onClick }: { label: string; extra?: string; action: string; warn?: boolean; muted?: boolean; live?: boolean; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className={cn("flex w-full items-center gap-2 border-b px-4 py-2 text-left text-xs", warn ? "bg-destructive/10 text-destructive active:bg-destructive/20" : muted ? "bg-muted/40 text-muted-foreground active:bg-muted" : "bg-amber-50 active:bg-amber-100 dark:bg-amber-950/30 dark:active:bg-amber-950/50")}>
-      <Mail className={cn("size-3.5 shrink-0", !warn && !muted && "text-amber-600 dark:text-amber-400")} />
+      {live ? <LiveDot className="mx-[3px]" /> : <Mail className={cn("size-3.5 shrink-0", !warn && !muted && "text-amber-600 dark:text-amber-400")} />}
       <span className="truncate font-medium">{label}</span>
       {extra ? <span className="shrink-0 text-muted-foreground">· {extra}</span> : null}
       <span className="ml-auto flex shrink-0 items-center text-muted-foreground">{action}<ChevronRight className="size-3.5" /></span>

@@ -7,10 +7,11 @@
  * row says so; tapping a row opens it in the entry form to change anything first. Unticked ones
  * stay here, and in the ledger as faded rows, until they are imported or dismissed.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { BellOff, Link2, Mail, Settings, X } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "../../../convex/_generated/api";
 import { matchesSender } from "../../../shared/gmail/query";
 import { senderAddress } from "../../../shared/gmail/mail";
@@ -23,6 +24,7 @@ import { offerUndo } from "@/lib/undo";
 import { useShortcuts } from "@/lib/shortcuts";
 import { dateLabel } from "@/lib/format";
 import { budgetImpact, draftMatches, draftsOpen } from "../../../shared/views";
+import { progressOf } from "../../../shared/gmail/backfill";
 import { sipFor, sipsOf } from "../../../shared/sips";
 import { useBudgetLabel } from "@/components/tx/entryBudgets";
 import { useOverText } from "@/lib/budgetText";
@@ -30,7 +32,7 @@ import { importable, type Importable } from "../../../shared/gmail/importable";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { useBottomBar } from "@/components/shell/SplitLayout";
-import { EmptyState, Section } from "@/components/shell/misc";
+import { EmptyState, LiveDot, Section } from "@/components/shell/misc";
 import { EntryMoney } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -47,6 +49,13 @@ const kindOf = (d: Draft): Kind => (d.proposal.type === "transfer" ? "transfer" 
 const SHOW_LABEL: Record<Show, string> = { all: "All", credit: "Credits", debit: "Debits", transfer: "Transfers" };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Rows drawn at first, and added each time the end of the list scrolls near. Reading back a year
+ * of mail leaves well over a thousand, and drawing them all at once kept the page from opening.
+ */
+const FIRST_ROWS = 60;
+const MORE_ROWS = 200;
 
 export default function GmailReviewPage() {
   const nav = useNavigate();
@@ -103,7 +112,8 @@ export default function GmailReviewPage() {
   const selectable = fresh.filter((i) => i.ready);
   const allOn = selectable.length > 0 && selectable.every(isOn);
   const setAll = (on: boolean) => setFlipped((s) => {
-    const n = new Set([...s].filter((id) => !selectable.some((i) => i.draft._id === id)));
+    const ids = new Set(selectable.map((i) => i.draft._id as string));
+    const n = new Set([...s].filter((id) => !ids.has(id)));
     for (const i of selectable) if (defaultOn(i) !== on) n.add(i.draft._id);
     return n;
   });
@@ -175,10 +185,24 @@ export default function GmailReviewPage() {
   const order = [...fresh, ...maybeAdded];
   const [cursor, setCursor] = useState<string | null>(null);
   const at = cursor ? order.find((i) => i.draft._id === cursor) : undefined;
+  const [drawn, setDrawn] = useState(FIRST_ROWS);
+  const end = useRef<HTMLDivElement>(null);
+  const more = drawn < order.length;
+  useEffect(() => {
+    const el = end.current;
+    if (!el || !more) return;
+    // a screen or so before the end comes into view, so scrolling never meets a gap
+    const io = new IntersectionObserver((seen) => { if (seen.some((e) => e.isIntersecting)) setDrawn((n) => n + MORE_ROWS); }, { rootMargin: "1200px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [more, drawn]);
   const move = (step: number) => {
     if (!order.length) return;
     const idx = at ? order.indexOf(at) : -1;
-    setCursor(order[Math.min(order.length - 1, Math.max(0, idx + step))].draft._id);
+    const next = Math.min(order.length - 1, Math.max(0, idx + step));
+    // j past the last row drawn draws more
+    if (next >= drawn - 1) setDrawn((n) => n + MORE_ROWS);
+    setCursor(order[next].draft._id);
   };
   useShortcuts({
     j: () => move(1), k: () => move(-1),
@@ -199,6 +223,7 @@ export default function GmailReviewPage() {
     <>
       <PageHeader back="/" title="From Gmail" right={<Button variant="ghost" size="icon" aria-label="Gmail settings" onClick={() => nav("/settings/gmail")}><Settings className="size-5" /></Button>} />
       <Page className={cn(items.length ? "pb-40" : "pb-10")}>
+        {gmail ? <StillReading gmail={gmail} onDetails={() => nav("/settings/gmail")} /> : null}
         {!items.length ? (
           <EmptyState title="Nothing from Gmail to import" hint="New money mail is checked every hour. What it finds shows up here to pick from, and as faded rows on their days." action={<Button variant="outline" size="sm" onClick={() => nav("/settings/gmail")}><Mail className="size-4" />Gmail settings</Button>} />
         ) : (
@@ -223,13 +248,14 @@ export default function GmailReviewPage() {
               <span className="tabular text-xs text-muted-foreground">{selected.length} of {shown.length} to import</span>
             </label> : <div className="mt-3" />}
 
-            {fresh.length ? <Section title={`New · ${fresh.length}`}>{fresh.map(row)}</Section> : null}
+            {fresh.length ? <Section title={`New · ${fresh.length}`}>{fresh.slice(0, drawn).map(row)}</Section> : null}
             {maybeAdded.length ? (
               <Section title={`Maybe already added · ${maybeAdded.length}`}>
                 <div className="border-b px-4 py-2 text-xs text-muted-foreground">Each of these looks like an entry you typed in, so it starts unticked. Tick it to import it as a new entry anyway, or link it to the one you have.</div>
-                {maybeAdded.map(row)}
+                {maybeAdded.slice(0, Math.max(0, drawn - fresh.length)).map(row)}
               </Section>
             ) : null}
+            {more ? <div ref={end} className="px-4 py-6 text-center text-xs text-muted-foreground">Showing {drawn} of {order.length}…</div> : null}
           </>
         )}
       </Page>
@@ -268,6 +294,30 @@ export default function GmailReviewPage() {
         </div>
       ) : null}
     </>
+  );
+}
+
+type Status = NonNullable<FunctionReturnType<typeof api.gmail.status>>;
+
+/**
+ * While Gmail is still being read (back to a year, or the hourly check running now), a pulsing
+ * dot and how far it has got: what is listed isn't all there will be, and more turns up on its own.
+ */
+function StillReading({ gmail, onDetails }: { gmail: Status; onDetails: () => void }) {
+  if (!gmail.connected || gmail.status !== "ok") return null;
+  const b = gmail.backfill?.state === "running" ? gmail.backfill : null;
+  if (!b && !gmail.syncing) return null;
+  const pct = b && b.total !== null ? Math.min(99, Math.floor(progressOf(b) * 100)) : null;
+  return (
+    <button type="button" onClick={onDetails} role="status"
+      className="mx-4 mt-4 flex w-[calc(100%-2rem)] items-start gap-3 rounded-lg border bg-muted/40 px-3 py-2 text-left text-sm active:bg-muted">
+      <LiveDot className="mt-1.5" />
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium">{b ? `Still reading Gmail back to ${b.year}${pct !== null ? ` · ${pct}%` : "…"}` : "Checking Gmail for new mail…"}</span>
+        <span className="block text-xs text-muted-foreground">{b ? "More entries show up here as it finds them. You can close the app meanwhile." : "Anything new shows up here in a moment."}</span>
+      </span>
+      {b ? <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">Details</span> : null}
+    </button>
   );
 }
 
