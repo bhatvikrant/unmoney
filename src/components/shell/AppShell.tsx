@@ -101,7 +101,8 @@ export default function AppShell() {
           <span className="min-w-0 truncate text-muted-foreground">{user?.name || user?.email || "Account"}</span>
         </NavLink>
       </aside>
-      <main id="main" tabIndex={-1} className="flex-1 min-w-0 pb-[calc(var(--tabbar-h)+1.5rem)] md:pb-0 outline-none">
+      {/* With a FAB on the page, keep room below the last row so the button never sits on it */}
+      <main id="main" tabIndex={-1} className="flex-1 min-w-0 pb-[calc(var(--tabbar-h)+1.5rem)] md:pb-0 has-[[data-fab]]:pb-[calc(var(--tabbar-h)+6rem)] md:has-[[data-fab]]:pb-26 outline-none">
         <Outlet />
         <MoneyManagerPrompt />
       </main>
