@@ -253,6 +253,10 @@ function CalendarView({ txs, range }: { txs: Tx[]; range: { from: string; to: st
   );
 }
 
+// One grid for the whole table: each row is a subgrid, so headers, rows and the total share column widths. Amounts sit right-aligned.
+const PERIOD_TABLE = "grid grid-cols-[1fr_auto_auto_auto] gap-x-4";
+const PERIOD_ROW = "col-span-4 grid grid-cols-subgrid items-center [&>:not(:first-child)]:text-right";
+
 function WeeklyView({ txs, range }: { txs: Tx[]; range: { from: string; to: string } }) {
   const { settings, ledger } = useApp();
   const [open, setOpen] = useState<{ from: string; to: string } | null>(null);
@@ -265,16 +269,18 @@ function WeeklyView({ txs, range }: { txs: Tx[]; range: { from: string; to: stri
   const tot = sumKinds(txs, ledger);
   return (
     <div>
-      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-4 py-1.5 text-[11px] text-muted-foreground border-b"><span>Week</span><span>Income</span><span>Expenses</span><span>Total</span></div>
+      <div className={PERIOD_TABLE}>
+      <div className={cn(PERIOD_ROW, "px-4 py-1.5 text-[11px] text-muted-foreground border-b")}><span>Week</span><span>Income</span><span>Expenses</span><span>Total</span></div>
       {rows.map((r) => (
-        <button key={r.from} type="button" onClick={() => setOpen(r)} className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-4 py-3 border-b text-sm w-full text-left hover:bg-accent/40">
+        <button key={r.from} type="button" onClick={() => setOpen(r)} className={cn(PERIOD_ROW, "px-4 py-3 border-b text-sm w-full text-left hover:bg-accent/40")}>
           <span className="text-xs">{dateLabel(r.from)} – {dateLabel(r.to)}</span>
           <Money amount={r.income} kind="income" className="text-xs" />
           <Money amount={r.expense} kind="expense" className="text-xs" />
           <Money amount={r.income - r.expense} className="text-xs" />
         </button>
       ))}
-      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-4 py-3 text-sm font-medium"><span>Total</span><Money amount={tot.income} kind="income" className="text-xs" /><Money amount={tot.expense} kind="expense" className="text-xs" /><Money amount={tot.income - tot.expense} className="text-xs" /></div>
+      <div className={cn(PERIOD_ROW, "px-4 py-3 text-sm font-medium")}><span>Total</span><Money amount={tot.income} kind="income" className="text-xs" /><Money amount={tot.expense} kind="expense" className="text-xs" /><Money amount={tot.income - tot.expense} className="text-xs" /></div>
+      </div>
       <BottomSheet open={!!open} onOpenChange={(o) => !o && setOpen(null)} title={open ? `${dateLabel(open.from)} – ${dateLabel(open.to)}` : ""}>
         {open ? <TransactionList txs={txs.filter((t) => t.date >= open.from && t.date <= open.to)} /> : null}
       </BottomSheet>
@@ -296,17 +302,17 @@ function MonthlyView({ month, reachable, onPick }: { month: string; reachable: (
   });
   const tot = sumKinds(txs, ledger);
   return (
-    <div>
-      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-4 py-1.5 text-[11px] text-muted-foreground border-b"><span>{y}</span><span>Income</span><span>Expenses</span><span>Total</span></div>
+    <div className={PERIOD_TABLE}>
+      <div className={cn(PERIOD_ROW, "px-4 py-1.5 text-[11px] text-muted-foreground border-b")}><span>{y}</span><span>Income</span><span>Expenses</span><span>Total</span></div>
       {rows.map((r) => (
-        <button key={r.key} type="button" disabled={!reachable(r.key)} title={reachable(r.key) ? undefined : "Nothing this month"} onClick={() => onPick(r.key)} className={cn("grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-4 py-3 border-b text-sm w-full text-left hover:bg-accent/40 disabled:pointer-events-none disabled:opacity-40", r.key === month && "bg-accent/30")}>
+        <button key={r.key} type="button" disabled={!reachable(r.key)} title={reachable(r.key) ? undefined : "Nothing this month"} onClick={() => onPick(r.key)} className={cn(PERIOD_ROW, "px-4 py-3 border-b text-sm w-full text-left hover:bg-accent/40 disabled:pointer-events-none disabled:opacity-40", r.key === month && "bg-accent/30")}>
           <span>{r.label}</span>
           <Money amount={r.income} kind="income" className="text-xs" />
           <Money amount={r.expense} kind="expense" className="text-xs" />
           <Money amount={r.income - r.expense} className="text-xs" />
         </button>
       ))}
-      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-4 px-4 py-3 text-sm font-medium"><span>Total</span><Money amount={tot.income} kind="income" className="text-xs" /><Money amount={tot.expense} kind="expense" className="text-xs" /><Money amount={tot.income - tot.expense} className="text-xs" /></div>
+      <div className={cn(PERIOD_ROW, "px-4 py-3 text-sm font-medium")}><span>Total</span><Money amount={tot.income} kind="income" className="text-xs" /><Money amount={tot.expense} kind="expense" className="text-xs" /><Money amount={tot.income - tot.expense} className="text-xs" /></div>
     </div>
   );
 }
