@@ -90,7 +90,8 @@ function MergeBody({ pair, onCancel, onDone }: { pair: MergePair; onCancel: () =
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
-      <div role="radiogroup" aria-label={title} className="space-y-2">
+      {/* min-w-0: a long note would otherwise widen the dialog's grid column past its edge */}
+      <div role="radiogroup" aria-label={title} className="min-w-0 space-y-2">
         {choices.map((c) => <Choice key={c.key} label={c.label} tx={c.tx} on={pick === c.key} onPick={() => setPick(c.key)} />)}
       </div>
       {blocked ? <p className="text-sm text-destructive">{blocked}</p> : null}
