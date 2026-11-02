@@ -8,7 +8,7 @@
  * one received.
  */
 import type { Doc, Id } from "../convex/_generated/dataModel";
-import { addMonths, todayISO } from "./dates";
+import { addMonths, diffDays, todayISO } from "./dates";
 import { currencyInfo } from "./currencies";
 import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_INCOME_CATEGORIES, type AccountKind } from "./defaults";
 import { drawsFromLinked, resolveKind } from "./ledger";
@@ -17,6 +17,7 @@ import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
 import { normName, normNote } from "./categoryLint";
 import { describeOp, HISTORY_COALESCE_MS, HISTORY_KINDS, HISTORY_MAX, type HistoryLine } from "./history";
+import { aroundDates, fromGmail, sipFor, sipKey, sipsOf, type Rhythm, type Sip } from "./sips";
 
 export const TABLES = [
   "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies", "categoryCleanups", "history", "drafts",
@@ -71,6 +72,13 @@ export type Template = Doc<"bookmarks">["template"];
 export type TxSplit = NonNullable<Doc<"transactions">["split"]>;
 /** Where an entry was read from; only Gmail so far. Set by the drafts ops, never by the entry form. */
 export type TxSource = NonNullable<Doc<"transactions">["source"]>;
+/** An entry as a merge recorded it (transactions.merge, drafts.link): everything but its ids. */
+export type EntrySnapshot = Omit<Doc<"transactions">, "_id" | "_creationTime" | "userId" | "rev" | "merged"> & { merged?: MergeRecord };
+/** What a merged entry was made of (Doc<"transactions">["merged"], typed). */
+export type MergeRecord = {
+  at: number; kept: EntrySnapshot; removed?: EntrySnapshot; draftId?: Id<"drafts">;
+  bookmarkIds?: Id<"bookmarks">[]; draftIds?: Id<"drafts">[];
+};
 export type TxFields = {
   type: TxType;
   date: string;
@@ -114,7 +122,7 @@ export type AccountFields = {
 };
 export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
-  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "dismissedRecurring" | "recentImports">>;
+  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "dismissedRecurring" | "dismissedSips" | "recentImports">>;
 export type ImportRow = {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
   description?: string; subAmount?: string; subCurrency?: string;
@@ -214,6 +222,17 @@ export interface Ops {
   "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
   /** ifPresent: entries already gone are skipped rather than refusing the lot (a chunked restore, after the server's sweep). */
   "transactions.bulkRemove": { args: { ids: Id<"transactions">[]; ifPresent?: boolean }; result: void };
+  /**
+   * Two entries that are one payment become one: `keepId` stays as it is, adds the other's tags and photos, and takes its
+   * note, description, mail and split link where it has none of its own. `removeId` is deleted; bookmarks and Gmail drafts
+   * pointing at it point at the kept entry instead. The kept entry records both as they were (`merged`), for unmerge.
+   */
+  "transactions.merge": { args: { keepId: Id<"transactions">; removeId: Id<"transactions"> }; result: void };
+  /**
+   * Undo a merge (transactions.merge or drafts.link), however long ago: the entry is as it was before it, and the entry
+   * merged into it comes back (as a new entry, with its bookmarks and drafts) or the Gmail draft is open again.
+   */
+  "transactions.unmerge": { args: { id: Id<"transactions"> }; result: void };
   /** Link entries to the shared expense they became on UnSplit (or, with null, unlink them). Entries gone meanwhile are left out. */
   "transactions.setSplit": { args: { ids: Id<"transactions">[]; split: TxSplit | null }; result: void };
   "transactions.importRows": {
@@ -243,8 +262,12 @@ export interface Ops {
   "drafts.acceptMany": { args: { items: (TxFields & { id: Id<"drafts"> })[] }; result: { ids: Id<"transactions">[]; accepted: Id<"drafts">[]; failed: number } };
   /** "Not an entry": the drafts are dismissed. Ones gone or already handled are left out. */
   "drafts.dismiss": { args: { ids: Id<"drafts">[] }; result: void };
-  /** "Yes, that's the one I typed in": the existing entry gets the draft's `source`, the draft becomes accepted. */
-  "drafts.link": { args: { id: Id<"drafts">; transactionId: Id<"transactions"> }; result: void };
+  /**
+   * "Yes, that's the one I typed in": the existing entry gets the draft's `source`, the draft becomes accepted. With
+   * `useMail` the entry also takes what the mail says (withMail): its date, amount and note, and the payment method and category where the mail names them.
+   * Either way the entry records what it was (`merged`), so transactions.unmerge can take the mail off again.
+   */
+  "drafts.link": { args: { id: Id<"drafts">; transactionId: Id<"transactions">; useMail?: boolean }; result: void };
   /** "No, it's new": the draft stops pointing at the entry it looked like, goes back to the ledger and is never matched again. */
   "drafts.unmatch": { args: { id: Id<"drafts"> }; result: void };
   /** Undo an import or a dismiss: the drafts are open again, and the entries in `transactionIds` that an import made from them are deleted. */
@@ -262,6 +285,26 @@ export interface Ops {
    * so nothing is back-filled. `fromTransactionId` joins that payment to it.
    */
   "repeats.create": { args: { template: Template; frequency: Frequency; after: string; today: string; fromTransactionId?: Id<"transactions"> }; result: Id<"repeats"> };
+
+  /**
+   * A SIP made from payments already in the ledger (a suggestion, or "Mark as SIP" on an entry): they are
+   * filed under it, and so is every later expense with one of their notes and about the same amount.
+   */
+  "sips.create": { args: { name: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; rhythm?: Rhythm }; result: string };
+  /** File more payments under a SIP; their notes become its keys too. */
+  "sips.mark": { args: { id: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; resume?: boolean }; result: void };
+  /**
+   * Save waiting Gmail drafts that a running SIP takes into it (the Gmail check runs this for the
+   * drafts it just made). `draftDates` are their dates, so the server loads the entries around them
+   * for the duplicate check. Returns how many were saved.
+   */
+  "sips.saveDrafts": { args: { draftIds: Id<"drafts">[]; draftDates: string[] }; result: number };
+  /** "Not a SIP": the entries go back to the ledger. Ones gone meanwhile are left out. */
+  "sips.unmark": { args: { ids: Id<"transactions">[] }; result: void };
+  /** Rename it, or stop (or restart) it: a stopped SIP keeps its payments and takes no new ones. */
+  "sips.update": { args: { id: string; name?: string; stopped?: boolean }; result: void };
+  /** Delete the SIP: every payment filed under it goes back to the ledger as an ordinary expense. */
+  "sips.remove": { args: { id: string }; result: void };
 
   "bookmarks.create": { args: { template: Template; transactionId?: Id<"transactions"> }; result: Id<"bookmarks"> };
   "bookmarks.update": { args: { id: Id<"bookmarks">; template: Template }; result: void };
@@ -366,6 +409,8 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.remove": ["transactions", "repeats"],
   "transactions.bulkUpdate": ["accounts", "categories", "transactions"],
   "transactions.bulkRemove": ["transactions"],
+  "transactions.merge": ["transactions", "bookmarks", "drafts"],
+  "transactions.unmerge": ["transactions", "bookmarks", "drafts", "accounts", "categories", "repeats"],
   "transactions.setSplit": ["transactions"],
   "transactions.importRows": ["settings", "accountGroups", "accounts", "categories", "currencies", "transactions"],
   "transactions.copy": ["transactions"],
@@ -374,7 +419,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "drafts.accept": ["drafts", "transactions", "accounts", "categories"],
   "drafts.acceptMany": ["drafts", "transactions", "accounts", "categories"],
   "drafts.dismiss": ["drafts"],
-  "drafts.link": ["drafts", "transactions"],
+  "drafts.link": ["drafts", "transactions", "accounts", "categories"],
   "drafts.unmatch": ["drafts"],
   "drafts.reopen": ["drafts", "transactions"],
   "repeats.update": ["repeats", "accounts", "categories"],
@@ -383,6 +428,12 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "repeats.addNext": ["repeats", "transactions", "accounts", "categories"],
   "repeats.skip": ["repeats"],
   "repeats.create": ["repeats", "transactions", "accounts", "categories"],
+  "sips.create": ["settings", "transactions", "drafts", "categories", "accounts"],
+  "sips.mark": ["settings", "transactions", "drafts", "categories", "accounts"],
+  "sips.saveDrafts": ["settings", "transactions", "drafts", "categories", "accounts"],
+  "sips.unmark": ["transactions"],
+  "sips.update": ["settings"],
+  "sips.remove": ["settings", "transactions"],
   "bookmarks.create": ["accounts", "transactions", "bookmarks"],
   "bookmarks.update": ["bookmarks"],
   "bookmarks.remove": ["bookmarks"],
@@ -405,6 +456,8 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
 // Ops that write a history line also load the history (to add to it) and the settings (amounts in
 // the sentence are written in the user's currency), on the server exactly as on the device.
 for (const k of HISTORY_KINDS) OP_TABLES[k] = [...new Set<Table>([...OP_TABLES[k], "history", "settings"])];
+// A new expense is filed under the SIP it pays (Work.insert), so every op that writes entries reads the SIPs (on settings).
+for (const k of Object.keys(OP_TABLES) as OpKind[]) if (OP_TABLES[k].includes("transactions") && !OP_TABLES[k].includes("settings")) OP_TABLES[k] = [...OP_TABLES[k], "settings"];
 
 /**
  * Which of the user's entries an op reads or writes, so the server loads just those rather than
@@ -427,6 +480,8 @@ export type TxScope = {
   categoryIds?: string[];
   /** The entries these tidy-up records moved, and those of the categories they created. */
   cleanupIds?: string[];
+  /** Every entry filed under these SIPs. */
+  sipIds?: string[];
 };
 
 export function txScope(op: Op): TxScope {
@@ -439,7 +494,14 @@ export function txScope(op: Op): TxScope {
     case "transactions.bulkRemove":
     case "transactions.setSplit": return { ids: a.ids as string[] };
     case "transactions.copy": return { ids: [id] };
+    case "transactions.merge": return { ids: [a.keepId as string, a.removeId as string] };
+    case "transactions.unmerge": return { ids: [id] };
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
+    case "sips.create":
+    case "sips.mark": return { ids: a.transactionIds as string[], dates: aroundDates((a.draftDates as string[] | undefined) ?? []) };
+    case "sips.saveDrafts": return { dates: aroundDates((a.draftDates as string[] | undefined) ?? []) };
+    case "sips.unmark": return { ids: a.ids as string[] };
+    case "sips.remove": return { sipIds: [id] };
     case "drafts.link": return { ids: [a.transactionId as string] };
     case "drafts.reopen": return { ids: (a.transactionIds as string[] | undefined) ?? [] };
     case "repeats.remove": return { repeatIds: [id] };
@@ -475,7 +537,7 @@ export function txScope(op: Op): TxScope {
 /** One scope covering several ops. */
 export function mergeTxScopes(scopes: TxScope[]): TxScope {
   const out: TxScope = {};
-  const keys = ["ids", "seriesOf", "repeatIds", "accountIds", "dates", "categoryIds", "cleanupIds"] as const;
+  const keys = ["ids", "seriesOf", "repeatIds", "accountIds", "dates", "categoryIds", "cleanupIds", "sipIds"] as const;
   for (const s of scopes) {
     if (s.all) out.all = true;
     for (const k of keys) if (s[k]?.length) out[k] = [...new Set([...(out[k] ?? []), ...s[k]!])];
@@ -579,12 +641,41 @@ class Work {
     return d;
   }
   insert<T extends Table>(table: T, doc: Insertable<T>): Id<T> {
+    if (table === "transactions") doc = this.fileUnderSip(doc as Insertable<"transactions">) as Insertable<T>;
     this.n++;
     const _id = `${TMP_PREFIX}${this.op.id}_${this.n}` as Id<T>;
     const arr = this.t(table);
     arr.push(clean({ ...doc, _id, _creationTime: this.op.at + this.n, userId: this.ctx.userId } as unknown as Doc<T>));
     this.idx.get(table)?.set(_id, arr.length - 1);
     return _id;
+  }
+  /**
+   * A new expense that pays a running SIP (one of its notes, about its amount) is filed under it,
+   * whichever op wrote it: the entry form, a Gmail draft, an import, a repeat. A payment newer than
+   * the SIP's last one moves its usual amount along (a step-up).
+   */
+  private fileUnderSip(doc: Insertable<"transactions">): Insertable<"transactions"> {
+    const sips = sipsOf(this.snap);
+    // only what Gmail read: an entry typed by hand is never filed under a SIP
+    if (doc.sipId !== undefined || doc.type !== "expense" || !sips.length || !fromGmail(doc)) return doc;
+    // a backup, or an entry an unmerge puts back, comes back as it was: one the user took out of a SIP stays out
+    if (this.op.kind === "backup.restore" || this.op.kind === "transactions.restoreRows" || this.op.kind === "transactions.unmerge") return doc;
+    const sip = sipFor(sips, doc);
+    if (!sip) return doc;
+    if (doc.date >= (sip.lastDate ?? "")) this.patchSip(sip.id, { amount: doc.amount, lastDate: doc.date });
+    return { ...doc, sipId: sip.id };
+  }
+  /** The id of the op being applied: the same on the device and the server, so ids made from it agree. */
+  get opId(): string {
+    return this.op.id;
+  }
+  /** Write the user's SIPs (they live on settings). */
+  setSips(sips: Sip[]): void {
+    const s = this.requireSettings();
+    this.patch("settings", s._id, { sips: sips.length ? sips : undefined });
+  }
+  patchSip(id: string, patch: Partial<Sip>): void {
+    this.setSips(sipsOf(this.snap).map((x) => (x.id === id ? clean({ ...x, ...patch }) : x)));
   }
   patch<T extends Table>(table: T, id: Id<T>, patch: Partial<Doc<T>>): void {
     const arr = this.t(table);
@@ -754,6 +845,40 @@ function shiftOccurrence(date: string, from: string, to: string, rep: Pick<Doc<"
   let out = to;
   for (let i = 0; i < steps; i++) out = nextOccurrence(out, to, rep.frequency);
   return out;
+}
+
+/**
+ * An entry as it would be with what a Gmail draft says (drafts.link with useMail): the mail's date, amount
+ * and note, and its payment method and category where it names them; the entry keeps the rest (tags,
+ * photos, a category of the same type). An amount in another currency comes from the mail or not at all.
+ */
+export function withMail(t: Doc<"transactions">, p: Doc<"drafts">["proposal"]): TxFields {
+  const sameType = p.type === t.type;
+  const transfer = p.type === "transfer";
+  return {
+    type: p.type, date: p.date, time: p.time ?? t.time,
+    accountId: p.accountId ?? t.accountId,
+    toAccountId: transfer ? p.toAccountId ?? t.toAccountId : undefined,
+    categoryId: transfer ? undefined : p.categoryId ?? (sameType ? t.categoryId : undefined),
+    subcategoryId: transfer ? undefined : p.categoryId ? p.subcategoryId : sameType ? t.subcategoryId : undefined,
+    amount: p.amount, subAmount: p.subAmount, subCurrency: p.subAmount ? p.subCurrency : undefined, exchangeRate: undefined,
+    note: p.note || t.note, description: p.description ?? t.description,
+    tags: t.tags, photoIds: t.photoIds, feeAmount: transfer && sameType ? t.feeAmount : undefined,
+  };
+}
+
+/** An entry without its ids, for a merge record (transactions.merge, drafts.link). */
+function snapshotOf(t: Doc<"transactions">): EntrySnapshot {
+  const { _id, _creationTime, userId, rev, ...rest } = t;
+  void _id; void _creationTime; void userId; void rev;
+  return rest as EntrySnapshot;
+}
+
+/** A merge record with every amount in it scaled, down to the merges inside it (a change of decimals). */
+function scaleMerge(m: MergeRecord | undefined, scale: (n: number | undefined) => number | undefined): MergeRecord | undefined {
+  if (!m) return undefined;
+  const one = (s: EntrySnapshot): EntrySnapshot => clean({ ...s, amount: scale(s.amount)!, feeAmount: scale(s.feeAmount), installmentTotal: scale(s.installmentTotal), merged: scaleMerge(s.merged, scale) });
+  return { ...m, kept: one(m.kept), removed: m.removed && one(m.removed) };
 }
 
 const templateOf = (t: TxFields): Template => ({
@@ -1057,7 +1182,7 @@ function rescale(w: Work, ids: Id<"transactions">[], factor: number) {
   const scale = (n: number | undefined) => (n === undefined ? undefined : scaleAmount(n, factor));
   for (const id of ids) {
     const t = w.must("transactions", id);
-    w.patch("transactions", id, { amount: scale(t.amount)!, feeAmount: scale(t.feeAmount), installmentTotal: scale(t.installmentTotal) });
+    w.patch("transactions", id, { amount: scale(t.amount)!, feeAmount: scale(t.feeAmount), installmentTotal: scale(t.installmentTotal), merged: scaleMerge(t.merged as MergeRecord | undefined, scale) });
   }
 }
 
@@ -1092,6 +1217,8 @@ function rescaleOtherAmounts(w: Work, factor: number) {
   const template = (t: Template): Template => ({ ...t, amount: scale(t.amount), feeAmount: t.feeAmount === undefined ? undefined : scale(t.feeAmount) });
   for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
   for (const b of [...w.snap.bookmarks]) w.patch("bookmarks", b._id, { template: template(b.template) });
+  // a SIP's usual amount is what later payments are matched against
+  if (sipsOf(w.snap).length) w.setSips(sipsOf(w.snap).map((x) => ({ ...x, amount: scale(x.amount) })));
   // a tidy-up undone later puts these budgets back, so they change scale too
   for (const c of [...w.snap.categoryCleanups]) {
     w.patch("categoryCleanups", c._id, {
@@ -1116,11 +1243,85 @@ export function restoreRowsFrom(data: BackupData, ids: RestoreIds): Record<strin
       categoryId: t.categoryId ? map(ids.categories, t.categoryId) : undefined,
       subcategoryId: t.subcategoryId ? map(ids.categories, t.subcategoryId) : undefined,
       repeatId: t.repeatId ? map(ids.repeats, t.repeatId) : undefined,
+      // what it was merged from names the backup's ids, not the restored ones: it cannot be undone after a restore
+      merged: undefined,
       // which backup entry this was, so a bookmark of it can point at the restored copy
       fromBackupId: typeof t._id === "string" ? t._id : undefined,
     }];
   });
 }
+
+/** Expenses read from Gmail that can be filed under a SIP, oldest first; ones gone meanwhile (or typed by hand) are left out. */
+function sipPayments(w: Work, ids: Id<"transactions">[]): Doc<"transactions">[] {
+  return ids.map((id) => w.get("transactions", id)).filter((t): t is Doc<"transactions"> => !!t && t.type === "expense" && t.amount > 0 && fromGmail(t))
+    .sort((a, b) => a.date.localeCompare(b.date) || a._creationTime - b._creationTime);
+}
+
+/** Drafts (waiting or dismissed) a SIP can save, oldest first; ones gone, saved meanwhile, not expenses or flagged as an entry already typed are left out. */
+function sipDraftsOf(w: Work, ids: Id<"drafts">[] = []): Doc<"drafts">[] {
+  return ids.map((id) => w.get("drafts", id))
+    .filter((d): d is Doc<"drafts"> => !!d && d.status !== "accepted" && !d.matchedTransactionId && d.proposal.type === "expense" && d.proposal.amount > 0)
+    .sort((a, b) => a.proposal.date.localeCompare(b.proposal.date));
+}
+
+/** An entry already in the ledger for this draft's payment: the same amount within two days. Saving it again would count it twice. */
+function alreadySaved(w: Work, d: Doc<"drafts">): boolean {
+  const p = d.proposal;
+  return w.snap.transactions.some((t) => t.type === "expense" && t.amount === p.amount && Math.abs(diffDays(t.date, p.date)) <= 2);
+}
+
+/** The expense category SIP payments are saved under: "Investments", made if the user has none. */
+function investmentsCategory(w: Work): Id<"categories"> {
+  const found = w.snap.categories.find((c) => c.type === "expense" && !c.parentId && !c.deletedAt && normName(c.name) === normName("Investments"));
+  if (found) return found._id;
+  return w.insert("categories", { type: "expense", name: "Investments", order: nextOrder(w.snap.categories.filter((c) => c.type === "expense")) });
+}
+
+/**
+ * Save a draft as a payment of `sip`: the date, amount and name the mail gave, the bank account it
+ * named (else the SIP's), under Investments. Returns false (the draft stays as it is) when no
+ * account is known or the account is gone.
+ */
+function saveSipDraft(w: Work, d: Doc<"drafts">, sip: Sip, categoryId: Id<"categories">): boolean {
+  const p = d.proposal;
+  const account = [p.accountId, sip.accountId].find((id) => id && !w.get("accounts", id)?.deletedAt);
+  if (!account || alreadySaved(w, d)) return false;
+  const t = validateTx(w, {
+    type: "expense", date: p.date, time: p.time, accountId: account, categoryId, amount: p.amount,
+    subAmount: p.subAmount, subCurrency: p.subAmount !== undefined ? p.subCurrency : undefined,
+    note: p.note, description: p.description, tags: [], photoIds: [],
+  });
+  const transactionId = w.insert("transactions", { ...t, source: { app: "gmail", messageId: d.messageId }, sipId: sip.id });
+  w.patch("drafts", d._id, { status: "accepted", transactionId, matchedTransactionId: undefined, resolvedAt: w.at });
+  return true;
+}
+
+/** File entries and save drafts under a SIP that is already in settings; moves its usual amount to the latest payment. Returns how many went in. */
+function fillSip(w: Work, sip: Sip, entries: Doc<"transactions">[], drafts: Doc<"drafts">[]): number {
+  const added: { date: string; amount: number }[] = [];
+  for (const t of entries) {
+    w.patch("transactions", t._id, { sipId: sip.id });
+    added.push(t);
+  }
+  if (drafts.length) {
+    const categoryId = investmentsCategory(w);
+    for (const d of drafts) if (saveSipDraft(w, d, sip, categoryId)) added.push(d.proposal);
+  }
+  const last = added.sort((a, b) => a.date.localeCompare(b.date))[added.length - 1];
+  const current = sipsOf(w.snap).find((x) => x.id === sip.id)!;
+  if (last && last.date >= (current.lastDate ?? "")) w.patchSip(sip.id, { amount: last.amount, lastDate: last.date });
+  return added.length;
+}
+function mustSip(w: Work, id: string, msg = "That SIP was deleted"): Sip {
+  const sip = sipsOf(w.snap).find((x) => x.id === id);
+  if (!sip) throw new Error(msg);
+  return sip;
+}
+const sipName = (s: string) => {
+  const n = s.trim().slice(0, MAX_NAME * 2);
+  if (!n) throw new Error("Give the SIP a name");
+  return n;
+};
 
 const handlers: Handlers = {
   "settings.completeOnboarding": (w, { currency, symbolPosition }) => {
@@ -1158,6 +1359,8 @@ const handlers: Handlers = {
     const factor = 10 ** (info.decimals - s.decimals);
     if (!keepData) {
       if (entries) w.clear("transactions");
+      // their usual amounts were in the old currency
+      if (s.sips) w.setSips([]);
     } else if (factor !== 1) {
       if (entries) rescale(w, w.snap.transactions.map((t) => t._id), factor);
       rescaleOtherAmounts(w, factor);
@@ -1572,6 +1775,75 @@ const handlers: Handlers = {
     w.removeWhere("transactions", (t) => gone.has(t._id));
   },
 
+  "transactions.merge": (w, { keepId, removeId }) => {
+    if (keepId === removeId) throw new Error("Pick two different entries");
+    const keep = w.must("transactions", keepId, "That entry is gone");
+    const gone = w.must("transactions", removeId, "That entry is gone");
+    const photoIds = [...new Set([...keep.photoIds, ...gone.photoIds])];
+    if (photoIds.length > 3) throw new Error("Together they have more than 3 photos. Remove some first.");
+    const bookmarkIds = w.snap.bookmarks.filter((b) => b.transactionId === removeId).map((b) => b._id);
+    const draftIds = w.snap.drafts.filter((d) => d.transactionId === removeId || d.matchedTransactionId === removeId).map((d) => d._id);
+    const merged: MergeRecord = { at: w.at, kept: snapshotOf(keep), removed: snapshotOf(gone), bookmarkIds, draftIds };
+    w.patch("transactions", keepId, {
+      tags: [...new Set([...keep.tags, ...gone.tags])], photoIds,
+      note: keep.note || gone.note, description: keep.description || gone.description,
+      // a mail on either one stays: the merged entry is that mail's payment
+      source: keep.source ?? gone.source, split: keep.split ?? gone.split, merged,
+    });
+    for (const id of bookmarkIds) w.patch("bookmarks", id, { transactionId: keepId });
+    for (const id of draftIds) {
+      const d = w.must("drafts", id);
+      w.patch("drafts", id, {
+        ...(d.transactionId === removeId ? { transactionId: keepId } : {}),
+        ...(d.matchedTransactionId === removeId ? { matchedTransactionId: keepId } : {}),
+      });
+    }
+    w.delete("transactions", removeId);
+  },
+
+  "transactions.unmerge": (w, { id }) => {
+    const t = w.must("transactions", id, "That entry is gone");
+    const m = t.merged as MergeRecord | undefined;
+    if (!m) throw new Error("That entry was not merged");
+    // a payment method, category or schedule gone since (merged away, tidied up) falls back to what the entry has now
+    const back = (s: EntrySnapshot): EntrySnapshot => {
+      const has = (table: "accounts" | "categories" | "repeats", ref: string | undefined) => !!ref && !!w.get(table, ref);
+      const r: EntrySnapshot = { ...s };
+      if (!has("accounts", r.accountId)) r.accountId = t.accountId;
+      if (r.type === "transfer" && !has("accounts", r.toAccountId)) r.toAccountId = t.toAccountId;
+      if (r.type === "transfer" && (!r.toAccountId || r.toAccountId === r.accountId)) throw new Error("Can't undo: a payment method it used is gone");
+      if (r.type !== "transfer" && !has("categories", r.categoryId)) {
+        if (t.type !== r.type || !t.categoryId) throw new Error("Can't undo: a category it used is gone");
+        r.categoryId = t.categoryId;
+        r.subcategoryId = t.subcategoryId;
+      }
+      if (r.subcategoryId && !has("categories", r.subcategoryId)) r.subcategoryId = undefined;
+      if (r.repeatId && !has("repeats", r.repeatId)) r.repeatId = undefined;
+      return r;
+    };
+    const kept = back(m.kept);
+    // every field the entry has now that it did not have before goes, as well as each one that changed
+    const cleared = Object.fromEntries(Object.keys(t).filter((k) => !k.startsWith("_") && k !== "userId" && k !== "rev" && !(k in kept)).map((k) => [k, undefined]));
+    w.patch("transactions", id, { ...cleared, ...kept } as Partial<Doc<"transactions">>);
+    if (m.removed) {
+      const again = w.insert("transactions", back(m.removed) as never);
+      for (const b of m.bookmarkIds ?? []) if (w.get("bookmarks", b)?.transactionId === id) w.patch("bookmarks", b, { transactionId: again });
+      for (const d of m.draftIds ?? []) {
+        const draft = w.get("drafts", d);
+        if (!draft) continue;
+        w.patch("drafts", d, {
+          ...(draft.transactionId === id ? { transactionId: again } : {}),
+          ...(draft.matchedTransactionId === id ? { matchedTransactionId: again } : {}),
+        });
+      }
+    }
+    if (m.draftId) {
+      const draft = w.get("drafts", m.draftId);
+      // it was this entry: never offer it as "already added?" for the same one again
+      if (draft && draft.status === "accepted" && draft.transactionId === id) w.patch("drafts", draft._id, { status: "open", transactionId: undefined, resolvedAt: undefined, keptNew: true });
+    }
+  },
+
   "transactions.setSplit": (w, { ids, split }) => {
     if (split && (split.app !== "unsplit" || !split.expenseId.trim())) throw new Error("Bad split link");
     const link = split ? { app: split.app, expenseId: split.expenseId.trim() } : undefined;
@@ -1794,8 +2066,8 @@ const handlers: Handlers = {
 
   "transactions.copy": (w, { id, useToday, today }) => {
     const t = w.must("transactions", id);
-    const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, split, source, ...rest } = t;
-    void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal; void split; void source;
+    const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, split, source, merged, ...rest } = t;
+    void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal; void split; void source; void merged;
     return w.insert("transactions", { ...rest, date: useToday ? (today && isDate(today) ? today : todayISO()) : t.date });
   },
 
@@ -1838,13 +2110,15 @@ const handlers: Handlers = {
       w.patch("drafts", id, { status: "open", transactionId: undefined, resolvedAt: undefined });
     }
   },
-  "drafts.link": (w, { id, transactionId }) => {
+  "drafts.link": (w, { id, transactionId, useMail }) => {
     const draft = w.must("drafts", id, "That draft is gone");
     if (draft.status !== "open") throw new Error("That draft was already handled");
     const tx = w.must("transactions", transactionId, "That entry is gone");
     // one entry is one payment: a second mail that looks like it is another payment, not this one again
     if (tx.source && tx.source.messageId !== draft.messageId) throw new Error("That entry already came from another mail");
-    w.patch("transactions", transactionId, { source: { app: "gmail", messageId: draft.messageId } });
+    const fields = useMail ? validateTx(w, withMail(tx, draft.proposal), tx) : {};
+    const merged: MergeRecord = { at: w.at, kept: snapshotOf(tx), draftId: id };
+    w.patch("transactions", transactionId, { ...fields, source: { app: "gmail", messageId: draft.messageId }, merged });
     w.patch("drafts", id, { status: "accepted", transactionId, matchedTransactionId: undefined, resolvedAt: w.at });
   },
 
@@ -1924,6 +2198,64 @@ const handlers: Handlers = {
     const from = fromTransactionId ? w.get("transactions", fromTransactionId) : undefined;
     if (from && !from.repeatId && !from.installmentIndex) w.patch("transactions", from._id, { repeatId });
     return repeatId;
+  },
+
+  "sips.create": (w, { name, transactionIds, draftIds, rhythm }) => {
+    const entries = sipPayments(w, transactionIds);
+    const drafts = sipDraftsOf(w, draftIds);
+    if (!entries.length && !drafts.length) throw new Error("Only payments read from Gmail can be SIPs");
+    const notes = [...entries.map((t) => t.note), ...drafts.map((d) => d.proposal.note)];
+    const latestEntry = entries[entries.length - 1];
+    const latestDraft = drafts[drafts.length - 1];
+    const id = `sip_${w.opId}`;
+    const sip: Sip = clean({
+      id,
+      name: sipName(name || latestEntry?.note || latestDraft.proposal.note),
+      keys: [...new Set(notes.map(sipKey).filter(Boolean))],
+      amount: (latestEntry ?? latestDraft.proposal).amount,
+      // the bank account the debits come from: the latest saved one's, else what the latest mail named
+      accountId: [...entries].reverse().find((t) => !w.get("accounts", t.accountId)?.deletedAt)?.accountId ?? [...drafts].reverse().find((d) => d.proposal.accountId)?.proposal.accountId,
+      rhythm,
+    });
+    w.setSips([...sipsOf(w.snap), sip]);
+    if (!fillSip(w, sip, entries, drafts)) throw new Error("None of those payments could be saved");
+    return id;
+  },
+  "sips.mark": (w, { id, transactionIds, draftIds, resume }) => {
+    const sip = mustSip(w, id);
+    const entries = sipPayments(w, transactionIds);
+    const drafts = sipDraftsOf(w, draftIds);
+    if (!entries.length && !drafts.length) throw new Error("Only payments read from Gmail can be SIPs");
+    const keys = [...new Set([...sip.keys, ...entries.map((t) => sipKey(t.note)), ...drafts.map((d) => sipKey(d.proposal.note))].filter(Boolean))];
+    // patchSip drops what is undefined after merging, so a resume clears stoppedAt
+    w.patchSip(id, { keys, stoppedAt: resume ? undefined : sip.stoppedAt, accountId: sip.accountId ?? entries[entries.length - 1]?.accountId });
+    fillSip(w, mustSip(w, id), entries, drafts);
+  },
+  "sips.saveDrafts": (w, { draftIds }) => {
+    const sips = sipsOf(w.snap);
+    if (!sips.length) return 0;
+    let saved = 0;
+    for (const d of sipDraftsOf(w, draftIds)) {
+      if (d.status !== "open") continue;
+      const sip = sipFor(sipsOf(w.snap), d.proposal);
+      if (sip && fillSip(w, sip, [], [d])) saved++;
+    }
+    return saved;
+  },
+  "sips.unmark": (w, { ids }) => {
+    for (const id of ids) if (w.get("transactions", id)?.sipId) w.patch("transactions", id, { sipId: undefined });
+  },
+  "sips.update": (w, { id, name, stopped }) => {
+    const sip = mustSip(w, id);
+    const patch: Partial<Sip> = {};
+    if (name !== undefined) patch.name = sipName(name);
+    if (stopped !== undefined) patch.stoppedAt = stopped ? sip.stoppedAt ?? w.at : undefined;
+    w.patchSip(id, patch);
+  },
+  "sips.remove": (w, { id }) => {
+    mustSip(w, id, "That SIP was already deleted");
+    for (const t of w.snap.transactions) if (t.sipId === id) w.patch("transactions", t._id, { sipId: undefined });
+    w.setSips(sipsOf(w.snap).filter((x) => x.id !== id));
   },
 
   "bookmarks.create": (w, { template, transactionId }) => {
@@ -2076,7 +2408,10 @@ const handlers: Handlers = {
       for (const t of data.transactions ?? []) {
         const s = mapTemplate(strip(t));
         if (!s.accountId) continue;
-        txIds.set(t._id as string, w.insert("transactions", { ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [], repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined } as never));
+        txIds.set(t._id as string, w.insert("transactions", {
+          ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [],
+          repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined,
+        } as never));
       }
     }
     for (const b of data.bookmarks ?? []) {
@@ -2099,6 +2434,10 @@ const handlers: Handlers = {
       for (const k of PASSCODE_FIELDS) delete s[k];
       // Account ids were reissued above; point the default at the restored copy, or drop it.
       s.defaultAccountId = s.defaultAccountId ? accountIds.get(s.defaultAccountId as string) : undefined;
+      // SIPs are the backup's (entries keep their sipId as it was), with their payment method moved to the restored copy
+      s.sips = Array.isArray(s.sips) && s.sips.length
+        ? (s.sips as Sip[]).map((x) => clean({ ...x, accountId: x.accountId ? accountIds.get(x.accountId) : undefined }))
+        : undefined;
       if (existing) w.patch("settings", existing._id, s as never);
       else w.insert("settings", s as never);
     }
@@ -2109,6 +2448,7 @@ const handlers: Handlers = {
     if (confirm !== "DELETE") throw new Error("Not confirmed");
     for (const t of ["notes", "repeats", "bookmarks", "budgets", "categoryCleanups"] as const) w.clear(t);
     if (entries) w.clear("transactions");
+    if (w.settings()?.sips) w.setSips([]);
   },
 
   "files.upload": () => {

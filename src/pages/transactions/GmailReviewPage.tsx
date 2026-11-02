@@ -23,10 +23,12 @@ import { offerUndo } from "@/lib/undo";
 import { useShortcuts } from "@/lib/shortcuts";
 import { dateLabel } from "@/lib/format";
 import { budgetImpact, draftMatches, draftsOpen } from "../../../shared/views";
+import { sipFor, sipsOf } from "../../../shared/sips";
 import { useBudgetLabel } from "@/components/tx/entryBudgets";
 import { useOverText } from "@/lib/budgetText";
 import { importable, type Importable } from "../../../shared/gmail/importable";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { Badge } from "@/components/ui/badge";
 import { useBottomBar } from "@/components/shell/SplitLayout";
 import { EmptyState, Section } from "@/components/shell/misc";
 import { EntryMoney } from "@/components/shell/Money";
@@ -278,6 +280,8 @@ function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, on
   const { accountName, categoryLabel, fmt } = useApp();
   const { draft: d, ready, matched } = item;
   const p = d.proposal;
+  // a running SIP takes it once it is saved: it goes to the SIPs page, not the daily list
+  const sip = sipFor(sipsOf(useView()), p);
   const f = ready?.fields;
   const isTransfer = p.type === "transfer";
   const label = isTransfer ? "Transfer" : f?.categoryId ? categoryLabel(f) : "No category";
@@ -295,7 +299,7 @@ function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, on
           <div className={cn("line-clamp-2", guess("category"))}>{label}</div>
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate">{p.note || label}</div>
+          <div className="flex items-center gap-1.5"><span className="truncate">{p.note || label}</span>{sip ? <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px]" title={`Saves to ${sip.name}`}>SIP</Badge> : null}</div>
           <div className="truncate text-xs text-muted-foreground">
             {domain ? <span title={d.from}>{domain} · </span> : null}
             {method ? <span className={cn(guess("method"))}>{method}</span> : <span className="text-amber-600 dark:text-amber-400">Open it to pick both methods</span>}

@@ -15,6 +15,8 @@ export type TxLike = {
   subcategoryId?: string;
   amount: number;
   feeAmount?: number;
+  /** Filed under a SIP: money moved into an investment, not spent. */
+  sipId?: string;
 };
 
 export type AccountLike = {
@@ -84,7 +86,9 @@ export function kindsOf(tx: TxLike, ctx: Ctx): Kinds {
   if (tx.type === "income") {
     k.income = tx.amount;
   } else if (tx.type === "expense") {
-    if (lump && isCreditCard(ctx, tx.accountId)) {
+    if (tx.sipId) {
+      k.transfer = tx.amount; // an investment: it leaves the account but is not spending
+    } else if (lump && isCreditCard(ctx, tx.accountId)) {
       k.transfer = tx.amount; // counted when the card is paid
     } else {
       k.expense = tx.amount;
