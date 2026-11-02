@@ -46,21 +46,28 @@ export function fromGmail(t: { source?: { app: string } }): boolean {
 /** Once a SIP is set, a payment may differ from its usual amount by this much (a yearly step-up) and still be filed under it. */
 export const SIP_AMOUNT_TOLERANCE = 0.2;
 
-type Payment = { type: string; note: string; amount: number };
+type Payment = { type: string; note: string; amount: number; date?: string };
 
-/** The SIP a payment belongs to: one of its keys, about its amount; the closest amount when several fit. Cancelled SIPs take nothing, unless `withCancelled`. */
+/**
+ * The SIP a payment belongs to: one of its keys, about its amount, and, for a SIP with a day of the
+ * month, on that day (a few days late, or a day or two early). Several SIPs of one name and amount
+ * (the 7th's and the 14th's) are told apart by the day; otherwise the closest amount wins. Cancelled
+ * SIPs take nothing, unless `withCancelled`.
+ */
 export function sipFor(sips: Sip[], t: Payment, withCancelled = false): Sip | undefined {
   if (t.type !== "expense" || t.amount <= 0) return undefined;
   const key = sipKey(t.note);
   if (!key) return undefined;
-  let best: Sip | undefined;
+  let best: { sip: Sip; off: number; late: number } | undefined;
   for (const s of sips) {
     if ((s.stoppedAt && !withCancelled) || !s.keys.includes(key)) continue;
     const off = Math.abs(t.amount - s.amount);
     if (off > Math.abs(s.amount) * SIP_AMOUNT_TOLERANCE) continue;
-    if (!best || off < Math.abs(t.amount - best.amount)) best = s;
+    const late = s.day !== undefined && t.date ? lateBy(s.day, t.date) : 0;
+    if (late === null) continue;
+    if (!best || off < best.off || (off === best.off && Math.abs(late) < best.late)) best = { sip: s, off, late: Math.abs(late) };
   }
-  return best;
+  return best?.sip;
 }
 
 // ---------- rhythm ----------
@@ -74,82 +81,176 @@ const DRIFT: Record<Rhythm, number> = { weekly: 2, fortnightly: 2, twiceMonthly:
 const MAX_SKIP: Record<Rhythm, number> = { weekly: 4, fortnightly: 2, twiceMonthly: 1, monthly: 3, quarterly: 2 };
 /** Two Gmail records of one name and amount this close are one payment (the bank's alert and the fund's mail). */
 export const SAME_PAYMENT_DAYS = 3;
-/** On a tie, the rhythm read first. */
-const ORDER: Rhythm[] = ["monthly", "twiceMonthly", "fortnightly", "weekly", "quarterly"];
+/**
+ * On a tie, the rhythm read first. Twice a month is never read: two days a month are two SIPs
+ * (`schedulesOf`). It stays a Rhythm for SIPs saved before.
+ */
+const ORDER: Rhythm[] = ["monthly", "fortnightly", "weekly", "quarterly"];
+/** How early a bank may take a debit due on a day of the month. */
+const EARLY = 2;
 
-/** How far apart two dates' days of the month are, across a month's end (the 30th and the 2nd are 3 apart). */
-function dayOff(a: string, b: string): number {
-  const d = Math.abs(parts(a).d - parts(b).d);
-  return Math.min(d, 31 - d);
+/**
+ * How many days after its day of the month a debit went out (negative: early), or null when it is
+ * not that day's. The 28th's debit on Monday 2 March is 2 days late; the 31st is due on the 30th in a
+ * 30-day month.
+ */
+export function lateBy(day: number, date: string): number | null {
+  const p = parts(date);
+  let best: number | null = null;
+  for (const k of [-1, 0, 1]) {
+    const m = parts(addMonths(make(p.y, p.m, 1), k));
+    const off = diffDays(make(m.y, m.m, clampDay(m.y, m.m, day)), date);
+    if (off >= -EARLY && off <= DRIFT.monthly && (best === null || Math.abs(off) < Math.abs(best))) best = off;
+  }
+  return best;
 }
 
-/** How many instalments apart b is from a on this rhythm (1 = the next one), or 0 when it isn't. */
-function step(r: Rhythm, a: string, b: string): number {
-  const gap = diffDays(a, b);
-  for (let k = 1; k <= MAX_SKIP[r]; k++) {
-    const due = r === "weekly" ? addDays(a, 7 * k) : r === "fortnightly" ? addDays(a, 14 * k) : r === "quarterly" ? addMonths(a, 3 * k) : addMonths(a, k);
-    if (r === "twiceMonthly") continue;
-    if (Math.abs(diffDays(due, b)) <= DRIFT[r]) return k;
+/**
+ * Where a date sits on a weekly or two-weekly schedule started at `anchor`: the instalment number and
+ * how many days off it the debit went out, or null when it is off the schedule.
+ */
+function onWeekday(r: "weekly" | "fortnightly", anchor: string, date: string): { n: number; off: number } | null {
+  const every = r === "weekly" ? 7 : 14;
+  const gap = diffDays(anchor, date);
+  const n = Math.round(gap / every);
+  const off = Math.abs(gap - n * every);
+  return off <= DRIFT[r] ? { n, off } : null;
+}
+
+/**
+ * How many instalments apart b is from a on rhythm r (1 = the next one), or 0 when it isn't. Weekly
+ * and every two weeks count from `anchor`, the run's first payment, so they keep its weekday: a
+ * debit two days late doesn't move the next one's date, and the 28th's debit followed by the 7th's
+ * (nine days) is not a late week.
+ */
+function step(r: Rhythm, a: string, b: string, anchor: string): number {
+  if (r === "weekly" || r === "fortnightly") {
+    const from = onWeekday(r, anchor, a);
+    const to = onWeekday(r, anchor, b);
+    const k = from && to ? to.n - from.n : 0;
+    return k >= 1 && k <= MAX_SKIP[r] ? k : 0;
   }
-  void gap;
+  for (let k = 1; k <= MAX_SKIP[r]; k++) {
+    if (Math.abs(diffDays(addMonths(a, r === "quarterly" ? 3 * k : k), b)) <= DRIFT[r]) return k;
+  }
   return 0;
 }
 
-/** The longest stretch of dates (oldest first) on rhythm r with at least one back-to-back instalment, as [from, to] indexes. */
-function longestRun(r: Rhythm, dates: string[]): { from: number; to: number } | null {
-  let best: { from: number; to: number } | null = null;
+/** Every stretch of dates (oldest first) on rhythm r with at least one back-to-back instalment, as [from, to] indexes. */
+function runsOf(r: Rhythm, dates: string[]): { from: number; to: number }[] {
+  const runs: { from: number; to: number }[] = [];
   let start = 0;
   let next = false;
   const close = (end: number) => {
-    if (end > start && next && (!best || end - start > best.to - best.from)) best = { from: start, to: end };
+    if (end > start && next) runs.push({ from: start, to: end });
   };
   for (let i = 1; i < dates.length; i++) {
-    let ok: boolean;
-    let back2back: boolean;
-    if (r === "twiceMonthly") {
-      // two days a month (the 5th and the 20th): each payment is about a month after the one two before
-      // it, on about the same day of the month as the first of its lane, and 5–26 days after the last.
-      // Every-two-weeks debits drift two days a month, so a few months on they leave their day.
-      const gap = diffDays(dates[i - 1], dates[i]);
-      const first = start + ((i - start) % 2);
-      const lane = i - 2 >= start
-        ? Math.abs(diffDays(addMonths(dates[i - 2], 1), dates[i])) <= DRIFT.twiceMonthly && dayOff(dates[first], dates[i]) <= DRIFT.twiceMonthly
-        : true;
-      ok = gap >= 5 && gap <= 26 && lane;
-      back2back = ok && i - 2 >= start;
-    } else {
-      const k = step(r, dates[i - 1], dates[i]);
-      ok = k > 0;
-      back2back = k === 1;
-    }
-    if (!ok) {
+    const k = step(r, dates[i - 1], dates[i], dates[start]);
+    if (!k) {
       close(i - 1);
       start = i;
       next = false;
       continue;
     }
-    if (back2back) next = true;
+    if (k === 1) next = true;
   }
   close(dates.length - 1);
+  return runs;
+}
+
+/** The rhythm, of these, whose longest stretch is longest, and how long it is. */
+function longestOf(rhythms: Rhythm[], dates: string[]): { r: Rhythm; len: number } | null {
+  let best: { r: Rhythm; len: number } | null = null;
+  for (const r of rhythms) {
+    for (const run of runsOf(r, dates)) {
+      const len = run.to - run.from + 1;
+      if (!best || len > best.len) best = { r, len };
+    }
+  }
   return best;
 }
 
 /**
  * The rhythm a run of payment dates (oldest first) keeps: the one with the longest regular stretch,
- * which has to hold two payments one instalment apart (three for twice a month, which two dates
- * can't tell from every two weeks). A pause between stretches doesn't matter: it is the stretch that
- * makes it a SIP. Null when nothing repeats.
+ * which has to hold two payments one instalment apart. A pause between stretches doesn't matter: it
+ * is the stretch that makes it a SIP. Null when nothing repeats. Payments of one name and amount may
+ * be several SIPs: `schedulesOf` says which.
  */
 export function rhythmOf(dates: string[]): Rhythm | null {
-  let best: { r: Rhythm; len: number } | null = null;
-  for (const r of ORDER) {
-    const run = longestRun(r, dates);
-    if (!run) continue;
-    const len = run.to - run.from + 1;
-    if (r === "twiceMonthly" && len < 3) continue;
-    if (!best || len > best.len) best = { r, len };
+  return longestOf(ORDER, dates)?.r ?? null;
+}
+
+/** One SIP's share of the payments of one name and amount: its rhythm, its day of the month (monthly and quarterly), and its dates, oldest first. */
+export type Schedule = { rhythm: Rhythm; day?: number; dates: string[] };
+
+/**
+ * The days of the month dates (oldest first) keep to, each with its dates and how many days late
+ * they went out in all. The most common day comes first, and each date goes to the day it is least
+ * off: 7, 14, 21 and 28, with their next-working-day debits (the 8th, the 30th), are four days.
+ */
+function daysOf(dates: string[]): { day: number; dates: string[]; late: number }[] {
+  const count = new Map<number, number>();
+  for (const d of dates) count.set(parts(d).d, (count.get(parts(d).d) ?? 0) + 1);
+  const byCount = [...dates].sort((a, b) => count.get(parts(b).d)! - count.get(parts(a).d)! || parts(a).d - parts(b).d);
+  const days: number[] = [];
+  for (const d of byCount) if (!days.some((day) => lateBy(day, d) !== null)) days.push(parts(d).d);
+  const lanes = new Map(days.map((day) => [day, { day, dates: [] as string[], late: 0 }]));
+  for (const d of dates) {
+    let day = days[0];
+    let off = Infinity;
+    for (const x of days) {
+      const l = lateBy(x, d);
+      if (l !== null && Math.abs(l) < off) [day, off] = [x, Math.abs(l)];
+    }
+    const lane = lanes.get(day)!;
+    lane.dates.push(d);
+    lane.late += off;
   }
-  return best?.r ?? null;
+  return [...lanes.values()];
+}
+
+/**
+ * The SIPs that payments of one name and one amount (dates oldest first) are. Each day of the month
+ * they keep, monthly or quarterly, is a SIP of its own: debits on the 7th, 14th, 21st and 28th are
+ * four SIPs, on the 5th and the 20th two. They are one SIP, every week or every two weeks, only when
+ * that reading (on one weekday) explains more of the payments, or as many with the debits nearer
+ * their dates. A day the payments stopped keeping and a later one they moved to (the SIP's date was
+ * changed) are one SIP, on the later day. Payments no reading explains are left out. Empty when
+ * nothing repeats.
+ */
+export function schedulesOf(dates: string[]): Schedule[] {
+  const lanes: (Schedule & { late: number })[] = [];
+  for (const lane of daysOf(dates)) {
+    const best = longestOf(["monthly", "quarterly"], lane.dates);
+    if (best) lanes.push({ rhythm: best.r, day: lane.day, dates: lane.dates, late: lane.late });
+  }
+  let weekly: { rhythm: Rhythm; covered: number; off: number } | null = null;
+  for (const r of ["weekly", "fortnightly"] as const) {
+    let covered = 0;
+    let off = 0;
+    for (const run of runsOf(r, dates)) {
+      covered += run.to - run.from + 1;
+      for (let i = run.from; i <= run.to; i++) off += onWeekday(r, dates[run.from], dates[i])!.off;
+    }
+    if (covered && (!weekly || covered > weekly.covered)) weekly = { rhythm: r, covered, off };
+  }
+  const covered = lanes.reduce((s, l) => s + l.dates.length, 0);
+  const late = lanes.reduce((s, l) => s + l.late, 0);
+  if (weekly && (weekly.covered > covered || (weekly.covered === covered && weekly.off / weekly.covered < late / covered))) {
+    return [{ rhythm: weekly.rhythm, dates }];
+  }
+  // a day that ended before another began is one SIP whose date was changed: it goes on, on the later day
+  const out: Schedule[] = [];
+  for (const lane of lanes.sort((a, b) => a.dates[0].localeCompare(b.dates[0]))) {
+    const before = out
+      .filter((s) => s.rhythm === lane.rhythm && s.dates[s.dates.length - 1] < lane.dates[0])
+      .sort((a, b) => b.dates[b.dates.length - 1].localeCompare(a.dates[a.dates.length - 1]))[0];
+    if (before) {
+      before.dates.push(...lane.dates);
+      before.day = lane.day;
+    } else out.push({ rhythm: lane.rhythm, day: lane.day, dates: [...lane.dates] });
+  }
+  return out;
 }
 
 /**
@@ -272,13 +373,15 @@ export function onePerPayment(list: GmailPayment[]): GmailPayment[] {
 export type SipSuggestion = {
   /** Stable across renders: the name, the amount and the first payment's date. */
   id: string;
-  /** What "Not a SIP" remembers (settings.dismissedSips). */
+  /** What "Not a SIP" remembers (settings.dismissedSips): the name, and the day when the name's payments are several SIPs ("…@7"). */
   key: string;
   /** What the SIP will be called: the mail's name, or who sent the mail when the name is a bank's generic one. */
   name: string;
   amount: number;
   /** Unknown only when the payments belong to a SIP already set (one is enough then). */
   rhythm?: Rhythm;
+  /** The day of the month it is due (monthly and quarterly). */
+  day?: number;
   /** The mail, the name or the category reads like an investment: listed under "Looks like a SIP"; the rest are "Maybe". */
   likely: boolean;
   /** One line on why. */
@@ -318,12 +421,21 @@ export function rhythmText(rhythm: Rhythm, dates: string[]): string {
   return RHYTHM_LABEL[rhythm];
 }
 
+/** "Mirae Asset · 7th": a SIP's name with its day, when payments of its name and amount are several SIPs. */
+const withDay = (name: string, day?: number) => (day ? `${name} · ${ordinal(day)}` : name);
+
+/** Payments of one name and one amount make several SIPs (their days), or a SIP of that name keeps a day: names then say the day. */
+function splitByDay(sips: Sip[], key: string, schedules: Schedule[]): boolean {
+  return schedules.length > 1 || sips.some((s) => s.day !== undefined && s.keys.includes(key));
+}
+
 /**
  * Payments Gmail read that look like a SIP: one name and the exact same amount, two or more times
- * on a rhythm (weekly to quarterly, each debit up to a few days off its date). The whole history of
- * that name and amount goes with it, pauses and all. Payments a running SIP takes are left out
- * (they are saved into it); ones of a cancelled SIP come back as "resume it", one payment being
- * enough. Names the user said are not SIPs are left out. Likely ones first, then by how many payments.
+ * on a rhythm (weekly to quarterly, each debit up to a few days off its date). Payments that keep
+ * several days of the month are a suggestion per day (`schedulesOf`), named with it. Each takes its
+ * whole history, pauses and all. Payments a running SIP takes are left out (they are saved into
+ * it); ones of a cancelled SIP come back as "resume it", one payment being enough. Names the user
+ * said are not SIPs are left out. Likely ones first, then by how many payments.
  */
 export function sipSuggestions(snap: Snapshot): SipSuggestion[] {
   const dismissed = new Set(snap.settings[0]?.dismissedSips ?? []);
@@ -331,7 +443,7 @@ export function sipSuggestions(snap: Snapshot): SipSuggestion[] {
   const groups = new Map<string, GmailPayment[]>();
   for (const p of gmailPayments(snap)) {
     if (dismissed.has(p.key)) continue;
-    if (sipFor(sips, { type: "expense", note: p.note, amount: p.amount })) continue;
+    if (sipFor(sips, { type: "expense", note: p.note, amount: p.amount, date: p.date })) continue;
     const id = `${p.key}|${p.amount}`;
     const list = groups.get(id);
     if (list) list.push(p);
@@ -340,40 +452,54 @@ export function sipSuggestions(snap: Snapshot): SipSuggestion[] {
   const out: SipSuggestion[] = [];
   for (const [id, raw] of groups) {
     const group = onePerPayment(raw);
-    const dates = group.map((p) => p.date);
-    const cancelled = sipFor(sips, { type: "expense", note: group[0].note, amount: group[0].amount }, true);
-    const rhythm = rhythmOf(dates) ?? undefined;
-    if (!rhythm && !cancelled) continue;
-    const signal = readSignal(group);
-    const payments = [...group].reverse();
-    const n = payments.length;
-    const history = [`${n} payment${n === 1 ? "" : "s"}`, rhythm ? rhythmText(rhythm, dates) : "", n > 1 ? `since ${monthYear(dates[0])}` : ""].filter(Boolean).join(", ");
-    const drafts = payments.flatMap((p) => (p.draft ? [p.draft] : []));
-    out.push({
-      id: `${id}|${dates[0]}`,
-      key: group[0].key,
-      name: cancelled?.name ?? signal.name ?? payments[0].note,
-      amount: group[0].amount,
-      rhythm,
-      likely: signal.likely || !!cancelled,
-      why: cancelled ? `${cancelled.name} is marked cancelled, but payments came again · ${history}` : `${signal.why} · ${history}`,
-      payments,
-      transactionIds: payments.flatMap((p) => (p.entry ? [p.entry._id] : [])),
-      draftIds: drafts.map((d) => d._id),
-      draftDates: drafts.map((d) => d.proposal.date),
-      sip: cancelled,
-    });
+    const schedules = schedulesOf(group.map((p) => p.date));
+    const split = splitByDay(sips, group[0].key, schedules);
+    // nothing repeats: only a cancelled SIP's payments are offered (to resume it)
+    const shares = schedules.length ? schedules.map((sc) => ({ sc, list: group.filter((p) => sc.dates.includes(p.date)) })) : [{ sc: undefined, list: group }];
+    for (const { sc, list } of shares) {
+      const latest = list[list.length - 1];
+      const cancelled = sipFor(sips, { type: "expense", note: latest.note, amount: latest.amount, date: latest.date }, true);
+      if (!sc && !cancelled) continue;
+      const key = split && sc?.day ? `${group[0].key}@${sc.day}` : group[0].key;
+      if (dismissed.has(key)) continue;
+      const dates = list.map((p) => p.date);
+      const signal = readSignal(list);
+      const payments = [...list].reverse();
+      const n = payments.length;
+      const history = [`${n} payment${n === 1 ? "" : "s"}`, sc ? rhythmText(sc.rhythm, dates) : "", n > 1 ? `since ${monthYear(dates[0])}` : ""].filter(Boolean).join(", ");
+      const drafts = payments.flatMap((p) => (p.draft ? [p.draft] : []));
+      out.push({
+        id: `${id}|${dates[0]}`,
+        key,
+        name: cancelled?.name ?? withDay(signal.name ?? payments[0].note, split ? sc?.day : undefined),
+        amount: group[0].amount,
+        rhythm: sc?.rhythm,
+        day: sc?.day,
+        likely: signal.likely || !!cancelled,
+        why: cancelled ? `${cancelled.name} is marked cancelled, but payments came again · ${history}` : `${signal.why} · ${history}`,
+        payments,
+        transactionIds: payments.flatMap((p) => (p.entry ? [p.entry._id] : [])),
+        draftIds: drafts.map((d) => d._id),
+        draftDates: drafts.map((d) => d.proposal.date),
+        sip: cancelled,
+      });
+    }
   }
-  return out.sort((a, b) => Number(b.likely) - Number(a.likely) || b.payments.length - a.payments.length || b.amount - a.amount);
+  return out.sort((a, b) => Number(b.likely) - Number(a.likely) || b.payments.length - a.payments.length || b.amount - a.amount || (a.day ?? 0) - (b.day ?? 0));
 }
 
 /**
  * "Mark as SIP" on payments the user picked: every payment Gmail read with the same name and the
  * exact same amount as one of them, in every month there is data for, one per payment, newest
- * first. Ones already in a SIP are not here (they are in it).
+ * first. When those payments are several SIPs (the 7th's and the 14th's), only the ones of the SIP a
+ * picked payment is part of. Ones already in a SIP are not here (they are in it).
  */
-export function similarPayments(snap: Snapshot, picked: { note: string; amount: number }[]): GmailPayment[] {
-  const wanted = new Set(picked.map((p) => `${sipKey(p.note)}|${p.amount}`));
+export function similarPayments(snap: Snapshot, picked: { note: string; amount: number; date?: string }[]): GmailPayment[] {
+  const wanted = new Map<string, string[]>();
+  for (const p of picked) {
+    const id = `${sipKey(p.note)}|${p.amount}`;
+    wanted.set(id, [...(wanted.get(id) ?? []), ...(p.date ? [p.date] : [])]);
+  }
   const groups = new Map<string, GmailPayment[]>();
   for (const p of gmailPayments(snap)) {
     const id = `${p.key}|${p.amount}`;
@@ -383,7 +509,29 @@ export function similarPayments(snap: Snapshot, picked: { note: string; amount: 
     if (list) list.push(p);
     else groups.set(id, [p]);
   }
-  return [...groups.values()].flatMap(onePerPayment).sort((a, b) => b.date.localeCompare(a.date));
+  return [...groups].flatMap(([id, raw]) => {
+    const list = onePerPayment(raw);
+    const schedules = schedulesOf(list.map((p) => p.date));
+    const near = (a: string, b: string) => Math.abs(diffDays(a, b)) <= SAME_PAYMENT_DAYS;
+    const mine = schedules.length > 1 ? schedules.filter((sc) => wanted.get(id)!.some((d) => sc.dates.some((x) => near(x, d)))) : [];
+    return mine.length ? list.filter((p) => mine.some((sc) => sc.dates.includes(p.date))) : list;
+  }).sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/**
+ * What a SIP made of these payments (newest first) is by default: its rhythm and day when they keep
+ * one schedule, and its name, with the day ("· 7th") when payments of that name and amount are
+ * several SIPs.
+ */
+export function newSipOf(snap: Snapshot, payments: GmailPayment[]): { name: string; rhythm?: Rhythm; day?: number } {
+  if (!payments.length) return { name: "" };
+  const dates = payments.map((p) => p.date).reverse();
+  const own = schedulesOf(dates);
+  const one = own.length === 1 ? own[0] : undefined;
+  const p = payments[0];
+  const all = onePerPayment(gmailPayments(snap).filter((x) => x.key === p.key && x.amount === p.amount));
+  const split = one?.day !== undefined && splitByDay(sipsOf(snap), p.key, schedulesOf(all.map((x) => x.date)));
+  return { name: withDay(readSignal(payments).name ?? p.note, split ? one?.day : undefined), rhythm: one?.rhythm ?? rhythmOf(dates) ?? undefined, day: one?.day };
 }
 
 /** The ids `sips.create` and `sips.mark` take for these payments. */

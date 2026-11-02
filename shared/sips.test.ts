@@ -6,10 +6,11 @@ import { buildCtx, computeBalances, sumKinds } from "./ledger";
 import { backupExport, ledgerOf, statsByCategory } from "./views";
 import { monthRecap, recapDrill, recapText } from "./recap";
 import {
-  gmailPayments, isSip, onePerPayment, perMonth, rhythmOf, similarPayments, sipArgs, sipDrafts, sipFor, sipKey, sipsInRange, sipsList, sipsOf, sipSuggestions, usualDay,
+  gmailPayments, isSip, lateBy, newSipOf, onePerPayment, ordinal, perMonth, rhythmOf, schedulesOf, similarPayments, sipArgs, sipDrafts, sipFor, sipKey, sipsInRange, sipsList, sipsOf,
+  sipSuggestions, usualDay,
 } from "./sips";
 import { recurringSuggestions } from "./upcoming";
-import { addDays } from "./dates";
+import { addDays, make, weekday } from "./dates";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -52,14 +53,71 @@ const GROWW = { from: "Groww <noreply@groww.in>", subject: "SIP instalment proce
 
 // ---------- rhythm ----------
 
-test("rhythmOf: monthly with debits a few days off, weekly, fortnightly, twice a month, quarterly", () => {
+test("rhythmOf: monthly with debits a few days off, weekly, fortnightly, quarterly", () => {
   expect(rhythmOf(["2026-09-08", "2026-10-10"])).toBe("monthly");
   expect(rhythmOf(["2026-06-05", "2026-07-06", "2026-08-05", "2026-09-07", "2026-10-06"])).toBe("monthly");
   expect(rhythmOf(["2026-09-01", "2026-09-08", "2026-09-16", "2026-09-22"])).toBe("weekly");
-  // every 14 days drifts off any day of the month: not "twice a month"
   expect(rhythmOf(Array.from({ length: 10 }, (_, i) => addDays("2026-07-06", 14 * i)))).toBe("fortnightly");
-  expect(rhythmOf(["2026-08-05", "2026-08-25", "2026-09-05", "2026-09-25", "2026-10-06"])).toBe("twiceMonthly");
   expect(rhythmOf(["2026-01-10", "2026-04-09", "2026-07-12"])).toBe("quarterly");
+});
+
+/** The day a SIP due on `day` of each month goes out: the next working day when it falls on a weekend. */
+function debits(day: number, from: [number, number], months: number): string[] {
+  return Array.from({ length: months }, (_, i) => {
+    const total = from[0] * 12 + from[1] - 1 + i;
+    let d = make(Math.floor(total / 12), (total % 12) + 1, day);
+    while (weekday(d) === 0 || weekday(d) === 6) d = addDays(d, 1);
+    return d;
+  });
+}
+const sorted = (...lists: string[][]) => lists.flat().sort();
+
+test("lateBy: how far a debit went out from its day of the month, across a month's end", () => {
+  expect(lateBy(7, "2026-06-08")).toBe(1);
+  expect(lateBy(28, "2026-03-30")).toBe(2);
+  expect(lateBy(28, "2026-03-02")).toBe(2); // Sat 28 Feb went out on Mon 2 Mar
+  expect(lateBy(31, "2026-09-30")).toBe(0);
+  expect(lateBy(7, "2026-06-14")).toBeNull();
+});
+
+test("schedulesOf: SIPs on the 7th, 14th, 21st and 28th of every month are four monthly SIPs, not one weekly one", () => {
+  // the recording: Mirae, ₹2,500, Mar–Oct 2026, a weekend's debit on the Monday after (Jun 8, Mar 30)
+  const days = [7, 14, 21, 28];
+  const dates = sorted(...days.map((d) => debits(d, [2026, 3], 8)));
+  expect(dates).toContain("2026-06-08");
+  expect(dates).toContain("2026-03-30");
+  const got = schedulesOf(dates);
+  expect(got.map((s) => [s.rhythm, s.day, s.dates.length])).toEqual(days.map((d) => ["monthly", d, 8]));
+  expect(got.flatMap((s) => s.dates).sort()).toEqual(dates);
+  // two months of it is already four
+  expect(schedulesOf(sorted(...days.map((d) => debits(d, [2026, 9], 2)))).map((s) => s.day)).toEqual(days);
+});
+
+test("schedulesOf: two days a month are two SIPs; three months of one day is one", () => {
+  expect(schedulesOf(["2026-08-05", "2026-08-25", "2026-09-05", "2026-09-25", "2026-10-06"]).map((s) => [s.rhythm, s.day, s.dates.length])).toEqual([["monthly", 5, 3], ["monthly", 25, 2]]);
+  expect(schedulesOf(["2026-06-05", "2026-07-06", "2026-08-05", "2026-09-07", "2026-10-06"]).map((s) => [s.rhythm, s.day])).toEqual([["monthly", 5]]);
+  // each day once: the earliest, as a debit only ever goes out later
+  expect(schedulesOf(["2026-01-10", "2026-04-09", "2026-07-12"]).map((s) => [s.rhythm, s.day])).toEqual([["quarterly", 9]]);
+});
+
+test("schedulesOf: a real weekly or two-weekly SIP keeps its weekday through the month and stays one SIP", () => {
+  // every Monday, Mar–Oct, two of them a day late (a holiday)
+  const mondays = Array.from({ length: 35 }, (_, i) => addDays("2026-03-02", 7 * i)).map((d, i) => (i === 9 || i === 20 ? addDays(d, 1) : d));
+  expect(schedulesOf(mondays)).toEqual([{ rhythm: "weekly", dates: mondays }]);
+  const short = ["2026-09-01", "2026-09-08", "2026-09-16", "2026-09-22"];
+  expect(schedulesOf(short)).toEqual([{ rhythm: "weekly", dates: short }]);
+  const fortnights = Array.from({ length: 10 }, (_, i) => addDays("2026-07-06", 14 * i));
+  expect(schedulesOf(fortnights)).toEqual([{ rhythm: "fortnightly", dates: fortnights }]);
+  // a pause doesn't hand it to the days of the month
+  const paused = [...mondays.slice(0, 8), ...mondays.slice(20)];
+  expect(schedulesOf(paused).map((s) => s.rhythm)).toEqual(["weekly"]);
+});
+
+test("schedulesOf: a SIP whose date was changed (the 5th, then the 12th) is one SIP, on the new day; nothing repeating is none", () => {
+  const moved = [...debits(5, [2026, 1], 5), ...debits(12, [2026, 7], 4)];
+  expect(schedulesOf(moved).map((s) => [s.rhythm, s.day, s.dates.length])).toEqual([["monthly", 12, 9]]);
+  expect(schedulesOf(["2026-09-08"])).toEqual([]);
+  expect(schedulesOf(["2026-01-03", "2026-02-19", "2026-05-02"])).toEqual([]);
 });
 
 test("rhythmOf: nothing from one payment, two months apart, or no pattern", () => {
@@ -280,6 +338,55 @@ test("Mark as SIP lists every Gmail payment with the same name and amount; typed
   const args = sipArgs(list);
   s = run(s, "sips.create", { name: "Flexi", ...args }).snap;
   expect(s.transactions.filter(isSip)).toHaveLength(4);
+});
+
+test("SIPs on four days of the month: four suggestions named by day; each accepted one takes only its day's debits, now and later", () => {
+  const { s: s0, bank } = base();
+  let s = s0;
+  const MIRAE = { from: "Mirae Asset Mutual Fund <mf@miraeasset.com>", subject: "SIP instalment processed" };
+  const days = [7, 14, 21, 28];
+  for (const d of sorted(...days.map((x) => debits(x, [2026, 3], 8)))) s = draft(s, d, "Mirae Asset Mutual Fund", 250000, bank, MIRAE).s;
+  const sug = sipSuggestions(s);
+  expect(sug.map((x) => [x.name, x.rhythm, x.day, x.payments.length])).toEqual(days.map((d) => [`Mirae Asset Mutual Fund · ${ordinal(d)}`, "monthly", d, 8]));
+  expect(sug[0].why).toContain("monthly around the 7th");
+
+  // Review from a suggestion, or Mark as SIP on one payment: only that day's payments
+  const fourteenth = sug[1];
+  expect(similarPayments(s, [{ note: fourteenth.payments[0].note, amount: 250000, date: fourteenth.payments[0].date }]).map((p) => p.date)).toEqual(fourteenth.payments.map((p) => p.date));
+  expect(newSipOf(s, fourteenth.payments)).toEqual({ name: "Mirae Asset Mutual Fund · 14th", rhythm: "monthly", day: 14 });
+
+  const seventh = sug[0];
+  s = run(s, "sips.create", { name: seventh.name, transactionIds: [], draftIds: seventh.draftIds, draftDates: seventh.draftDates, rhythm: seventh.rhythm, day: seventh.day }).snap;
+  const sip = sipsOf(s)[0];
+  expect(sip.day).toBe(7);
+  expect(s.transactions.filter((t) => t.sipId === sip.id).map((t) => t.date)).toEqual(seventh.payments.map((p) => p.date).reverse());
+  // the other three are still offered, still named by day
+  expect(sipSuggestions(s).map((x) => [x.name, x.payments.length])).toEqual([14, 21, 28].map((d) => [`Mirae Asset Mutual Fund · ${ordinal(d)}`, 8]));
+
+  // November: Sat 7th goes out Mon 9th and is saved into the 7th's SIP; Sat 14th (Mon 16th) is not
+  const nov9 = draft(s, "2026-11-09", "Mirae Asset Mutual Fund", 250000, bank, MIRAE);
+  const nov16 = draft(nov9.s, "2026-11-16", "Mirae Asset Mutual Fund", 250000, bank, MIRAE);
+  s = run(nov16.s, "sips.saveDrafts", { draftIds: [nov9.id, nov16.id], draftDates: ["2026-11-09", "2026-11-16"] }).snap;
+  expect(s.drafts.find((d) => d._id === nov9.id)!.status).toBe("accepted");
+  expect(s.transactions.find((t) => t._id === s.drafts.find((d) => d._id === nov9.id)!.transactionId)!.sipId).toBe(sip.id);
+  expect(s.drafts.find((d) => d._id === nov16.id)!.status).toBe("open");
+  expect(sipFor(sipsOf(s), { type: "expense", note: "Mirae Asset Mutual Fund", amount: 250000, date: "2026-11-16" })).toBeUndefined();
+  expect(sipSuggestions(s).find((x) => x.day === 14)!.payments).toHaveLength(9);
+
+  // "Not a SIP" on the 28th's leaves the 14th's and the 21st's
+  const not28 = sipSuggestions(s).find((x) => x.day === 28)!;
+  s = run(s, "settings.update", { patch: { dismissedSips: [not28.key] } }).snap;
+  expect(sipSuggestions(s).map((x) => x.day)).toEqual([14, 21]);
+});
+
+test("a SIP saved before days of the month were read keeps taking its debits on any day", () => {
+  const { s: s0, other, bank } = base();
+  let s = s0;
+  for (const d of ["2026-09-10", "2026-10-10"]) s = gmailEntry(s, d, "Groww", 1000000, bank, other, GROWW).s;
+  s = run(s, "sips.create", { name: "Flexi", transactionIds: s.transactions.map((t) => t._id), rhythm: "monthly" }).snap;
+  expect(sipsOf(s)[0].day).toBeUndefined();
+  expect(sipFor(sipsOf(s), { type: "expense", note: "Groww", amount: 1000000, date: "2026-11-23" })?.name).toBe("Flexi");
+  expect(() => run(s, "sips.create", { name: "X", transactionIds: [s.transactions[0]._id], day: 32 })).toThrow("Bad day");
 });
 
 // ---------- recaps ----------
