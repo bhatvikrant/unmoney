@@ -7,4 +7,6 @@ crons.daily("prune old sync ops", { hourUTC: 3, minuteUTC: 0 }, internal.sync.pr
 crons.hourly("check Gmail for new money mail", { minuteUTC: 20 }, internal.gmail.syncAll, {});
 crons.daily("prune old tombstones", { hourUTC: 3, minuteUTC: 20 }, internal.sync.pruneTombstones, {});
 crons.daily("prune resolved Gmail drafts", { hourUTC: 3, minuteUTC: 10 }, internal.sync.pruneDrafts, {});
+crons.daily("prune old usage sessions", { hourUTC: 3, minuteUTC: 30 }, internal.usage.pruneSessions, {});
+crons.daily("count each user's data for the superadmin dashboard", { hourUTC: 3, minuteUTC: 40 }, internal.admin.refreshStats, {});
 export default crons;

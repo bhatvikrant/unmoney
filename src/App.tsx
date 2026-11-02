@@ -15,6 +15,8 @@ import LedgerRoute from "@/pages/transactions/LedgerRoute";
 import { useMediaQuery, WIDE } from "@/lib/media";
 import TransactionEditor from "@/pages/transactions/TransactionEditor";
 import { SplitLayout } from "@/components/shell/SplitLayout";
+import { useUsageTracking } from "@/lib/usage";
+import { isSuperadmin } from "../shared/admin";
 
 // Only the ledger, the entry form and the shell load with the app. Every other screen is fetched the
 // first time it is opened (from the service worker's cache once installed), so a cold start parses a
@@ -73,6 +75,8 @@ const GmailReviewPage = screen(() => import("@/pages/transactions/GmailReviewPag
 const UpcomingPage = screen(() => import("@/pages/transactions/UpcomingPage"));
 const SipsPage = screen(() => import("@/pages/transactions/SipsPage"));
 const PrivacyPage = screen(() => import("@/pages/legal/PrivacyPage"));
+// Its own chunk (AdminPage-*.js), left out of the service worker's precache (vite.config.ts): only the superadmin ever downloads it.
+const AdminPage = screen(() => import("@/pages/admin/AdminPage"));
 
 /**
  * Shown while there is nothing to show yet. The text waits a moment: a warm start is over before it
@@ -151,6 +155,7 @@ function Gate() {
   const { view, user } = useStore();
   const settings = settingsOf(view);
   const lock = usePasscodeLock(settings);
+  useUsageTracking();
   // the other tabs' code, once the ledger has had a moment to settle, so the first tap on them is instant
   useEffect(() => {
     const t = setTimeout(() => { void loadStats(); void loadAccounts(); void loadSettings(); }, 1500);
@@ -165,6 +170,8 @@ function Gate() {
       <Routes>
         {/* full screen, beside the shell: no sidebar or tab bar behind the story cards */}
         <Route path="recap/:key" element={<RecapPage />} />
+        {/* the server answers only the superadmin too (convex/admin.ts); here it keeps everyone else from fetching the page's code */}
+        <Route path="admin" element={isSuperadmin(user?.email) ? <AdminPage /> : <Navigate to="/" replace />} />
         <Route element={<AppShell />}>
           <Route index element={<LedgerRoute />} />
           <Route path="t/new" element={<LedgerRoute />} />
