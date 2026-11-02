@@ -31,6 +31,26 @@ export const frequency = v.union(
  * documents not written since this was added; a device loading everything still gets those.
  */
 const synced = { rev: v.optional(v.number()) };
+/**
+ * A SIP (or other regular investment) the user accepted (docs/specs/sips.md). An expense whose note is
+ * one of `keys` and whose amount is near `amount` is filed under it as it is saved. Kept on settings
+ * rather than in a table of its own, so a device still running an older version of the app, which
+ * knows no such table, is never sent one.
+ */
+export const sip = v.object({
+  /** Made from the id of the op that created it, so the device and the server agree on it. */
+  id: v.string(),
+  name: v.string(),
+  /** Normalised notes (shared/sips.ts sipKey) its payments are saved with. */
+  keys: v.array(v.string()),
+  /** What one payment usually is, in minor units; follows the latest payment (a yearly step-up). */
+  amount: v.number(),
+  /** Date of the latest payment filed under it: only a payment on or after it moves `amount`. */
+  lastDate: v.optional(v.string()),
+  accountId: v.optional(v.id("accounts")),
+  /** Stopped SIPs keep their payments but no longer take new ones. */
+  stoppedAt: v.optional(v.number()),
+});
 export const budgetPeriod = v.union(v.literal("weekly"), v.literal("monthly"), v.literal("yearly"));
 
 /** [categoryId, subcategoryId] of an entry or template, null where unset. */
@@ -82,6 +102,10 @@ export default defineSchema({
     defaultAccountId: v.optional(v.id("accounts")),
     /** Notes (normalised) the user said are not bills, so the Bills & subscriptions page stops suggesting them. */
     dismissedRecurring: v.optional(v.array(v.string())),
+    /** Merchants (normalised notes) the user said are not SIPs, so the SIPs page stops suggesting them. */
+    dismissedSips: v.optional(v.array(v.string())),
+    /** The user's SIPs, oldest first. */
+    sips: v.optional(v.array(sip)),
     /** The last imports (newest first, at most 10), so one can be undone: its entries carry its id as importId. */
     recentImports: v.optional(v.array(v.object({ id: v.string(), name: v.string(), at: v.number(), count: v.number(), undoneAt: v.optional(v.number()) }))),
   }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
@@ -208,12 +232,15 @@ export default defineSchema({
       bookmarkIds: v.optional(v.array(v.id("bookmarks"))),
       draftIds: v.optional(v.array(v.id("drafts"))),
     })),
+    /** The SIP this expense pays into: it leaves the ledger and every spending total, but still leaves its payment method (docs/specs/sips.md). */
+    sipId: v.optional(v.string()),
   })
     .index("by_user_date", ["userId", "date"])
     .index("by_user_account", ["userId", "accountId"])
     .index("by_user_to_account", ["userId", "toAccountId"])
     .index("by_user_category", ["userId", "categoryId"])
     .index("by_repeat", ["repeatId"])
+    .index("by_sip", ["sipId"])
     .searchIndex("search_note", { searchField: "note", filterFields: ["userId"] })
     .index("by_user_rev", ["userId", "rev"]),
 

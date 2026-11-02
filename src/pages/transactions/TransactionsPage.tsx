@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useView } from "@/lib/store";
 import { budgetStatus, draftsRange, notesRange, txCarryBefore, txCsvRows, txListRange } from "../../../shared/views";
 import { upcomingOccurrences } from "../../../shared/upcoming";
+import { isSip, sipDrafts } from "../../../shared/sips";
 import { useToday } from "@/lib/today";
 import { useApp } from "@/lib/app";
 import { primeKeyboard } from "@/lib/keyboard";
@@ -29,6 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { BudgetBar } from "@/components/BudgetBars";
 import { RecapNudge } from "@/pages/recap/RecapNudge";
 import { GmailNudge } from "@/pages/transactions/GmailNudge";
+import { SipNudge } from "@/pages/transactions/SipNudge";
 import { QuickAddSheet } from "@/components/tx/QuickAdd";
 import { cn } from "@/lib/utils";
 import { kindLabel } from "../../../shared/defaults";
@@ -77,7 +79,8 @@ export default function TransactionsPage() {
   const swipe = useSwipe(next, prev, !bulk.active, swipeHintOnce);
 
   const snap = useView();
-  const raw = useMemo(() => txListRange(snap, range.from, range.to), [snap, range.from, range.to]);
+  // payments filed under a SIP live on the SIPs page, not here (a line under the summary says how much)
+  const raw = useMemo(() => txListRange(snap, range.from, range.to).filter((t) => !isSip(t)), [snap, range.from, range.to]);
   const carry = useMemo(() => (settings.carryOver ? txCarryBefore(snap, range.from) : 0), [snap, settings.carryOver, range.from]);
 
   const filterAcc = useMemo(() => new Set((sp.get("acc") ?? "").split(",").filter(Boolean)), [sp]);
@@ -103,7 +106,12 @@ export default function TransactionsPage() {
     : 0), [raw, filterAcc, filterType, filterCat, ledger]);
 
   // drafts from Gmail sit on their days as faded rows, never in the sums; a filtered list hides them
-  const drafts = useMemo(() => (filtered ? [] : draftsRange(snap, range.from, range.to)), [snap, filtered, range.from, range.to]);
+  // and so do drafts a SIP will take once saved
+  const drafts = useMemo(() => {
+    if (filtered) return [];
+    const toSips = sipDrafts(snap);
+    return draftsRange(snap, range.from, range.to).filter((d) => !toSips.has(d._id));
+  }, [snap, filtered, range.from, range.to]);
   // and so do the coming dates of repeats (bills, salary), until they are added
   const today = useToday();
   const upcoming = useMemo(() => (filtered ? [] : upcomingOccurrences(snap, range.from, range.to, today)), [snap, filtered, range.from, range.to, today]);
@@ -147,6 +155,7 @@ export default function TransactionsPage() {
         {/* first week of the month: last month's recap, under the summary bar */}
         <RecapNudge month={month} />
         <GmailNudge from={range.from} to={range.to} />
+        <SipNudge from={range.from} to={range.to} />
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
         {raw && view === "daily" ? <TransactionList txs={txs} drafts={drafts} upcoming={upcoming} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}

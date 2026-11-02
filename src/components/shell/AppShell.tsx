@@ -40,7 +40,7 @@ const under = (pathname: string, pages: string[]) => pages.some((p) => pathname 
 function isActive(pathname: string, to: string) {
   if (to === "/") return pathname === "/" || pathname.startsWith("/t/") || under(pathname, ["/search", "/bookmarks"]);
   if (to === "/stats") return under(pathname, ["/stats", "/budget", "/notes"]);
-  if (to === "/settings") return under(pathname, ["/settings", "/recaps", "/import", "/gmail", "/upcoming"]);
+  if (to === "/settings") return under(pathname, ["/settings", "/recaps", "/import", "/gmail", "/upcoming", "/sips"]);
   return pathname.startsWith(to);
 }
 
