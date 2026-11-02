@@ -27,7 +27,8 @@ import { parseMail } from "../shared/gmail/rules";
 import { latestRates } from "./lib/fxFeed";
 import { accountMapKey, noteOf, resolveParsed, type ResolveCtx } from "../shared/gmail/resolve";
 import { foldDrafts, laterMatches, matchEntry, samePayment, type DraftCandidate } from "../shared/gmail/dedup";
-import { buildQuery, DEFAULT_SENDERS, LOOKBACKS, matchesSender, normaliseSender, readsFromFor, spanMs, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
+import { buildQuery, DEFAULT_SENDERS, DEFAULT_SPAN_DAYS, LOOKBACKS, matchesSender, normaliseSender, readsFromFor, spanMs, windowStart, withNewDefaults, type Lookback } from "../shared/gmail/query";
+import { aiShortfall, BACKFILL_AI_RESERVE, COUNT_MAX, estimateMs, isYearStart, MAX_SPAN_DAYS, nextMonthStart, nextSpanDays, START_SPAN_DAYS, yearProblem } from "../shared/gmail/backfill";
 import { applyMerchantMemory, learnMerchants, mergeMerchants, type MerchantMemory } from "../shared/gmail/learn";
 import { PAIRED_NOTE } from "../shared/gmail/dedup";
 import { senderAddress } from "../shared/gmail/mail";
@@ -55,6 +56,16 @@ const MAX_SENDERS = 100;
 /** Mails fetched in parallel, and the least time each such batch takes: 3 per 300 ms is 50 quota units a second. */
 const FETCH_AT_ONCE = 3;
 const FETCH_BATCH_MS = 300;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+/** Between one backfill slice and the next; longer after a failure or while the AI could not read some mail. */
+const STEP_GAP_MS = 5000;
+const STEP_BUSY_MS = 60 * 1000;
+const STEP_RETRY_MS = 10 * 60 * 1000;
+/** A running backfill whose last step is older than this lost its chain (a step that died): the hourly cron starts it again. */
+const STALL_MS = 15 * 60 * 1000;
+/** AI reads a backfill may use in a month: the cap less what is kept for new mail. */
+const BACKFILL_AI_CAP = AI_MONTHLY_CAP - BACKFILL_AI_RESERVE;
 
 const lookbackArg = v.union(...LOOKBACKS.map((d) => v.literal(d)));
 const redirectUri = () => `${process.env.CONVEX_SITE_URL}/gmail/callback`;
@@ -92,6 +103,11 @@ export const status = query({
       log: c?.log ?? [],
       aiCalls: c && c.aiMonth === month ? c.aiCalls : 0,
       aiCap: AI_MONTHLY_CAP,
+      backfill: c?.backfill ? {
+        year: c.backfill.year, from: c.backfill.from, state: c.backfill.state, startedAt: c.backfill.startedAt, cursor: c.backfill.cursor,
+        total: c.backfill.total ?? null, read: c.backfill.read, found: c.backfill.found, finishedAt: c.backfill.finishedAt ?? null,
+        aiResumesAt: nextMonthStart(Date.now()),
+      } : null,
     };
   },
 });
@@ -104,30 +120,46 @@ export const signInEmail = internalQuery({
   handler: async (ctx, { userId }) => (await ctx.db.get(userId))?.email ?? undefined,
 });
 
+const sinceArg = v.object({ year: v.number(), from: v.number() });
+type Since = { year: number; from: number };
+
+/** Why a year to read back to can't be used, as the error the app shows. */
+function checkSince({ year, from }: Since, now: number) {
+  const problem = yearProblem(year, now);
+  if (problem) throw new ConvexError(problem);
+  if (!isYearStart(year, from)) throw new ConvexError("That isn't the start of the year");
+}
+
 /**
  * Where to send the browser to connect Gmail. The state carries who started it and the lookback
- * they chose, signed, so the callback can trust it without a table.
+ * they chose (or the year to read back to, as `y<year>_<from>`), signed, so the callback can trust it without a table.
  */
 export const connectUrl = action({
-  args: { lookbackDays: lookbackArg },
-  handler: async (ctx, { lookbackDays }): Promise<string> => {
+  args: { lookbackDays: lookbackArg, since: v.optional(sinceArg) },
+  handler: async (ctx, { lookbackDays, since }): Promise<string> => {
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new ConvexError("Sign in first");
     if (!hasTokenKey()) throw new ConvexError("Gmail sync isn't set up on this server yet");
-    const payload = `${userId}.${lookbackDays}.${Date.now()}`;
+    if (since) checkSince(since, Date.now());
+    const payload = `${userId}.${since ? `y${since.year}_${since.from}` : lookbackDays}.${Date.now()}`;
     const state = `${payload}.${await sign(payload)}`;
     const loginHint = await ctx.runQuery(internal.gmail.signInEmail, { userId });
     return gmailApi.authUrl({ redirectUri: redirectUri(), state, loginHint: loginHint ?? undefined });
   },
 });
 
-async function readState(state: string): Promise<{ userId: Id<"users">; lookbackDays: Lookback } | null> {
+async function readState(state: string): Promise<{ userId: Id<"users">; lookbackDays: Lookback; since?: Since } | null> {
   const parts = state.split(".");
   if (parts.length !== 4) return null;
   const [userId, lookback, ts, sig] = parts;
   const payload = `${userId}.${lookback}.${ts}`;
   if (!(await verify(payload, sig))) return null;
   if (!Number.isFinite(Number(ts)) || Date.now() - Number(ts) > STATE_TTL_MS) return null;
+  if (lookback.startsWith("y")) {
+    const [year, from] = lookback.slice(1).split("_").map(Number);
+    if (yearProblem(year, Date.now()) || !isYearStart(year, from)) return null;
+    return { userId: userId as Id<"users">, lookbackDays: DEFAULT_SPAN_DAYS, since: { year, from } };
+  }
   const lookbackDays = Number(lookback) as Lookback;
   if (!LOOKBACKS.includes(lookbackDays)) return null;
   return { userId: userId as Id<"users">, lookbackDays };
@@ -159,12 +191,12 @@ export const callback = httpAction(async (ctx, req) => {
     // the previous version only knows ?gmail=connected). Another mailbox waits for this browser's claim.
     const signedInAs = await ctx.runQuery(internal.gmail.signInEmail, { userId: state.userId });
     if (signedInAs && signedInAs.toLowerCase() === email.toLowerCase()) {
-      await ctx.runMutation(internal.gmail.saveConnection, { userId: state.userId, email, refreshTokenEnc: enc, iv, lookbackDays: state.lookbackDays });
+      await ctx.runMutation(internal.gmail.saveConnection, { userId: state.userId, email, refreshTokenEnc: enc, iv, lookbackDays: state.lookbackDays, backfillFrom: state.since });
       await ctx.scheduler.runAfter(0, internal.gmail.syncUser, { userId: state.userId });
       return back("connected");
     }
     const claim = crypto.randomUUID();
-    await ctx.runMutation(internal.gmail.holdConnection, { userId: state.userId, claim, email, refreshTokenEnc: enc, iv, lookbackDays: state.lookbackDays });
+    await ctx.runMutation(internal.gmail.holdConnection, { userId: state.userId, claim, email, refreshTokenEnc: enc, iv, lookbackDays: state.lookbackDays, backfillFrom: state.since });
     return back(`claim&claim=${claim}`);
   } catch (e) {
     console.error("gmail connect failed", e instanceof Error ? e.message : e);
@@ -174,7 +206,7 @@ export const callback = httpAction(async (ctx, req) => {
 
 /** A grant back from Google, until the app that started connecting claims it (or 10 minutes pass). */
 export const holdConnection = internalMutation({
-  args: { userId: v.id("users"), claim: v.string(), email: v.string(), refreshTokenEnc: v.string(), iv: v.string(), lookbackDays: lookbackArg },
+  args: { userId: v.id("users"), claim: v.string(), email: v.string(), refreshTokenEnc: v.string(), iv: v.string(), lookbackDays: lookbackArg, backfillFrom: v.optional(sinceArg) },
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("gmailPending", args);
     await ctx.scheduler.runAfter(STATE_TTL_MS, internal.gmail.dropPending, { id });
@@ -198,7 +230,7 @@ export const claimConnection = mutation({
     await ctx.db.delete(p._id);
     // someone sent this user a link that another account started: never attach their mail there
     if (p.userId !== userId) return "other-account";
-    await saveConnectionFor(ctx, { userId, email: p.email, refreshTokenEnc: p.refreshTokenEnc, iv: p.iv, lookbackDays: p.lookbackDays });
+    await saveConnectionFor(ctx, { userId, email: p.email, refreshTokenEnc: p.refreshTokenEnc, iv: p.iv, lookbackDays: p.lookbackDays, backfillFrom: p.backfillFrom });
     await ctx.scheduler.runAfter(0, internal.gmail.syncUser, { userId });
     return "connected";
   },
@@ -206,27 +238,49 @@ export const claimConnection = mutation({
 
 /** A new connection, or the existing one's token replaced (a reconnect keeps its senders and what it learned). */
 export const saveConnection = internalMutation({
-  args: { userId: v.id("users"), email: v.string(), refreshTokenEnc: v.string(), iv: v.string(), lookbackDays: lookbackArg },
+  args: { userId: v.id("users"), email: v.string(), refreshTokenEnc: v.string(), iv: v.string(), lookbackDays: lookbackArg, backfillFrom: v.optional(sinceArg) },
   handler: (ctx, args) => saveConnectionFor(ctx, args),
 });
 
-async function saveConnectionFor(ctx: MutationCtx, { userId, email, refreshTokenEnc, iv, lookbackDays }: { userId: Id<"users">; email: string; refreshTokenEnc: string; iv: string; lookbackDays: number }) {
+/** A backfill not started yet: the whole mailbox from 1 January `year` to now still to read. */
+function newBackfill({ year, from }: Since, now: number): NonNullable<Connection["backfill"]> {
+  return { year, from, run: crypto.randomUUID(), state: "running", startedAt: now, cursor: now, spanDays: START_SPAN_DAYS, read: 0, found: 0 };
+}
+
+/**
+ * Start a backfill's chain of steps afresh (an older chain stops at its next step). The first one
+ * waits `delayMs`, so a check just scheduled reads the newest mail first.
+ */
+async function kickBackfill(ctx: MutationCtx, c: Pick<Connection, "_id" | "userId" | "backfill">, delayMs = 0) {
+  if (!c.backfill || c.backfill.state === "done") return;
+  const run = crypto.randomUUID();
+  await ctx.db.patch(c._id, { backfill: { ...c.backfill, run, state: "running", lastStepAt: Date.now() } });
+  await ctx.scheduler.runAfter(delayMs, internal.gmail.backfillStep, { userId: c.userId, run });
+}
+
+async function saveConnectionFor(ctx: MutationCtx, { userId, email, refreshTokenEnc, iv, lookbackDays, backfillFrom }: { userId: Id<"users">; email: string; refreshTokenEnc: string; iv: string; lookbackDays: number; backfillFrom?: Since }) {
   if (!(await ctx.db.get(userId))) return;
-  const readsFrom = readsFromFor(lookbackDays, Date.now());
+  const now = Date.now();
+  const readsFrom = backfillFrom ? backfillFrom.from : readsFromFor(lookbackDays, now);
   const old = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
   if (old) {
-    // a different mailbox is a fresh start; the same one picks up where it left off
+    // a different mailbox is a fresh start; the same one picks up where it left off, a backfill included
     const same = old.email.toLowerCase() === email.toLowerCase();
+    const backfill = backfillFrom ? newBackfill(backfillFrom, now) : same ? old.backfill : undefined;
     await ctx.db.patch(old._id, {
-      email, refreshTokenEnc, iv, lookbackDays, readsFrom, status: "ok", lastError: undefined,
-      syncedUpTo: same ? old.syncedUpTo : undefined, accountMap: same ? old.accountMap : {},
+      email, refreshTokenEnc, iv, lookbackDays, readsFrom: backfill && !backfillFrom ? backfill.from : readsFrom, status: "ok", lastError: undefined,
+      syncedUpTo: same ? old.syncedUpTo : undefined, accountMap: same ? old.accountMap : {}, backfill,
     });
+    // after the first check (scheduled by the caller), so the newest mail shows up first
+    await kickBackfill(ctx, { _id: old._id, userId, backfill }, 30_000);
     return;
   }
-  await ctx.db.insert("gmailConnections", {
+  const backfill = backfillFrom ? newBackfill(backfillFrom, now) : undefined;
+  const id = await ctx.db.insert("gmailConnections", {
     userId, email, refreshTokenEnc, iv, status: "ok", lookbackDays, readsFrom, senders: DEFAULT_SENDERS, scanPurchases: true, accountMap: {},
-    aiMonth: monthOf(Date.now()), aiCalls: 0, log: [],
+    aiMonth: monthOf(now), aiCalls: 0, log: [], ...(backfill ? { backfill } : {}),
   });
+  await kickBackfill(ctx, { _id: id, userId, backfill }, 30_000);
 }
 
 export const connectionOf = internalQuery({
@@ -244,11 +298,80 @@ export const updateSettings = mutation({
     const patch: Partial<Connection> = {};
     if (args.senders) patch.senders = [...new Set(args.senders.map(normaliseSender).filter(Boolean))].slice(0, MAX_SENDERS);
     if (args.scanPurchases !== undefined) patch.scanPurchases = args.scanPurchases;
-    // a new look-back counts from now: a longer one reaches older mail, "from now on" stops reading it
-    if (args.lookbackDays !== undefined) Object.assign(patch, { lookbackDays: args.lookbackDays, readsFrom: readsFromFor(args.lookbackDays, Date.now()) });
+    // a new look-back counts from now: a longer one reaches older mail, "from now on" stops reading it; it ends reading back to a year
+    if (args.lookbackDays !== undefined) Object.assign(patch, { lookbackDays: args.lookbackDays, readsFrom: readsFromFor(args.lookbackDays, Date.now()), backfill: undefined });
     if (args.paused === true && c.status === "ok") patch.status = "paused";
-    if (args.paused === false && c.status === "paused") { patch.status = "ok"; patch.lastError = undefined; }
+    const resumed = args.paused === false && c.status === "paused";
+    if (resumed) { patch.status = "ok"; patch.lastError = undefined; }
     await ctx.db.patch(c._id, patch);
+    // pausing stopped reading back too: carry on where it was
+    if (resumed && args.lookbackDays === undefined) await kickBackfill(ctx, c);
+  },
+});
+
+/**
+ * Read the mailbox back to 1 January `year` (`from` is that midnight on the device), on the
+ * server, a slice at a time: the app can be closed meanwhile. Choosing again starts over;
+ * mail that already became a draft or was read is skipped.
+ */
+export const startBackfill = mutation({
+  args: sinceArg.fields,
+  handler: async (ctx, since) => {
+    const userId = await requireUser(ctx);
+    const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (!c) throw new ConvexError("Gmail is not connected");
+    if (c.status === "reauth") throw new ConvexError("Gmail needs reconnecting");
+    checkSince(since, Date.now());
+    const backfill = newBackfill(since, Date.now());
+    // hourly checks keep reading the usual 30 days; the backfill reads the rest
+    await ctx.db.patch(c._id, { lookbackDays: DEFAULT_SPAN_DAYS, readsFrom: since.from, backfill });
+    if (c.status === "ok") await ctx.scheduler.runAfter(0, internal.gmail.backfillStep, { userId, run: backfill.run });
+  },
+});
+
+/** Stop reading back: drafts it already made stay; hourly checks read the last 30 days. */
+export const stopBackfill = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await requireUser(ctx);
+    const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (!c?.backfill) return;
+    await ctx.db.patch(c._id, { backfill: undefined, lookbackDays: DEFAULT_SPAN_DAYS, readsFrom: readsFromFor(DEFAULT_SPAN_DAYS, Date.now()) });
+  },
+});
+
+/**
+ * Money mail since `from` that no check has read yet, counted by listing ids (one Gmail call per
+ * 500, nothing fetched), up to `max`.
+ */
+async function countUnread(ctx: ActionCtx, token: string, c: Connection, afterMs: number, beforeMs: number, max = COUNT_MAX): Promise<number> {
+  const q = buildQuery({ senders: c.senders, scanPurchases: c.scanPurchases, afterSeconds: afterMs / 1000, beforeSeconds: beforeMs / 1000, muted: c.muted ?? [] });
+  let count = 0;
+  for await (const page of gmailApi.listMessageIds(token, q)) {
+    const seen = await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids: page });
+    count += page.length - seen.length;
+    if (count >= max) return max;
+  }
+  return count;
+}
+
+/**
+ * Before reading back: how much money mail since `from` waits, how long reading it takes, and
+ * whether this month's AI reads may run out on the way (the rest is then read next month).
+ */
+export const estimateBackfill = action({
+  args: { from: v.number() },
+  handler: async (ctx, { from }): Promise<{ count: number; capped: boolean; ms: number; aiShort: boolean; aiResumesAt: number }> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new ConvexError("Sign in first");
+    const c = await ctx.runQuery(internal.gmail.connectionOf, { userId });
+    if (!c) throw new ConvexError("Gmail is not connected");
+    if (c.status === "reauth") throw new ConvexError("Gmail needs reconnecting");
+    const now = Date.now();
+    const token = await gmailApi.accessToken(await decryptText(c.refreshTokenEnc, c.iv));
+    const count = await countUnread(ctx, token, c, from, now);
+    const used = c.aiMonth === monthOf(now) ? c.aiCalls : 0;
+    return { count, capped: count >= COUNT_MAX, ms: estimateMs(count), aiShort: aiShortfall(count, BACKFILL_AI_CAP - used, AI_BATCH), aiResumesAt: nextMonthStart(now) };
   },
 });
 
@@ -335,13 +458,24 @@ export const revokeForUser = internalAction({
 
 // ---------- checking the mailbox ----------
 
-/** Hourly cron: every live connection gets its own check, spread over a few minutes. */
+/**
+ * Hourly cron: every live connection gets its own check, spread over a few minutes. A backfill
+ * whose chain broke starts again, and one waiting for AI reads carries on once a new month gives some.
+ */
 export const syncAll = internalMutation({
   args: {},
   handler: async (ctx) => {
     const all = await ctx.db.query("gmailConnections").collect();
+    const now = Date.now();
     let i = 0;
-    for (const c of all) if (c.status === "ok") await ctx.scheduler.runAfter(i++ * 3000, internal.gmail.syncUser, { userId: c.userId });
+    for (const c of all) {
+      if (c.status !== "ok") continue;
+      const delay = i++ * 3000;
+      await ctx.scheduler.runAfter(delay, internal.gmail.syncUser, { userId: c.userId });
+      const b = c.backfill;
+      const used = c.aiMonth === monthOf(now) ? c.aiCalls : 0;
+      if (b && ((b.state === "running" && now - (b.lastStepAt ?? b.startedAt) > STALL_MS) || (b.state === "waiting-ai" && used < BACKFILL_AI_CAP))) await kickBackfill(ctx, c, delay + 60_000);
+    }
   },
 });
 
@@ -526,7 +660,16 @@ type Collected = {
   aiSkipped: number;
   aiDropped: number;
   notes: string[];
+  /** Mails in the window no check had read, and how many of them this one fetched. */
+  unread: number;
+  fetched: number;
+  /** When the mails the AI could not read this time arrived, and whether that was the monthly limit. */
+  retryAt: number[];
+  aiCapped: boolean;
 };
+
+/** A backfill slice instead of the usual window: its bounds, the AI reads it may use, and since when saved drafts are looked at. */
+type Range = { token: string; afterMs: number; beforeMs: number; aiCap: number; savedSince: number };
 
 function candidateOf(mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai", merchant?: string): DraftCandidate {
   return {
@@ -578,13 +721,14 @@ async function askClaude(mails: Mail[], read: Read): Promise<{ reads: AiRead[]; 
 /** A day and the days either side: what "already added?" compares a mail's date with. */
 const around = (date: string) => [addDays(date, -1), date, addDays(date, 1)];
 
-/** Search, fetch, triage, parse, dedup: everything a check does short of writing. Shared by the check and the dry run. */
-async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<Collected> {
+/** Search, fetch, triage, parse, dedup: everything a check does short of writing. Shared by the check, a backfill slice and the dry run. */
+async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Range): Promise<Collected> {
   const c = prep.connection;
-  const token = await gmailApi.accessToken(await decryptText(c.refreshTokenEnc, c.iv));
-  const afterMs = windowStart(c, startedAt);
+  const token = range?.token ?? await gmailApi.accessToken(await decryptText(c.refreshTokenEnc, c.iv));
+  const afterMs = range?.afterMs ?? windowStart(c, startedAt);
+  const aiCap = range?.aiCap ?? AI_MONTHLY_CAP;
   const muted = c.muted ?? [];
-  const q = buildQuery({ senders: c.senders, scanPurchases: c.scanPurchases, afterSeconds: afterMs / 1000, muted });
+  const q = buildQuery({ senders: c.senders, scanPurchases: c.scanPurchases, afterSeconds: afterMs / 1000, beforeSeconds: range && range.beforeMs / 1000, muted });
   // The whole window, a page at a time, less what already has a draft or was read and made none:
   // a check reaches past the mail it has handled to what it has not. The newest SYNC_MAX of those
   // are read now; the rest wait, and the window is held so the next check carries on from there.
@@ -597,9 +741,9 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
   }
   // nothing new and nothing saved to learn from (most hours): nothing more to read
   if (!unread.length && !prep.learnFrom.length) {
-    return { scanned, inserts: [], updates: [], matches: [], learned: {}, learnedMerchants: {}, processed: [], syncedUpTo: startedAt, aiCalls: 0, aiSkipped: 0, aiDropped: 0, notes: [] };
+    return { scanned, inserts: [], updates: [], matches: [], learned: {}, learnedMerchants: {}, processed: [], syncedUpTo: startedAt, aiCalls: 0, aiSkipped: 0, aiDropped: 0, notes: [], unread: 0, fetched: 0, retryAt: [], aiCapped: false };
   }
-  const read = await ctx.runQuery(internal.gmail.prepareRead, { userId: c.userId, since: afterMs - SAVED_SLACK_MS });
+  const read = await ctx.runQuery(internal.gmail.prepareRead, { userId: c.userId, since: range?.savedSince ?? afterMs - SAVED_SLACK_MS });
   const fresh = unread.slice(0, SYNC_MAX);
   const waiting = unread.length - fresh.length;
   const mails: Mail[] = [];
@@ -628,7 +772,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     else forAi.push(mail);
   }
 
-  let aiCalls = 0, aiSkipped = 0, aiDropped = 0;
+  let aiCalls = 0, aiSkipped = 0, aiDropped = 0, aiCapped = false;
   if (forAi.length && !process.env.ANTHROPIC_API_KEY) {
     aiSkipped = forAi.length;
     // say how many, so a mail no rule knows does not just vanish
@@ -637,7 +781,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     const used = c.aiMonth === monthOf(startedAt) ? c.aiCalls : 0;
     for (let i = 0; i < forAi.length; i += AI_BATCH) {
       const batch = forAi.slice(i, i + AI_BATCH);
-      if (used + aiCalls >= AI_MONTHLY_CAP) { aiSkipped += batch.length; retry.push(...batch); continue; }
+      if (used + aiCalls >= aiCap) { aiSkipped += batch.length; retry.push(...batch); aiCapped = true; continue; }
       aiCalls++;
       try {
         const { reads: answers, dropped } = await askClaude(batch, read);
@@ -654,7 +798,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
         notes.push("AI reading failed for some mail; it will be retried");
       }
     }
-    if (aiSkipped && used + aiCalls >= AI_MONTHLY_CAP) notes.push(`monthly AI limit reached, ${aiSkipped} mails waiting`);
+    if (aiCapped) notes.push(`monthly AI limit reached, ${aiSkipped} mails waiting`);
   }
 
   // The past entries resolving looks at: the merchant's own (its category last time, the purchase
@@ -702,6 +846,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number): Promise<C
     learned: learnAccounts(prep, read),
     learnedMerchants: learnMerchants(prep.learnFrom, c.merchantMap ?? {}, read.categories),
     aiCalls, aiSkipped, aiDropped, notes, processed,
+    unread: unread.length, fetched: fresh.length, retryAt: retry.map((m) => m.receivedAt), aiCapped,
     // a check starts the look-back before syncedUpTo: hold it back so the mail skipped this time is in
     // the next window (where this one started, when older mail still waits)
     syncedUpTo: Math.min(startedAt, ...retry.map((m) => m.receivedAt + spanMs(c.lookbackDays)), ...(waiting ? [afterMs + spanMs(c.lookbackDays)] : [])),
@@ -732,6 +877,79 @@ export const syncUser = internalAction({
       await ctx.runMutation(internal.gmail.failSync, { userId, startedAt, error: message, reauth: e instanceof GmailAuthError });
       return { ran: true, error: message };
     }
+  },
+});
+
+/**
+ * One slice of reading back to a year: the newest unread mail between the slice's start and the
+ * backfill's cursor, up to a check's SYNC_MAX. Once a slice is read the cursor moves to its start;
+ * the next step follows a few seconds later, so the backfill runs on the server whether or not the
+ * app is open. Gmail is fetched at the usual pace (half its per-user quota), one slice at a time,
+ * and the AI reads only what the month leaves above BACKFILL_AI_RESERVE: when that runs out it
+ * waits for next month (syncAll carries on).
+ */
+export const backfillStep = internalAction({
+  args: { userId: v.id("users"), run: v.string() },
+  handler: async (ctx, { userId, run }): Promise<void> => {
+    const c = await ctx.runQuery(internal.gmail.connectionOf, { userId });
+    if (!c?.backfill || c.backfill.run !== run || c.backfill.state !== "running" || c.status !== "ok") return;
+    // new mail first, on time: the hourly check would mostly find a slice holding the connection
+    if (!c.lastSyncAt || Date.now() - c.lastSyncAt >= HOUR_MS) await ctx.runAction(internal.gmail.syncUser, { userId });
+    const startedAt = Date.now();
+    if (!(await ctx.runMutation(internal.gmail.claimSync, { userId, startedAt }))) {
+      // another check holds the connection, or it stopped being live (the next step ends above)
+      await ctx.scheduler.runAfter(STEP_BUSY_MS, internal.gmail.backfillStep, { userId, run });
+      return;
+    }
+    try {
+      const prep = await ctx.runQuery(internal.gmail.prepareSync, { userId });
+      const b = prep?.connection.backfill;
+      if (!prep || !b) { await ctx.runMutation(internal.gmail.releaseSync, { userId }); return; }
+      const used = prep.connection.aiMonth === monthOf(startedAt) ? prep.connection.aiCalls : 0;
+      if (used >= BACKFILL_AI_CAP) {
+        await ctx.runMutation(internal.gmail.releaseSync, { userId, run, waitingAi: true });
+        return;
+      }
+      const token = await gmailApi.accessToken(await decryptText(prep.connection.refreshTokenEnc, prep.connection.iv));
+      // once, for the progress bar: everything left to read
+      const total = b.total ?? await countUnread(ctx, token, prep.connection, b.from, b.cursor);
+      const spanDays = Math.min(b.spanDays, MAX_SPAN_DAYS);
+      const sliceStart = Math.max(b.from, b.cursor - spanDays * DAY_MS);
+      const got = await collect(ctx, prep, startedAt, {
+        token, afterMs: sliceStart, beforeMs: b.cursor + 1000, aiCap: BACKFILL_AI_CAP, savedSince: sliceStart - SAVED_SLACK_MS,
+      });
+      // a slice that held more than one check reads is read again (what was read is skipped), smaller next time
+      let cursor = got.unread <= SYNC_MAX ? sliceStart : b.cursor;
+      // mail the AI could not read stays ahead of the cursor, to be read again
+      if (got.retryAt.length) cursor = Math.min(b.cursor, Math.max(cursor, Math.max(...got.retryAt) + 1000));
+      const done = cursor <= b.from && !got.retryAt.length;
+      const state = done ? "done" : got.aiCapped ? "waiting-ai" : "running";
+      await ctx.runMutation(internal.gmail.writeBackfill, {
+        userId, run, startedAt,
+        inserts: got.inserts, updates: got.updates, matches: got.matches, learned: got.learned, learnedMerchants: got.learnedMerchants,
+        aiCalls: got.aiCalls, processed: got.processed, learnedRev: prep.rev,
+        step: { cursor, spanDays: nextSpanDays(spanDays, got.unread, SYNC_MAX), total, read: got.fetched, state },
+      });
+      // the AI failed for a moment: give it time before asking again
+      if (state === "running") await ctx.scheduler.runAfter(got.retryAt.length ? STEP_RETRY_MS : STEP_GAP_MS, internal.gmail.backfillStep, { userId, run });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Reading old mail failed";
+      console.error("gmail backfill failed", { userId, message });
+      // a few failures in a row pause the connection, and the next step stops
+      await ctx.runMutation(internal.gmail.failSync, { userId, startedAt, error: message, reauth: e instanceof GmailAuthError });
+      if (!(e instanceof GmailAuthError)) await ctx.scheduler.runAfter(STEP_RETRY_MS, internal.gmail.backfillStep, { userId, run });
+    }
+  },
+});
+
+/** A backfill step that read nothing: let go of the connection, and say when it waits for next month's AI reads. */
+export const releaseSync = internalMutation({
+  args: { userId: v.id("users"), run: v.optional(v.string()), waitingAi: v.optional(v.boolean()) },
+  handler: async (ctx, { userId, run, waitingAi }) => {
+    const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (!c) return;
+    const wait = waitingAi && c.backfill && c.backfill.run === run ? { backfill: { ...c.backfill, state: "waiting-ai" as const, lastStepAt: Date.now() } } : {};
+    await ctx.db.patch(c._id, { syncingSince: undefined, ...wait });
   },
 });
 
@@ -906,61 +1124,109 @@ export const writeSync = internalMutation({
   handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, learnedMerchants = {}, aiCalls, scanned, note, processed = [], syncedUpTo = startedAt, learnedRev }) => {
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!c) return;
-    let found = 0;
-    const seen: SeenRow[] = processed.map((p) => ({ messageId: p.id, receivedAt: p.receivedAt, processed: true }));
-    const fresh: { id: Id<"drafts">; date: string }[] = [];
-    for (const d of inserts) {
-      const dup = await ctx.db.query("drafts").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", d.messageId)).first();
-      if (dup) continue;
-      const id = await insertSynced(ctx, userId, "drafts", { ...d, status: "open" });
-      if (d.proposal.type === "expense" && !d.matchedTransactionId) fresh.push({ id, date: d.proposal.date });
-      seen.push(...seenOfDraft(d));
-      found++;
+    const found = await writeDrafts(ctx, userId, startedAt, { inserts, updates, matches, processed });
+    // rows no window can reach any more: well before where the next one starts, even when held back;
+    // none while reading back to a year, whose slices skip what they find here
+    if (!c.backfill || c.backfill.state === "done") {
+      const reach = Math.min(startedAt, windowStart({ ...c, syncedUpTo }, startedAt)) - SEEN_KEEP_MS;
+      for (const r of await ctx.db.query("gmailSeen").withIndex("by_user_received", (q) => q.eq("userId", userId).lt("receivedAt", reach)).take(200)) await ctx.db.delete(r._id);
     }
-    for (const u of updates) {
-      const d = await ctx.db.get(u.id);
-      if (!d || d.userId !== userId || d.status !== "open") continue;
-      const proposal = { ...d.proposal };
-      if (u.note) proposal.note = u.note;
-      if (u.categoryId) { proposal.categoryId = u.categoryId; proposal.subcategoryId = u.subcategoryId; }
-      // the other side of a move between the user's own methods arrived: the draft is that transfer now
-      if (u.transfer) {
-        Object.assign(proposal, { type: "transfer" as const, accountId: u.transfer.accountId, toAccountId: u.transfer.toAccountId, categoryId: undefined, subcategoryId: undefined });
-        if (!proposal.description?.includes(PAIRED_NOTE)) proposal.description = [proposal.description, PAIRED_NOTE].filter(Boolean).join(" · ");
-      }
-      await patchSynced(ctx, userId, u.id, { extraMessageIds: [...new Set([...d.extraMessageIds, ...u.extraMessageIds])], proposal });
-      seen.push(...u.extraMessageIds.map((messageId) => ({ messageId, receivedAt: d.receivedAt })));
-    }
-    // the user may have saved, linked or said "it's new" while the check ran
-    for (const m of matches) {
-      const d = await ctx.db.get(m.id);
-      if (!d || d.userId !== userId || d.status !== "open" || d.matchedTransactionId || d.keptNew) continue;
-      const tx = await ctx.db.get(m.transactionId);
-      if (!tx || tx.userId !== userId || tx.source) continue;
-      await patchSynced(ctx, userId, m.id, { matchedTransactionId: m.transactionId });
-    }
-    await markSeen(ctx, userId, seen);
-    // a debit of a SIP the user set goes straight into it, through the same op the app runs (docs/specs/sips.md)
-    if (fresh.length) {
-      const settings = await ctx.db.query("settings").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
-      if (settings?.sips?.some((x) => !x.stoppedAt)) {
-        await runOps(ctx, userId, [{ id: `gmail-sips-${userId}-${startedAt}`, kind: "sips.saveDrafts", args: { draftIds: fresh.map((f) => f.id), draftDates: fresh.map((f) => f.date) }, at: startedAt }]);
-      }
-    }
-    // rows no window can reach any more: well before where the next one starts, even when held back
-    const reach = Math.min(startedAt, windowStart({ ...c, syncedUpTo }, startedAt)) - SEEN_KEEP_MS;
-    for (const r of await ctx.db.query("gmailSeen").withIndex("by_user_received", (q) => q.eq("userId", userId).lt("receivedAt", reach)).take(200)) await ctx.db.delete(r._id);
     const month = monthOf(startedAt);
     const entry = { at: startedAt, scanned, found, ...(note ? { note } : {}) };
     await ctx.db.patch(c._id, {
       lastSyncAt: startedAt, lastError: undefined, syncedUpTo, syncingSince: undefined, ...(learnedRev !== undefined ? { learnedRev } : {}),
-      aiMonth: month, aiCalls: (c.aiMonth === month ? c.aiCalls : 0) + aiCalls,
-      accountMap: { ...c.accountMap, ...learned },
-      ...(Object.keys(learnedMerchants).length ? { merchantMap: mergeMerchants(c.merchantMap ?? {}, learnedMerchants) } : {}),
+      ...learning(c, month, aiCalls, learned, learnedMerchants),
       log: [entry, ...c.log].slice(0, LOG_KEEP),
     });
   },
 });
+
+/** What a check or a backfill slice learned, and the AI reads it used, as a patch to the connection. */
+function learning(c: Connection, month: string, aiCalls: number, learned: Record<string, Id<"accounts">>, learnedMerchants: NonNullable<Connection["merchantMap"]>) {
+  return {
+    aiMonth: month, aiCalls: (c.aiMonth === month ? c.aiCalls : 0) + aiCalls,
+    accountMap: { ...c.accountMap, ...learned },
+    ...(Object.keys(learnedMerchants).length ? { merchantMap: mergeMerchants(c.merchantMap ?? {}, learnedMerchants) } : {}),
+  };
+}
+
+/**
+ * A backfill slice's outcome: its drafts as a check writes them, and the backfill moved on. Its
+ * slices stay out of the log; finishing adds one line for the whole read.
+ */
+export const writeBackfill = internalMutation({
+  args: {
+    userId: v.id("users"), run: v.string(), startedAt: v.number(), inserts: v.array(insertArg), updates: v.array(updateArg), matches: v.array(matchArg),
+    learned: v.record(v.string(), v.id("accounts")), learnedMerchants: merchantArg, aiCalls: v.number(),
+    processed: v.array(v.object({ id: v.string(), receivedAt: v.number() })), learnedRev: v.number(),
+    step: v.object({ cursor: v.number(), spanDays: v.number(), total: v.number(), read: v.number(), state: v.union(v.literal("running"), v.literal("waiting-ai"), v.literal("done")) }),
+  },
+  handler: async (ctx, { userId, run, startedAt, inserts, updates, matches, learned, learnedMerchants = {}, aiCalls, processed, learnedRev, step }) => {
+    const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (!c) return;
+    const found = await writeDrafts(ctx, userId, startedAt, { inserts, updates, matches, processed });
+    const now = Date.now();
+    // stopped or started again meanwhile: the drafts stand, the backfill is the newer one's
+    const b = c.backfill && c.backfill.run === run ? c.backfill : undefined;
+    const next = b && { ...b, cursor: step.cursor, spanDays: step.spanDays, total: step.total, read: b.read + step.read, found: b.found + found, state: step.state, lastStepAt: now, ...(step.state === "done" ? { finishedAt: now } : {}) };
+    const finished = next?.state === "done" ? { at: startedAt, scanned: next.read, found: next.found, note: `Read back to 1 Jan ${next.year}` } : undefined;
+    await ctx.db.patch(c._id, {
+      syncingSince: undefined, learnedRev,
+      ...learning(c, monthOf(startedAt), aiCalls, learned, learnedMerchants),
+      ...(next ? { backfill: next } : {}),
+      ...(finished ? { log: [finished, ...c.log].slice(0, LOG_KEEP) } : {}),
+    });
+  },
+});
+
+/**
+ * New drafts (once each), folded mails and open drafts that now match an entry; every mail
+ * remembered as dealt with, and a running SIP's debits saved into it. How many drafts are new.
+ */
+async function writeDrafts(ctx: MutationCtx, userId: Id<"users">, startedAt: number, { inserts, updates, matches, processed }: { inserts: (typeof insertArg.type)[]; updates: (typeof updateArg.type)[]; matches: (typeof matchArg.type)[]; processed: { id: string; receivedAt: number }[] }): Promise<number> {
+  let found = 0;
+  const seen: SeenRow[] = processed.map((p) => ({ messageId: p.id, receivedAt: p.receivedAt, processed: true }));
+  const fresh: { id: Id<"drafts">; date: string }[] = [];
+  for (const d of inserts) {
+    const dup = await ctx.db.query("drafts").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", d.messageId)).first();
+    if (dup) continue;
+    const id = await insertSynced(ctx, userId, "drafts", { ...d, status: "open" });
+    if (d.proposal.type === "expense" && !d.matchedTransactionId) fresh.push({ id, date: d.proposal.date });
+    seen.push(...seenOfDraft(d));
+    found++;
+  }
+  for (const u of updates) {
+    const d = await ctx.db.get(u.id);
+    if (!d || d.userId !== userId || d.status !== "open") continue;
+    const proposal = { ...d.proposal };
+    if (u.note) proposal.note = u.note;
+    if (u.categoryId) { proposal.categoryId = u.categoryId; proposal.subcategoryId = u.subcategoryId; }
+    // the other side of a move between the user's own methods arrived: the draft is that transfer now
+    if (u.transfer) {
+      Object.assign(proposal, { type: "transfer" as const, accountId: u.transfer.accountId, toAccountId: u.transfer.toAccountId, categoryId: undefined, subcategoryId: undefined });
+      if (!proposal.description?.includes(PAIRED_NOTE)) proposal.description = [proposal.description, PAIRED_NOTE].filter(Boolean).join(" · ");
+    }
+    await patchSynced(ctx, userId, u.id, { extraMessageIds: [...new Set([...d.extraMessageIds, ...u.extraMessageIds])], proposal });
+    seen.push(...u.extraMessageIds.map((messageId) => ({ messageId, receivedAt: d.receivedAt })));
+  }
+  // the user may have saved, linked or said "it's new" while the check ran
+  for (const m of matches) {
+    const d = await ctx.db.get(m.id);
+    if (!d || d.userId !== userId || d.status !== "open" || d.matchedTransactionId || d.keptNew) continue;
+    const tx = await ctx.db.get(m.transactionId);
+    if (!tx || tx.userId !== userId || tx.source) continue;
+    await patchSynced(ctx, userId, m.id, { matchedTransactionId: m.transactionId });
+  }
+  await markSeen(ctx, userId, seen);
+  // a debit of a SIP the user set goes straight into it, through the same op the app runs (docs/specs/sips.md)
+  if (fresh.length) {
+    const settings = await ctx.db.query("settings").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (settings?.sips?.some((x) => !x.stoppedAt)) {
+      await runOps(ctx, userId, [{ id: `gmail-sips-${userId}-${startedAt}`, kind: "sips.saveDrafts", args: { draftIds: fresh.map((f) => f.id), draftDates: fresh.map((f) => f.date) }, at: startedAt }]);
+    }
+  }
+  return found;
+}
 
 /** A failed check: logged, and after a few in a row the connection pauses itself (or asks to reconnect when the grant is dead). */
 export const failSync = internalMutation({
