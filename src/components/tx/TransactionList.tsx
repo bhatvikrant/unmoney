@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import { useOpenEntry } from "@/lib/nav";
-import { ArrowRight, Camera, Mail, Repeat, Star, Users } from "lucide-react";
+import { ArrowRight, Camera, Mail, Merge, Repeat, Star, Users } from "lucide-react";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { useView } from "@/lib/store";
@@ -68,6 +68,7 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
           {tx.repeatId && !tx.installmentIndex ? <Repeat className="size-3 text-muted-foreground shrink-0" /> : null}
           {tx.photoIds.length ? <Camera className="size-3 text-muted-foreground shrink-0" /> : null}
           {tx.split ? <Users className="size-3 text-muted-foreground shrink-0" aria-label="Split on UnSplit" /> : null}
+          {tx.merged ? <Merge className="size-3 text-muted-foreground shrink-0" aria-label="Merged" /> : null}
           {tx.type === "expense" && tx.amount < 0 ? <Badge variant="secondary" className="text-[10px] px-1 py-0">Refund</Badge> : null}
         </div>
         <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
@@ -105,10 +106,10 @@ export function DayHeader({ date, income, expense, totals = true }: { date: stri
 
 /**
  * A draft read from Gmail, on its day in the ledger: the same shape of row, faded, until it is
- * saved. Not selectable, not swipeable (that would read as deleting an entry); dismissing happens
- * in the form or on the review page.
+ * saved. Not swipeable (that would read as deleting an entry); dismissing happens in the form or on
+ * the review page. While selecting it can be ticked, to link it to the entry it already is.
  */
-export function DraftRow({ draft, onClick, className }: { draft: Draft; onClick?: () => void; className?: string }) {
+export function DraftRow({ draft, onClick, selected, onSelect, className }: { draft: Draft; onClick?: () => void; selected?: boolean; onSelect?: (v: boolean) => void; className?: string }) {
   const { accountName, categoryLabel, fmtSub } = useApp();
   const p = draft.proposal;
   const isTransfer = p.type === "transfer";
@@ -116,10 +117,11 @@ export function DraftRow({ draft, onClick, className }: { draft: Draft; onClick?
   const method = p.accountId ? (isTransfer ? `${accountName(p.accountId)} → ${accountName(p.toAccountId)}` : accountName(p.accountId)) : "";
   return (
     <div
-      className={cn("flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm", onClick && "cursor-pointer hover:bg-accent/40 active:bg-accent", className)}
+      className={cn("flex items-center gap-3 px-4 py-2.5 border-b last:border-b-0 text-sm", onClick && "cursor-pointer hover:bg-accent/40 active:bg-accent", selected && "bg-primary/10", className)}
       role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined} aria-label={`Unsaved entry from Gmail: ${p.note || label}`}
-      onClick={onClick} onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+      onClick={onClick} onKeyDown={onClick ? (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onClick(); } } : undefined}
     >
+      {onSelect ? <Checkbox checked={!!selected} onCheckedChange={(v) => onSelect(!!v)} onClick={(e) => e.stopPropagation()} aria-label="Select this draft" /> : null}
       <div className="w-20 shrink-0 text-xs text-muted-foreground leading-tight line-clamp-2">{label}</div>
       <div className="min-w-0 flex-1">
         <div className="truncate flex items-center gap-1.5">
@@ -217,8 +219,10 @@ export function TransactionList({ txs, drafts, upcoming, selectable, selected, o
                 </SwipeToDelete>
               </Fade>
             ) : r.kind === "draft" ? (
-              <Fade key={`g:${r.d.messageId}`} faded>
-                <DraftRow draft={r.d} onClick={selectable ? undefined : () => openEntry("new", { draft: r.d._id })} />
+              // a ticked draft shows solid, so it reads as picked rather than greyed out
+              <Fade key={`g:${r.d.messageId}`} faded={!selected?.has(r.d._id)}>
+                <DraftRow draft={r.d} onClick={selectable ? () => onToggle?.(r.d._id, !selected?.has(r.d._id)) : () => openEntry("new", { draft: r.d._id })}
+                  selected={selected?.has(r.d._id)} onSelect={selectable ? (v) => onToggle?.(r.d._id, v) : undefined} />
               </Fade>
             ) : (
               <Fade key={`r:${r.o.repeat._id}:${r.o.date}`} faded>
