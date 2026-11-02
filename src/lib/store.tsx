@@ -20,6 +20,7 @@ import { applyChanges } from "../../shared/changes";
 import * as local from "./db";
 import { SHARE_CACHE } from "./share";
 import { clearSafetyCopies } from "./safetyCopy";
+import { usage } from "./usage";
 import type { Meta, Profile, QueuedOp } from "./db";
 
 export type SyncStatus = {
@@ -88,6 +89,7 @@ async function loadEverything(convex: ConvexReactClient): Promise<{ rev: number;
   const snapshot = emptySnapshot();
   const rest = TABLES.filter((t) => t !== "transactions");
   const tables = await Promise.all(rest.map((table) => convex.query(api.sync.table, { table })));
+  usage.down(tables);
   for (const [i, t] of rest.entries()) {
     if (!tables[i]) return null;
     (snapshot as Record<Table, unknown[]>)[t] = tables[i] as unknown[];
@@ -97,6 +99,7 @@ async function loadEverything(convex: ConvexReactClient): Promise<{ rev: number;
   let cursor: string | null = null;
   for (;;) {
     const res: { page: Doc<"transactions">[]; isDone: boolean; continueCursor: string } = await convex.query(api.sync.transactionsPage, { paginationOpts: { numItems: TX_PAGE, cursor } });
+    usage.down(res);
     for (const t of res.page) entries.set(t._id, t);
     if (res.isDone) break;
     cursor = res.continueCursor;
@@ -342,6 +345,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   // ---- following what changes ----
   const following = ready && me != null && !!base && meta.rev !== null && meta.userId === me.userId && !reload;
   const changes = useQuery(api.sync.changes, following ? { since: meta.rev! } : "skip");
+  useEffect(() => { if (changes) usage.down(changes); }, [changes]);
   const merged = useMemo(() => (base && following && changes && changes.rev > (meta.rev ?? 0) ? applyChanges(base, changes) : base), [base, following, changes, meta.rev]);
   /** The user whose copy has caught up with the server in this session. */
   const [caughtUpFor, setCaughtUpFor] = useState<string | null>(null);
@@ -451,6 +455,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
           try {
             const url = await convex.mutation(api.files.generateUploadUrl, {});
             const res = await fetch(url, { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
+            usage.upBytes(blob.size);
             if (!res.ok) throw new Error(`Upload failed (${res.status})`);
             storageId = (await res.json()).storageId;
             // the server serves and deletes a file only for the user who claimed it
@@ -492,6 +497,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
         let results: Awaited<ReturnType<typeof convex.mutation<typeof api.sync.apply>>>;
         try {
+          usage.up(sent);
+          usage.ops(sent.length);
           results = await convex.mutation(api.sync.apply, { ops: sent });
         } catch (e) {
           if (isAuthError(e)) break;

@@ -12,7 +12,7 @@ import { applyTheme } from "@/lib/theme";
 
 /** Also the support and developer contact on Google's consent screen (docs/google-verification.md). */
 const CONTACT_EMAIL = "vik.bhat223@gmail.com";
-const UPDATED = "20 October 2026";
+const UPDATED = "2 November 2026";
 const USER_DATA_POLICY = "https://developers.google.com/terms/api-services-user-data-policy";
 const LIMITED_USE = "https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes";
 
@@ -68,6 +68,14 @@ export default function PrivacyPage() {
           <Sub title="If you connect Gmail">
             Gmail is connected from More › Gmail, through a second Google consent screen that asks for read-only access to your
             mail (the <code className="rounded bg-muted px-1 py-0.5 text-[12px]">gmail.readonly</code> scope). See the next section.
+          </Sub>
+          <Sub title="How you use the app">
+            Counts that help keep UnMoney running well: when the app is opened and for how long, which screens are visited, the
+            device type, operating system and browser, whether it is the installed app, the app version, your time zone, and
+            roughly how much data it syncs. On the server UnMoney also counts how many entries, payment methods, photos and so
+            on each account has, and how much space they take. These are only counts and sizes: never your amounts, notes,
+            category or merchant names. They stay in UnMoney's own database, are seen only by UnMoney's developer, and are not
+            shared with anyone or used for advertising.
           </Sub>
         </Section>
 
@@ -133,7 +141,8 @@ export default function PrivacyPage() {
           </ul>
           <p className="mt-3">
             Your data could also be disclosed if the law requires it, or passed to a new owner if UnMoney were ever sold or
-            merged, in which case you would be told first. There are no ads and no third-party analytics or tracking in the app.
+            merged, in which case you would be told first. There are no ads and no third-party analytics or tracking in the app; the
+            usage counts described above are UnMoney's own and never leave its database.
           </p>
         </Section>
 
@@ -143,6 +152,7 @@ export default function PrivacyPage() {
             <li>Drafts you saved or dismissed: deleted 90 days after you did.</li>
             <li>The encrypted Gmail token and connection settings: until you disconnect Gmail or delete your account.</li>
             <li>Your entries (including ones saved from Gmail), and the rest of your ledger: until you delete them or your account.</li>
+            <li>Usage counts: each app session for 120 days; the daily totals made from them until you delete your account.</li>
           </ul>
         </Section>
 
@@ -158,7 +168,7 @@ export default function PrivacyPage() {
           <p className="mt-3">
             <strong className="font-medium text-foreground">Delete account</strong> at the bottom of the More page. UnMoney
             revokes its Gmail access at Google and deletes your account and everything in it: entries, payment methods,
-            categories, photos, drafts, the Gmail connection and your sign-in. This cannot be undone, so export a backup first
+            categories, photos, drafts, the Gmail connection, usage counts and your sign-in. This cannot be undone, so export a backup first
             (More › Backup &amp; export) if you want one.
           </p>
           <p className="mt-3">If you cannot sign in any more and want your data deleted, write to the address below.</p>

@@ -497,6 +497,105 @@ export default defineSchema({
     .index("by_user_message", ["userId", "messageId"])
     .index("by_user_received", ["userId", "receivedAt"]),
 
+  /**
+   * Usage counts for the superadmin dashboard (convex/usage.ts, shared/admin.ts). Server-only and
+   * never synced to devices: one row per browser or installed app a user signs in on.
+   */
+  usageDevices: defineTable({
+    userId: v.id("users"),
+    /** Random, kept in the device's localStorage. */
+    deviceId: v.string(),
+    firstSeenAt: v.number(),
+    lastSeenAt: v.number(),
+    os: v.string(),
+    browser: v.string(),
+    formFactor: v.union(v.literal("phone"), v.literal("tablet"), v.literal("desktop")),
+    /** Opened as the installed app rather than in a browser tab. */
+    standalone: v.boolean(),
+    appVersion: v.string(),
+    /** Minutes east of UTC, as the device last reported it: local days and hours are counted with it. */
+    tzOffset: v.number(),
+    sessions: v.number(),
+  }).index("by_user_device", ["userId", "deviceId"]),
+
+  /** One device's use on one of its local days. Sums of what its sessions reported (usage.ping). */
+  usageDaily: defineTable({
+    userId: v.id("users"),
+    deviceId: v.string(),
+    day: v.string(),
+    opens: v.number(),
+    /** Time the app was on screen. */
+    activeMs: v.number(),
+    /** Sync data received and sent, as measured on the device (JSON size, so an estimate). */
+    bytesDown: v.number(),
+    bytesUp: v.number(),
+    /** Receipt photos fetched from the network (not the device's cache). */
+    photoFetches: v.number(),
+    opsSent: v.number(),
+    /** Opens by local hour: "h0" … "h23". */
+    hours: v.record(v.string(), v.number()),
+    /** Visits by screen (shared/admin.ts screenKey). */
+    screens: v.record(v.string(), v.number()),
+    /** Sessions begun this day, by how long they lasted (shared/admin.ts LENGTH_BUCKETS). */
+    lengths: v.record(v.string(), v.number()),
+  })
+    .index("by_day", ["day"])
+    .index("by_user_day", ["userId", "day"]),
+
+  /** One opening of the app, with running totals; what usage.ping last stored, so the next one adds only the difference. */
+  usageSessions: defineTable({
+    userId: v.id("users"),
+    deviceId: v.string(),
+    sessionId: v.string(),
+    day: v.string(),
+    startedAt: v.number(),
+    lastSeenAt: v.number(),
+    activeMs: v.number(),
+    bytesDown: v.number(),
+    bytesUp: v.number(),
+    photoFetches: v.number(),
+    opsSent: v.number(),
+    screens: v.record(v.string(), v.number()),
+    appVersion: v.string(),
+  })
+    .index("by_session", ["sessionId"])
+    .index("by_user_started", ["userId", "startedAt"]),
+
+  /**
+   * What each user keeps on the server, counted by admin.refreshStats (daily, or when the dashboard
+   * asks): document counts and sizes per table, files, which features are in use. Counts only,
+   * never amounts, notes or names.
+   */
+  adminStats: defineTable({
+    userId: v.id("users"),
+    computedAt: v.number(),
+    tables: v.record(v.string(), v.object({ count: v.number(), bytes: v.number() })),
+    files: v.object({ count: v.number(), bytes: v.number() }),
+    /** Entries by how they came in. */
+    entries: v.object({ manual: v.number(), gmail: v.number(), imported: v.number(), repeat: v.number(), split: v.number(), withPhotos: v.number(), transfers: v.number() }),
+    /** Entries created per local day (last 365), and by local hour "h0" … "h23". */
+    createdByDay: v.record(v.string(), v.number()),
+    createdByHour: v.record(v.string(), v.number()),
+    /** Oldest entry date the user has (they may have imported years back). */
+    firstEntryDate: v.optional(v.string()),
+    features: v.record(v.string(), v.boolean()),
+    /** Settings worth a chart: main currency, theme, accent, start screen. */
+    prefs: v.record(v.string(), v.string()),
+    accountKinds: v.record(v.string(), v.number()),
+    gmail: v.optional(v.object({
+      status: v.string(),
+      aiCalls: v.number(),
+      aiMonth: v.string(),
+      lastSyncAt: v.optional(v.number()),
+      hasError: v.boolean(),
+      senders: v.number(),
+      drafts: v.object({ open: v.number(), accepted: v.number(), dismissed: v.number(), rule: v.number(), ai: v.number() }),
+    })),
+    syncOps: v.object({ applied: v.number(), rejected: v.number() }),
+    signIns: v.number(),
+    lastSignInAt: v.optional(v.number()),
+  }).index("by_user", ["userId"]),
+
   currencies: defineTable({
     userId: v.id("users"),
     ...synced,

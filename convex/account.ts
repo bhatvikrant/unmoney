@@ -37,6 +37,11 @@ const STEPS: { name: string; take: (ctx: MutationCtx, userId: Id<"users">) => Pr
   ...(["settings", "accountGroups", "accounts", "repeats", "bookmarks", "budgets", "currencies", "importLinks", "categoryCleanups", "history", "gmailConnections", "gmailPending", "drafts", "aiUsage", "syncState"] as const).map((t) => ({
     name: t, take: (ctx: MutationCtx, u: Id<"users">) => ctx.db.query(t).withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH),
   })),
+  // usage counts (convex/usage.ts) and what the superadmin dashboard counted of this user
+  { name: "usageSessions", take: (ctx, u) => ctx.db.query("usageSessions").withIndex("by_user_started", (q) => q.eq("userId", u)).take(BATCH) },
+  { name: "usageDaily", take: (ctx, u) => ctx.db.query("usageDaily").withIndex("by_user_day", (q) => q.eq("userId", u)).take(BATCH) },
+  { name: "usageDevices", take: (ctx, u) => ctx.db.query("usageDevices").withIndex("by_user_device", (q) => q.eq("userId", u)).take(BATCH) },
+  { name: "adminStats", take: (ctx, u) => ctx.db.query("adminStats").withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "authAccounts", take: (ctx, u) => ctx.db.query("authAccounts").withIndex("userIdAndProvider", (q) => q.eq("userId", u)).take(BATCH),
     also: async (ctx, d) => {
       for (const c of await ctx.db.query("authVerificationCodes").withIndex("accountId", (q) => q.eq("accountId", d._id as Id<"authAccounts">)).collect()) await ctx.db.delete(c._id);

@@ -9,6 +9,7 @@
  */
 
 import type * as account from "../account.js";
+import type * as admin from "../admin.js";
 import type * as ai from "../ai.js";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
@@ -27,6 +28,7 @@ import type * as passcode from "../passcode.js";
 import type * as repeats from "../repeats.js";
 import type * as seed from "../seed.js";
 import type * as sync from "../sync.js";
+import type * as usage from "../usage.js";
 
 import type {
   ApiFromModules,
@@ -36,6 +38,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   account: typeof account;
+  admin: typeof admin;
   ai: typeof ai;
   auth: typeof auth;
   crons: typeof crons;
@@ -54,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   repeats: typeof repeats;
   seed: typeof seed;
   sync: typeof sync;
+  usage: typeof usage;
 }>;
 
 /**
