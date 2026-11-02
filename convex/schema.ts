@@ -618,6 +618,24 @@ export default defineSchema({
     .index("by_day", ["day"])
     .index("by_user_day", ["userId", "day"]),
 
+  /**
+   * One user's Claude calls on one of their local days, per feature (usage.recordAi): how many, the
+   * tokens, and what they cost in USD at the price of the day (shared/aiCost.ts).
+   */
+  aiDaily: defineTable({
+    userId: v.id("users"),
+    day: v.string(),
+    feature: v.union(v.literal("tidy"), v.literal("gmail")),
+    calls: v.number(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    cacheWriteTokens: v.number(),
+    cacheReadTokens: v.number(),
+    costUsd: v.number(),
+  })
+    .index("by_day", ["day"])
+    .index("by_user_day", ["userId", "day", "feature"]),
+
   /** One opening of the app, with running totals; what usage.ping last stored, so the next one adds only the difference. */
   usageSessions: defineTable({
     userId: v.id("users"),
