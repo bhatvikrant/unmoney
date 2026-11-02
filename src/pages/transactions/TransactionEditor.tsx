@@ -650,6 +650,8 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
 
         {saved?.merged ? <MergedFrom tx={saved} /> : null}
 
+        {/* a draft read from Gmail can be marked as a SIP before it is saved: its earlier payments come with it */}
+        {draft && !saved ? <div className="mt-3 border-t bg-card"><SipToggle draft={draft} onDone={() => closeEntry()} /></div> : null}
         {saved?.type === "expense" ? (
           <div className="mt-3 border-y bg-card">
             <SipToggle tx={saved} />
