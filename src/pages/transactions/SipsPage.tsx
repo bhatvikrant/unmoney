@@ -9,8 +9,8 @@ import { useOpenEntry } from "@/lib/nav";
 import { dateLabel, monthLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { monthKeyForDate, monthRange } from "../../../shared/period";
-import { knowsAccount, ordinal, perMonth, RHYTHM_LABEL, sipDrafts, sipsList, sipSuggestions, usualDay, type Rhythm, type SipRow, type SipSuggestion } from "../../../shared/sips";
-import { parts } from "../../../shared/dates";
+import { knowsAccount, ordinal, perMonth, RHYTHM_LABEL, sipDrafts, sipsList, sipSuggestions, usualDay, type Rhythm, type SipRow, type SipStatus, type SipSuggestion } from "../../../shared/sips";
+import { diffDays, parts } from "../../../shared/dates";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { EmptyState, InfoHint, Section } from "@/components/shell/misc";
 import { Money } from "@/components/shell/Money";
@@ -145,11 +145,15 @@ export default function SipsPage() {
     );
   };
 
-  const statusText = (r: SipRow) => {
-    const last = r.entries[0];
-    // the badge beside the name says paused or cancelled; this says since when
-    if (r.status !== "running") return last ? `last paid ${dateLabel(last.date, { year: true })}` : "no payments";
-    return `${RHYTHM_LABEL[r.sip.rhythm ?? "monthly"]}${r.next ? ` · next around ${dateLabel(r.next)}` : ""}`;
+  // when it was last paid, and what that says: on time, late (amber), most likely stopped (red)
+  const lastPaid = (r: SipRow) => {
+    const last = r.entries[0]?.date;
+    if (!last) return "No payments yet";
+    if (r.status === "cancelled") return `Cancelled · last paid ${lastLabel(last)}`;
+    const when = `Last paid ${ago(last, today)}`;
+    if (r.status === "stale") return `${when} · ${dateLabel(last, { year: true })}`;
+    if (r.status === "late") return `${when} · ${r.missed} debit${r.missed === 1 ? "" : "s"} missed`;
+    return `${when}${r.next ? ` · next ${dateLabel(r.next)}` : ""}`;
   };
 
   return (
@@ -191,18 +195,20 @@ export default function SipsPage() {
         {rows.length ? (
           <Section title="Your SIPs">
             {rows.map((r) => (
-              <button key={r.sip.id} type="button" onClick={() => setOpenId(r.sip.id)} className="flex w-full items-center gap-3 border-b px-4 py-2.5 text-left text-sm last:border-b-0 hover:bg-accent/40">
+              <button key={r.sip.id} type="button" onClick={() => setOpenId(r.sip.id)} className="flex w-full items-start gap-3 border-b px-4 py-2.5 text-left text-sm last:border-b-0 hover:bg-accent/40">
                 <DayBlock rhythm={r.sip.rhythm ?? "monthly"} day={r.sip.day ?? (r.entries.length ? usualDay(r.entries.map((t) => parts(t.date).d)) : undefined)} dim={r.status !== "running"} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate font-medium">{r.sip.name}</span>
-                    {r.status !== "running" ? <Badge variant="secondary" className="px-1 py-0 text-[10px]">{r.status === "paused" ? "Paused" : "Cancelled"}</Badge> : null}
+                  <div className="flex items-baseline gap-2">
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                      <span className="truncate font-medium">{r.sip.name}</span>
+                      <StatusBadge status={r.status} />
+                    </span>
+                    <Money amount={r.total} className="shrink-0 font-medium" />
                   </div>
-                  <div className="truncate text-xs text-muted-foreground"><Money amount={r.sip.amount} muted /> · {statusText(r)}</div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <Money amount={r.total} />
-                  <div className="text-[11px] text-muted-foreground">{r.entries.length} payment{r.entries.length === 1 ? "" : "s"}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    <Money amount={r.sip.amount} muted /> {RHYTHM_LABEL[r.sip.rhythm ?? "monthly"]} · {r.entries.length} paid
+                  </div>
+                  <div className={cn("truncate text-xs", TONE[r.status])}>{lastPaid(r)}</div>
                 </div>
               </button>
             ))}
@@ -214,6 +220,32 @@ export default function SipsPage() {
       {review ? <MarkSipSheet key={review.id} picked={[{ note: review.payments[0].note, amount: review.amount, date: review.payments[0].date }]} open onOpenChange={(o) => { if (!o) setReview(null); }} /> : null}
     </>
   );
+}
+
+/** How each status reads: as usual, amber when late, red when most likely stopped. */
+const TONE: Record<SipStatus, string> = {
+  running: "text-muted-foreground", late: "text-amber-600 dark:text-amber-400", stale: "text-destructive", cancelled: "text-muted-foreground",
+};
+
+function StatusBadge({ status }: { status: SipStatus }) {
+  if (status === "running") return null;
+  if (status === "cancelled") return <Badge variant="secondary" className="px-1 py-0 text-[10px]">Cancelled</Badge>;
+  return (
+    <Badge variant="outline" className={cn("px-1 py-0 text-[10px]", status === "late" ? "border-amber-500/40" : "border-destructive/40", TONE[status])}>
+      {status === "late" ? "Late" : "Stopped?"}
+    </Badge>
+  );
+}
+
+/** "today", "3 days ago", "5 weeks ago", "7 months ago", "2 years ago". */
+function ago(date: string, today: string): string {
+  const days = diffDays(date, today);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
+  const months = Math.floor(days / 30.44);
+  return months < 24 ? `${months} months ago` : `${Math.floor(months / 12)} years ago`;
 }
 
 /**
@@ -295,7 +327,10 @@ function SipSheet({ row, onClose }: { row: SipRow | null; onClose: () => void })
     })).catch(fail);
   }
 
-  const state = row.status === "cancelled" ? "cancelled" : row.status === "paused" ? "paused: no debit lately, the next one goes straight in" : RHYTHM_LABEL[sip.rhythm ?? "monthly"];
+  const state = row.status === "cancelled" ? "cancelled"
+    : row.status === "stale" ? `no debit since ${dateLabel(entries[0].date, { year: true })}, most likely stopped: if one comes, it still goes straight in`
+      : row.status === "late" ? `${row.missed} debit${row.missed === 1 ? "" : "s"} missed: the next one goes straight in`
+        : RHYTHM_LABEL[sip.rhythm ?? "monthly"];
   return (
     <BottomSheet open onOpenChange={(o) => { if (!o) onClose(); }} title={sip.name} description={`${entries.length} payment${entries.length === 1 ? "" : "s"} · ${state}`}>
       <div className="space-y-3 px-2">
