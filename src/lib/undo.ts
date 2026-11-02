@@ -46,6 +46,12 @@ export function useUndoableDelete() {
       offerUndo(`Deleted ${gone.length} ${gone.length === 1 ? "entry" : "entries"}`, () => restore(gone));
     },
 
+    /** Two entries become one (transactions.merge); Undo puts both back as they were. The entry's own screen can undo it later too. */
+    async merge(keepId: string, removeId: string) {
+      await dispatch("transactions.merge", { keepId: keepId as Id<"transactions">, removeId: removeId as Id<"transactions"> });
+      offerUndo("Merged into one entry", () => dispatch("transactions.unmerge", { id: keepId as Id<"transactions"> }));
+    },
+
     async note(note: Doc<"notes">) {
       await dispatch("notes.remove", { id: note._id });
       offerUndo("Note deleted", () => dispatch("notes.upsert", { date: note.date, text: note.text, color: note.color }));

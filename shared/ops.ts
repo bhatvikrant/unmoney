@@ -71,6 +71,13 @@ export type Template = Doc<"bookmarks">["template"];
 export type TxSplit = NonNullable<Doc<"transactions">["split"]>;
 /** Where an entry was read from; only Gmail so far. Set by the drafts ops, never by the entry form. */
 export type TxSource = NonNullable<Doc<"transactions">["source"]>;
+/** An entry as a merge recorded it (transactions.merge, drafts.link): everything but its ids. */
+export type EntrySnapshot = Omit<Doc<"transactions">, "_id" | "_creationTime" | "userId" | "rev" | "merged"> & { merged?: MergeRecord };
+/** What a merged entry was made of (Doc<"transactions">["merged"], typed). */
+export type MergeRecord = {
+  at: number; kept: EntrySnapshot; removed?: EntrySnapshot; draftId?: Id<"drafts">;
+  bookmarkIds?: Id<"bookmarks">[]; draftIds?: Id<"drafts">[];
+};
 export type TxFields = {
   type: TxType;
   date: string;
@@ -214,6 +221,17 @@ export interface Ops {
   "transactions.bulkUpdate": { args: { ids: Id<"transactions">[]; date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> }; result: void };
   /** ifPresent: entries already gone are skipped rather than refusing the lot (a chunked restore, after the server's sweep). */
   "transactions.bulkRemove": { args: { ids: Id<"transactions">[]; ifPresent?: boolean }; result: void };
+  /**
+   * Two entries that are one payment become one: `keepId` stays as it is, adds the other's tags and photos, and takes its
+   * note, description, mail and split link where it has none of its own. `removeId` is deleted; bookmarks and Gmail drafts
+   * pointing at it point at the kept entry instead. The kept entry records both as they were (`merged`), for unmerge.
+   */
+  "transactions.merge": { args: { keepId: Id<"transactions">; removeId: Id<"transactions"> }; result: void };
+  /**
+   * Undo a merge (transactions.merge or drafts.link), however long ago: the entry is as it was before it, and the entry
+   * merged into it comes back (as a new entry, with its bookmarks and drafts) or the Gmail draft is open again.
+   */
+  "transactions.unmerge": { args: { id: Id<"transactions"> }; result: void };
   /** Link entries to the shared expense they became on UnSplit (or, with null, unlink them). Entries gone meanwhile are left out. */
   "transactions.setSplit": { args: { ids: Id<"transactions">[]; split: TxSplit | null }; result: void };
   "transactions.importRows": {
@@ -243,8 +261,12 @@ export interface Ops {
   "drafts.acceptMany": { args: { items: (TxFields & { id: Id<"drafts"> })[] }; result: { ids: Id<"transactions">[]; accepted: Id<"drafts">[]; failed: number } };
   /** "Not an entry": the drafts are dismissed. Ones gone or already handled are left out. */
   "drafts.dismiss": { args: { ids: Id<"drafts">[] }; result: void };
-  /** "Yes, that's the one I typed in": the existing entry gets the draft's `source`, the draft becomes accepted. */
-  "drafts.link": { args: { id: Id<"drafts">; transactionId: Id<"transactions"> }; result: void };
+  /**
+   * "Yes, that's the one I typed in": the existing entry gets the draft's `source`, the draft becomes accepted. With
+   * `useMail` the entry also takes what the mail says (withMail): its date, amount and note, and the payment method and category where the mail names them.
+   * Either way the entry records what it was (`merged`), so transactions.unmerge can take the mail off again.
+   */
+  "drafts.link": { args: { id: Id<"drafts">; transactionId: Id<"transactions">; useMail?: boolean }; result: void };
   /** "No, it's new": the draft stops pointing at the entry it looked like, goes back to the ledger and is never matched again. */
   "drafts.unmatch": { args: { id: Id<"drafts"> }; result: void };
   /** Undo an import or a dismiss: the drafts are open again, and the entries in `transactionIds` that an import made from them are deleted. */
@@ -366,6 +388,8 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "transactions.remove": ["transactions", "repeats"],
   "transactions.bulkUpdate": ["accounts", "categories", "transactions"],
   "transactions.bulkRemove": ["transactions"],
+  "transactions.merge": ["transactions", "bookmarks", "drafts"],
+  "transactions.unmerge": ["transactions", "bookmarks", "drafts", "accounts", "categories", "repeats"],
   "transactions.setSplit": ["transactions"],
   "transactions.importRows": ["settings", "accountGroups", "accounts", "categories", "currencies", "transactions"],
   "transactions.copy": ["transactions"],
@@ -374,7 +398,7 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "drafts.accept": ["drafts", "transactions", "accounts", "categories"],
   "drafts.acceptMany": ["drafts", "transactions", "accounts", "categories"],
   "drafts.dismiss": ["drafts"],
-  "drafts.link": ["drafts", "transactions"],
+  "drafts.link": ["drafts", "transactions", "accounts", "categories"],
   "drafts.unmatch": ["drafts"],
   "drafts.reopen": ["drafts", "transactions"],
   "repeats.update": ["repeats", "accounts", "categories"],
@@ -439,6 +463,8 @@ export function txScope(op: Op): TxScope {
     case "transactions.bulkRemove":
     case "transactions.setSplit": return { ids: a.ids as string[] };
     case "transactions.copy": return { ids: [id] };
+    case "transactions.merge": return { ids: [a.keepId as string, a.removeId as string] };
+    case "transactions.unmerge": return { ids: [id] };
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
     case "drafts.link": return { ids: [a.transactionId as string] };
     case "drafts.reopen": return { ids: (a.transactionIds as string[] | undefined) ?? [] };
@@ -756,6 +782,40 @@ function shiftOccurrence(date: string, from: string, to: string, rep: Pick<Doc<"
   return out;
 }
 
+/**
+ * An entry as it would be with what a Gmail draft says (drafts.link with useMail): the mail's date, amount
+ * and note, and its payment method and category where it names them; the entry keeps the rest (tags,
+ * photos, a category of the same type). An amount in another currency comes from the mail or not at all.
+ */
+export function withMail(t: Doc<"transactions">, p: Doc<"drafts">["proposal"]): TxFields {
+  const sameType = p.type === t.type;
+  const transfer = p.type === "transfer";
+  return {
+    type: p.type, date: p.date, time: p.time ?? t.time,
+    accountId: p.accountId ?? t.accountId,
+    toAccountId: transfer ? p.toAccountId ?? t.toAccountId : undefined,
+    categoryId: transfer ? undefined : p.categoryId ?? (sameType ? t.categoryId : undefined),
+    subcategoryId: transfer ? undefined : p.categoryId ? p.subcategoryId : sameType ? t.subcategoryId : undefined,
+    amount: p.amount, subAmount: p.subAmount, subCurrency: p.subAmount ? p.subCurrency : undefined, exchangeRate: undefined,
+    note: p.note || t.note, description: p.description ?? t.description,
+    tags: t.tags, photoIds: t.photoIds, feeAmount: transfer && sameType ? t.feeAmount : undefined,
+  };
+}
+
+/** An entry without its ids, for a merge record (transactions.merge, drafts.link). */
+function snapshotOf(t: Doc<"transactions">): EntrySnapshot {
+  const { _id, _creationTime, userId, rev, ...rest } = t;
+  void _id; void _creationTime; void userId; void rev;
+  return rest as EntrySnapshot;
+}
+
+/** A merge record with every amount in it scaled, down to the merges inside it (a change of decimals). */
+function scaleMerge(m: MergeRecord | undefined, scale: (n: number | undefined) => number | undefined): MergeRecord | undefined {
+  if (!m) return undefined;
+  const one = (s: EntrySnapshot): EntrySnapshot => clean({ ...s, amount: scale(s.amount)!, feeAmount: scale(s.feeAmount), installmentTotal: scale(s.installmentTotal), merged: scaleMerge(s.merged, scale) });
+  return { ...m, kept: one(m.kept), removed: m.removed && one(m.removed) };
+}
+
 const templateOf = (t: TxFields): Template => ({
   type: t.type, accountId: t.accountId, toAccountId: t.toAccountId, categoryId: t.categoryId, subcategoryId: t.subcategoryId,
   amount: t.amount, note: t.note, description: t.description, tags: t.tags, feeAmount: t.feeAmount,
@@ -1057,7 +1117,7 @@ function rescale(w: Work, ids: Id<"transactions">[], factor: number) {
   const scale = (n: number | undefined) => (n === undefined ? undefined : scaleAmount(n, factor));
   for (const id of ids) {
     const t = w.must("transactions", id);
-    w.patch("transactions", id, { amount: scale(t.amount)!, feeAmount: scale(t.feeAmount), installmentTotal: scale(t.installmentTotal) });
+    w.patch("transactions", id, { amount: scale(t.amount)!, feeAmount: scale(t.feeAmount), installmentTotal: scale(t.installmentTotal), merged: scaleMerge(t.merged as MergeRecord | undefined, scale) });
   }
 }
 
@@ -1116,6 +1176,8 @@ export function restoreRowsFrom(data: BackupData, ids: RestoreIds): Record<strin
       categoryId: t.categoryId ? map(ids.categories, t.categoryId) : undefined,
       subcategoryId: t.subcategoryId ? map(ids.categories, t.subcategoryId) : undefined,
       repeatId: t.repeatId ? map(ids.repeats, t.repeatId) : undefined,
+      // what it was merged from names the backup's ids, not the restored ones: it cannot be undone after a restore
+      merged: undefined,
       // which backup entry this was, so a bookmark of it can point at the restored copy
       fromBackupId: typeof t._id === "string" ? t._id : undefined,
     }];
@@ -1572,6 +1634,75 @@ const handlers: Handlers = {
     w.removeWhere("transactions", (t) => gone.has(t._id));
   },
 
+  "transactions.merge": (w, { keepId, removeId }) => {
+    if (keepId === removeId) throw new Error("Pick two different entries");
+    const keep = w.must("transactions", keepId, "That entry is gone");
+    const gone = w.must("transactions", removeId, "That entry is gone");
+    const photoIds = [...new Set([...keep.photoIds, ...gone.photoIds])];
+    if (photoIds.length > 3) throw new Error("Together they have more than 3 photos. Remove some first.");
+    const bookmarkIds = w.snap.bookmarks.filter((b) => b.transactionId === removeId).map((b) => b._id);
+    const draftIds = w.snap.drafts.filter((d) => d.transactionId === removeId || d.matchedTransactionId === removeId).map((d) => d._id);
+    const merged: MergeRecord = { at: w.at, kept: snapshotOf(keep), removed: snapshotOf(gone), bookmarkIds, draftIds };
+    w.patch("transactions", keepId, {
+      tags: [...new Set([...keep.tags, ...gone.tags])], photoIds,
+      note: keep.note || gone.note, description: keep.description || gone.description,
+      // a mail on either one stays: the merged entry is that mail's payment
+      source: keep.source ?? gone.source, split: keep.split ?? gone.split, merged,
+    });
+    for (const id of bookmarkIds) w.patch("bookmarks", id, { transactionId: keepId });
+    for (const id of draftIds) {
+      const d = w.must("drafts", id);
+      w.patch("drafts", id, {
+        ...(d.transactionId === removeId ? { transactionId: keepId } : {}),
+        ...(d.matchedTransactionId === removeId ? { matchedTransactionId: keepId } : {}),
+      });
+    }
+    w.delete("transactions", removeId);
+  },
+
+  "transactions.unmerge": (w, { id }) => {
+    const t = w.must("transactions", id, "That entry is gone");
+    const m = t.merged as MergeRecord | undefined;
+    if (!m) throw new Error("That entry was not merged");
+    // a payment method, category or schedule gone since (merged away, tidied up) falls back to what the entry has now
+    const back = (s: EntrySnapshot): EntrySnapshot => {
+      const has = (table: "accounts" | "categories" | "repeats", ref: string | undefined) => !!ref && !!w.get(table, ref);
+      const r: EntrySnapshot = { ...s };
+      if (!has("accounts", r.accountId)) r.accountId = t.accountId;
+      if (r.type === "transfer" && !has("accounts", r.toAccountId)) r.toAccountId = t.toAccountId;
+      if (r.type === "transfer" && (!r.toAccountId || r.toAccountId === r.accountId)) throw new Error("Can't undo: a payment method it used is gone");
+      if (r.type !== "transfer" && !has("categories", r.categoryId)) {
+        if (t.type !== r.type || !t.categoryId) throw new Error("Can't undo: a category it used is gone");
+        r.categoryId = t.categoryId;
+        r.subcategoryId = t.subcategoryId;
+      }
+      if (r.subcategoryId && !has("categories", r.subcategoryId)) r.subcategoryId = undefined;
+      if (r.repeatId && !has("repeats", r.repeatId)) r.repeatId = undefined;
+      return r;
+    };
+    const kept = back(m.kept);
+    // every field the entry has now that it did not have before goes, as well as each one that changed
+    const cleared = Object.fromEntries(Object.keys(t).filter((k) => !k.startsWith("_") && k !== "userId" && k !== "rev" && !(k in kept)).map((k) => [k, undefined]));
+    w.patch("transactions", id, { ...cleared, ...kept } as Partial<Doc<"transactions">>);
+    if (m.removed) {
+      const again = w.insert("transactions", back(m.removed) as never);
+      for (const b of m.bookmarkIds ?? []) if (w.get("bookmarks", b)?.transactionId === id) w.patch("bookmarks", b, { transactionId: again });
+      for (const d of m.draftIds ?? []) {
+        const draft = w.get("drafts", d);
+        if (!draft) continue;
+        w.patch("drafts", d, {
+          ...(draft.transactionId === id ? { transactionId: again } : {}),
+          ...(draft.matchedTransactionId === id ? { matchedTransactionId: again } : {}),
+        });
+      }
+    }
+    if (m.draftId) {
+      const draft = w.get("drafts", m.draftId);
+      // it was this entry: never offer it as "already added?" for the same one again
+      if (draft && draft.status === "accepted" && draft.transactionId === id) w.patch("drafts", draft._id, { status: "open", transactionId: undefined, resolvedAt: undefined, keptNew: true });
+    }
+  },
+
   "transactions.setSplit": (w, { ids, split }) => {
     if (split && (split.app !== "unsplit" || !split.expenseId.trim())) throw new Error("Bad split link");
     const link = split ? { app: split.app, expenseId: split.expenseId.trim() } : undefined;
@@ -1794,8 +1925,8 @@ const handlers: Handlers = {
 
   "transactions.copy": (w, { id, useToday, today }) => {
     const t = w.must("transactions", id);
-    const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, split, source, ...rest } = t;
-    void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal; void split; void source;
+    const { _id, _creationTime, userId, repeatId, installmentIndex, installmentCount, installmentTotal, split, source, merged, ...rest } = t;
+    void _id; void _creationTime; void userId; void repeatId; void installmentIndex; void installmentCount; void installmentTotal; void split; void source; void merged;
     return w.insert("transactions", { ...rest, date: useToday ? (today && isDate(today) ? today : todayISO()) : t.date });
   },
 
@@ -1838,13 +1969,15 @@ const handlers: Handlers = {
       w.patch("drafts", id, { status: "open", transactionId: undefined, resolvedAt: undefined });
     }
   },
-  "drafts.link": (w, { id, transactionId }) => {
+  "drafts.link": (w, { id, transactionId, useMail }) => {
     const draft = w.must("drafts", id, "That draft is gone");
     if (draft.status !== "open") throw new Error("That draft was already handled");
     const tx = w.must("transactions", transactionId, "That entry is gone");
     // one entry is one payment: a second mail that looks like it is another payment, not this one again
     if (tx.source && tx.source.messageId !== draft.messageId) throw new Error("That entry already came from another mail");
-    w.patch("transactions", transactionId, { source: { app: "gmail", messageId: draft.messageId } });
+    const fields = useMail ? validateTx(w, withMail(tx, draft.proposal), tx) : {};
+    const merged: MergeRecord = { at: w.at, kept: snapshotOf(tx), draftId: id };
+    w.patch("transactions", transactionId, { ...fields, source: { app: "gmail", messageId: draft.messageId }, merged });
     w.patch("drafts", id, { status: "accepted", transactionId, matchedTransactionId: undefined, resolvedAt: w.at });
   },
 

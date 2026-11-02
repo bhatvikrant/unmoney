@@ -159,7 +159,7 @@ export default function TransactionsPage() {
       {/* beside an open entry (wide screens) the + would sit on the panel */}
       {(bulk.active && view === "daily") || entryOpen ? null : <Fab title="New entry (N) · hold for quick add (Q)" onHold={() => setQuickOpen(true)} onClick={(e) => { primeKeyboard(e.currentTarget); openEntry("new", { date: addDate() }); }} />}
       <QuickAddSheet open={quickOpen} onOpenChange={setQuickOpen} onNew={() => openEntry("new", { date: addDate() })} />
-      {view === "daily" ? <BulkBar bulk={bulk} txs={txs} /> : null}
+      {view === "daily" ? <BulkBar bulk={bulk} txs={txs} drafts={drafts} /> : null}
       <FilterSheet key={filterKey} open={filterOpen} onOpenChange={setFilterOpen} txs={raw ?? []} />
     </>
   );

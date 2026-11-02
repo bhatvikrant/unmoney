@@ -34,3 +34,33 @@ test("a merge synced to the server moves every entry of the merged methods", asy
   expect(txs.map((x) => [x.note, x.accountId === bankId])).toEqual([["Lunch", true]]);
   expect((await accounts()).some((a) => a._id === cashId)).toBe(false);
 });
+
+test("merging two entries on the server keeps one and repoints its bookmark, and unmerging puts them back", async () => {
+  const t = convexTest({ schema, modules });
+  const userId = await t.run((ctx) => ctx.db.insert("users", { email: "e@x" }));
+  const as = t.withIdentity({ subject: `${userId}|s` });
+  let n = 0;
+  const op = (kind: Op["kind"], args: unknown): Op => ({ id: `op${++n}`, kind, args, at: n });
+  const apply = (...ops: Op[]) => as.mutation(api.sync.apply, { ops });
+  await apply(op("settings.completeOnboarding", { currency: "USD" }));
+  const cashId = ((await as.query(api.sync.table, { table: "accounts" })) as Doc<"accounts">[]).find((a) => a.name === "Cash")!._id;
+  const food = ((await as.query(api.sync.table, { table: "categories" })) as Doc<"categories">[]).find((c) => c.name === "Food")!._id;
+  const entry = { type: "expense", date: "2026-03-04", accountId: cashId, categoryId: food, amount: 700, tags: [], photoIds: [] };
+  await apply(op("transactions.create", { ...entry, note: "Lunch" }), op("transactions.create", { ...entry, note: "", tags: ["work"] }));
+  const txs = async () => (await as.query(api.sync.table, { table: "transactions" })) as Doc<"transactions">[];
+  const [lunch, other] = await txs();
+  await apply(op("bookmarks.create", { template: { type: "expense", accountId: cashId, categoryId: food, amount: 700, note: "", tags: [] }, transactionId: other._id }));
+
+  const [res] = await apply(op("transactions.merge", { keepId: lunch._id, removeId: other._id }));
+  expect(res.status).toBe("applied");
+  expect((await txs()).map((x) => [x._id, x.note, x.tags])).toEqual([[lunch._id, "Lunch", ["work"]]]);
+  const bookmarks = async () => (await as.query(api.sync.table, { table: "bookmarks" })) as Doc<"bookmarks">[];
+  expect((await bookmarks())[0].transactionId).toBe(lunch._id);
+
+  // undone later: both entries are back as they were, and the bookmark is on the one it was made from
+  const [undo] = await apply(op("transactions.unmerge", { id: lunch._id }));
+  expect(undo.status).toBe("applied");
+  const after = await txs();
+  expect(after.map((x) => [x.note, x.tags, x.merged]).sort()).toEqual([["", ["work"], undefined], ["Lunch", [], undefined]]);
+  expect((await bookmarks())[0].transactionId).toBe(after.find((x) => x.note === "")!._id);
+});

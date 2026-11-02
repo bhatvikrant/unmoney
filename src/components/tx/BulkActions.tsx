@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bookmark, CalendarDays, StickyNote, Tag, Trash2, Users, WalletCards, X } from "lucide-react";
+import { Bookmark, CalendarDays, Merge, StickyNote, Tag, Trash2, Users, WalletCards, X } from "lucide-react";
 import { useLocation } from "react-router";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -9,9 +9,10 @@ import { useApp } from "@/lib/app";
 import { sumKinds } from "../../../shared/ledger";
 import { Money } from "@/components/shell/Money";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
-import type { Tx } from "@/components/tx/TransactionList";
+import type { Draft, Tx } from "@/components/tx/TransactionList";
 import type { BulkSelect } from "@/components/tx/useBulkSelect";
 import { SplitDialog } from "@/components/tx/SplitDialog";
+import { MergeDialog, type MergePair } from "@/components/tx/MergeDialog";
 import { canSplit } from "@/lib/unsplit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -22,8 +23,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 type Edit = null | "date" | "note" | "delete";
 
-/** Action bar (plus the pickers and dialogs it opens) for the entries ticked in `bulk`. */
-export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
+/**
+ * Action bar (plus the pickers and dialogs it opens) for the entries ticked in `bulk`. Gmail `drafts`
+ * shown in the same list can be ticked too, but only to merge one with an entry: every other action
+ * is for entries.
+ */
+export function BulkBar({ bulk, txs, drafts = [] }: { bulk: BulkSelect; txs: Tx[]; drafts?: Draft[] }) {
   const bar = useBottomBar();
   const { ledger } = useApp();
   const view = useView();
@@ -36,11 +41,17 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
   const [val, setVal] = useState("");
   const [sheet, setSheet] = useState<null | "category" | "account">(null);
   const [split, setSplit] = useState(false);
+  const [merge, setMerge] = useState<MergePair | null>(null);
   const [busy, setBusy] = useState(false);
 
   const chosen = useMemo(() => txs.filter((t) => bulk.selected.has(t._id)), [txs, bulk.selected]);
   const totals = useMemo(() => sumKinds(chosen, ledger), [chosen, ledger]);
   const n = chosen.length;
+  const chosenDrafts = useMemo(() => drafts.filter((d) => bulk.selected.has(d._id)), [drafts, bulk.selected]);
+  // exactly two rows: two entries, or an entry and a draft (which links it to the mail); two drafts are not one entry yet
+  const pair: MergePair | null = n + chosenDrafts.length !== 2 ? null
+    : n === 2 ? { kind: "entries", a: chosen[0], b: chosen[1] }
+    : n === 1 ? { kind: "link", tx: chosen[0], draft: chosenDrafts[0] } : null;
   // The category picker lists one type at a time; entries of the other type (and transfers) are left alone.
   const catType = chosen.some((t) => t.type === "expense") ? "expense" : "income";
   const ids = () => chosen.map((t) => t._id as Id<"transactions">);
@@ -96,7 +107,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
 
   if (!bulk.active) return null;
   const entryOpen = pathname.startsWith("/t/");
-  const off = n === 0 || busy;
+  const off = n === 0 || busy || chosenDrafts.length > 0;
   return (
     <>
       {/* beside an open entry (wide screens) it spans the list only, not the entry's own bar */}
@@ -104,12 +115,18 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
         <div className="mx-auto max-w-3xl">
           <div className="flex items-center gap-2 px-3 pt-2 text-sm">
             <Button variant="outline" size="sm" onClick={() => (n === txs.length ? bulk.clear() : bulk.selectAll(txs))}>{n === txs.length && n > 0 ? "Clear" : "Select all"}</Button>
-            <span className="text-muted-foreground">{n} selected</span>
+            <span className="text-muted-foreground">{n + chosenDrafts.length} selected</span>
             <span className="flex-1" />
             {n ? <Money amount={totals.income - totals.expense} className="text-xs" /> : null}
             <Button variant="ghost" size="icon" aria-label="Exit selection" onClick={bulk.exit}><X className="size-4" /></Button>
           </div>
           <div className="flex items-center gap-2 p-3 pt-1 overflow-x-auto">
+            {/* first, where a phone shows it without scrolling: two rows ticked, or a draft (which can only be merged) */}
+            {pair || chosenDrafts.length ? (
+              <Button variant="outline" size="sm" disabled={busy || !pair} title={pair ? undefined : "Tick one entry and one email draft to merge them"} onClick={() => setMerge(pair)}>
+                <Merge className="size-4" />Merge
+              </Button>
+            ) : null}
             <Button variant="outline" size="sm" disabled={off} onClick={() => setEdit("date")}><CalendarDays className="size-4" />Date</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={() => setSheet("category")}><Tag className="size-4" />Category</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={() => setSheet("account")}><WalletCards className="size-4" />Payment method</Button>
@@ -122,6 +139,7 @@ export function BulkBar({ bulk, txs }: { bulk: BulkSelect; txs: Tx[] }) {
       </div>
       <CategoryPicker open={sheet === "category"} onOpenChange={(o) => !o && setSheet(null)} type={catType} onPick={pickCategory} />
       <AccountPicker open={sheet === "account"} onOpenChange={(o) => !o && setSheet(null)} onPick={pickAccount} title="Move to payment method" />
+      <MergeDialog pair={merge} onOpenChange={(o) => !o && setMerge(null)} onDone={() => { setMerge(null); bulk.exit(); }} />
       <SplitDialog open={split} onOpenChange={(o) => !o && setSplit(false)} txs={chosen} />
       <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
         <DialogContent>
