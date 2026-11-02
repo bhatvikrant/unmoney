@@ -13,6 +13,7 @@ import { Money } from "@/components/shell/Money";
 import { TransactionList, TransactionRow } from "@/components/tx/TransactionList";
 import { useApp } from "@/lib/app";
 import { useView } from "@/lib/store";
+import { sipsOf } from "../../../shared/sips";
 import { useOpenEntry } from "@/lib/nav";
 import { longMonth } from "@/lib/format";
 import { addDays, parts } from "../../../shared/dates";
@@ -105,6 +106,7 @@ function Body({ d, open, recapKey, range, back, onDrill }: {
       case "hour": return hourRange(d.hour);
       case "scheduled": return "Scheduled entries";
       case "income": return "Income";
+      case "sip": return (d.id ? sipsOf(view).find((x) => x.id === d.id)?.name : undefined) ?? "Into SIPs";
       case "largest": return `Your ${d.count} largest`;
     }
   })();

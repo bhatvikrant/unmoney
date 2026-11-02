@@ -25,6 +25,7 @@ export function encodeDrill(d: RecapDrill): string {
     case "hour": return `h:${d.hour}`;
     case "scheduled": return "s";
     case "income": return "i";
+    case "sip": return d.id ? `p:${d.id}` : "p";
     case "largest": return `top:${d.count}`;
   }
 }
@@ -35,6 +36,7 @@ export function decodeDrill(s: string | null, card: RecapCard | undefined): Reca
   if (s === "rest") return card?.kind === "categories" ? { kind: "rest", exclude: card.top.map((t) => t.id) } : null;
   if (s === "s") return { kind: "scheduled" };
   if (s === "i") return { kind: "income" };
+  if (s === "p") return { kind: "sip" };
   const at = s.indexOf(":");
   if (at < 1) return null;
   const tag = s.slice(0, at), v = s.slice(at + 1);
@@ -45,6 +47,7 @@ export function decodeDrill(s: string | null, card: RecapCard | undefined): Reca
     case "m": return /^\d{4}-(0[1-9]|1[0-2])$/.test(v) ? { kind: "month", month: v } : null;
     case "n": return { kind: "note", text: v };
     case "a": return { kind: "account", id: v };
+    case "p": return { kind: "sip", id: v };
     case "h": { const h = Number(v); return Number.isInteger(h) && h >= 0 && h < 24 ? { kind: "hour", hour: h } : null; }
     case "top": { const n = Number(v); return Number.isInteger(n) && n > 0 && n <= 50 ? { kind: "largest", count: n } : null; }
   }

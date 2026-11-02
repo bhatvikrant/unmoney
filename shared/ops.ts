@@ -8,7 +8,7 @@
  * one received.
  */
 import type { Doc, Id } from "../convex/_generated/dataModel";
-import { addMonths, todayISO } from "./dates";
+import { addMonths, diffDays, todayISO } from "./dates";
 import { currencyInfo } from "./currencies";
 import { DEFAULT_ACCOUNTS, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_GROUPS, DEFAULT_INCOME_CATEGORIES, type AccountKind } from "./defaults";
 import { drawsFromLinked, resolveKind } from "./ledger";
@@ -17,7 +17,7 @@ import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
 import { normName, normNote } from "./categoryLint";
 import { describeOp, HISTORY_COALESCE_MS, HISTORY_KINDS, HISTORY_MAX, type HistoryLine } from "./history";
-import { sipFor, sipKey, sipsOf, type Sip } from "./sips";
+import { aroundDates, fromGmail, sipFor, sipKey, sipsOf, type Rhythm, type Sip } from "./sips";
 
 export const TABLES = [
   "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies", "categoryCleanups", "history", "drafts",
@@ -290,9 +290,15 @@ export interface Ops {
    * A SIP made from payments already in the ledger (a suggestion, or "Mark as SIP" on an entry): they are
    * filed under it, and so is every later expense with one of their notes and about the same amount.
    */
-  "sips.create": { args: { name: string; transactionIds: Id<"transactions">[] }; result: string };
+  "sips.create": { args: { name: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; rhythm?: Rhythm }; result: string };
   /** File more payments under a SIP; their notes become its keys too. */
-  "sips.mark": { args: { id: string; transactionIds: Id<"transactions">[] }; result: void };
+  "sips.mark": { args: { id: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; resume?: boolean }; result: void };
+  /**
+   * Save waiting Gmail drafts that a running SIP takes into it (the Gmail check runs this for the
+   * drafts it just made). `draftDates` are their dates, so the server loads the entries around them
+   * for the duplicate check. Returns how many were saved.
+   */
+  "sips.saveDrafts": { args: { draftIds: Id<"drafts">[]; draftDates: string[] }; result: number };
   /** "Not a SIP": the entries go back to the ledger. Ones gone meanwhile are left out. */
   "sips.unmark": { args: { ids: Id<"transactions">[] }; result: void };
   /** Rename it, or stop (or restart) it: a stopped SIP keeps its payments and takes no new ones. */
@@ -422,8 +428,9 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "repeats.addNext": ["repeats", "transactions", "accounts", "categories"],
   "repeats.skip": ["repeats"],
   "repeats.create": ["repeats", "transactions", "accounts", "categories"],
-  "sips.create": ["settings", "transactions"],
-  "sips.mark": ["settings", "transactions"],
+  "sips.create": ["settings", "transactions", "drafts", "categories", "accounts"],
+  "sips.mark": ["settings", "transactions", "drafts", "categories", "accounts"],
+  "sips.saveDrafts": ["settings", "transactions", "drafts", "categories", "accounts"],
   "sips.unmark": ["transactions"],
   "sips.update": ["settings"],
   "sips.remove": ["settings", "transactions"],
@@ -491,7 +498,8 @@ export function txScope(op: Op): TxScope {
     case "transactions.unmerge": return { ids: [id] };
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
     case "sips.create":
-    case "sips.mark": return { ids: a.transactionIds as string[] };
+    case "sips.mark": return { ids: a.transactionIds as string[], dates: aroundDates((a.draftDates as string[] | undefined) ?? []) };
+    case "sips.saveDrafts": return { dates: aroundDates((a.draftDates as string[] | undefined) ?? []) };
     case "sips.unmark": return { ids: a.ids as string[] };
     case "sips.remove": return { sipIds: [id] };
     case "drafts.link": return { ids: [a.transactionId as string] };
@@ -648,7 +656,8 @@ class Work {
    */
   private fileUnderSip(doc: Insertable<"transactions">): Insertable<"transactions"> {
     const sips = sipsOf(this.snap);
-    if (doc.sipId !== undefined || doc.type !== "expense" || !sips.length) return doc;
+    // only what Gmail read: an entry typed by hand is never filed under a SIP
+    if (doc.sipId !== undefined || doc.type !== "expense" || !sips.length || !fromGmail(doc)) return doc;
     // a backup, or an entry an unmerge puts back, comes back as it was: one the user took out of a SIP stays out
     if (this.op.kind === "backup.restore" || this.op.kind === "transactions.restoreRows" || this.op.kind === "transactions.unmerge") return doc;
     const sip = sipFor(sips, doc);
@@ -1242,12 +1251,66 @@ export function restoreRowsFrom(data: BackupData, ids: RestoreIds): Record<strin
   });
 }
 
-/** Expenses that can be filed under a SIP, oldest first; ones gone meanwhile are left out. */
+/** Expenses read from Gmail that can be filed under a SIP, oldest first; ones gone meanwhile (or typed by hand) are left out. */
 function sipPayments(w: Work, ids: Id<"transactions">[]): Doc<"transactions">[] {
-  const entries = ids.map((id) => w.get("transactions", id)).filter((t): t is Doc<"transactions"> => !!t && t.type === "expense" && t.amount > 0)
+  return ids.map((id) => w.get("transactions", id)).filter((t): t is Doc<"transactions"> => !!t && t.type === "expense" && t.amount > 0 && fromGmail(t))
     .sort((a, b) => a.date.localeCompare(b.date) || a._creationTime - b._creationTime);
-  if (!entries.length) throw new Error("Only expenses can be SIPs");
-  return entries;
+}
+
+/** Drafts (waiting or dismissed) a SIP can save, oldest first; ones gone, saved meanwhile, not expenses or flagged as an entry already typed are left out. */
+function sipDraftsOf(w: Work, ids: Id<"drafts">[] = []): Doc<"drafts">[] {
+  return ids.map((id) => w.get("drafts", id))
+    .filter((d): d is Doc<"drafts"> => !!d && d.status !== "accepted" && !d.matchedTransactionId && d.proposal.type === "expense" && d.proposal.amount > 0)
+    .sort((a, b) => a.proposal.date.localeCompare(b.proposal.date));
+}
+
+/** An entry already in the ledger for this draft's payment: the same amount within two days. Saving it again would count it twice. */
+function alreadySaved(w: Work, d: Doc<"drafts">): boolean {
+  const p = d.proposal;
+  return w.snap.transactions.some((t) => t.type === "expense" && t.amount === p.amount && Math.abs(diffDays(t.date, p.date)) <= 2);
+}
+
+/** The expense category SIP payments are saved under: "Investments", made if the user has none. */
+function investmentsCategory(w: Work): Id<"categories"> {
+  const found = w.snap.categories.find((c) => c.type === "expense" && !c.parentId && !c.deletedAt && normName(c.name) === normName("Investments"));
+  if (found) return found._id;
+  return w.insert("categories", { type: "expense", name: "Investments", order: nextOrder(w.snap.categories.filter((c) => c.type === "expense")) });
+}
+
+/**
+ * Save a draft as a payment of `sip`: the date, amount and name the mail gave, the bank account it
+ * named (else the SIP's), under Investments. Returns false (the draft stays as it is) when no
+ * account is known or the account is gone.
+ */
+function saveSipDraft(w: Work, d: Doc<"drafts">, sip: Sip, categoryId: Id<"categories">): boolean {
+  const p = d.proposal;
+  const account = [p.accountId, sip.accountId].find((id) => id && !w.get("accounts", id)?.deletedAt);
+  if (!account || alreadySaved(w, d)) return false;
+  const t = validateTx(w, {
+    type: "expense", date: p.date, time: p.time, accountId: account, categoryId, amount: p.amount,
+    subAmount: p.subAmount, subCurrency: p.subAmount !== undefined ? p.subCurrency : undefined,
+    note: p.note, description: p.description, tags: [], photoIds: [],
+  });
+  const transactionId = w.insert("transactions", { ...t, source: { app: "gmail", messageId: d.messageId }, sipId: sip.id });
+  w.patch("drafts", d._id, { status: "accepted", transactionId, matchedTransactionId: undefined, resolvedAt: w.at });
+  return true;
+}
+
+/** File entries and save drafts under a SIP that is already in settings; moves its usual amount to the latest payment. Returns how many went in. */
+function fillSip(w: Work, sip: Sip, entries: Doc<"transactions">[], drafts: Doc<"drafts">[]): number {
+  const added: { date: string; amount: number }[] = [];
+  for (const t of entries) {
+    w.patch("transactions", t._id, { sipId: sip.id });
+    added.push(t);
+  }
+  if (drafts.length) {
+    const categoryId = investmentsCategory(w);
+    for (const d of drafts) if (saveSipDraft(w, d, sip, categoryId)) added.push(d.proposal);
+  }
+  const last = added.sort((a, b) => a.date.localeCompare(b.date))[added.length - 1];
+  const current = sipsOf(w.snap).find((x) => x.id === sip.id)!;
+  if (last && last.date >= (current.lastDate ?? "")) w.patchSip(sip.id, { amount: last.amount, lastDate: last.date });
+  return added.length;
 }
 function mustSip(w: Work, id: string, msg = "That SIP was deleted"): Sip {
   const sip = sipsOf(w.snap).find((x) => x.id === id);
@@ -2137,26 +2200,47 @@ const handlers: Handlers = {
     return repeatId;
   },
 
-  "sips.create": (w, { name, transactionIds }) => {
+  "sips.create": (w, { name, transactionIds, draftIds, rhythm }) => {
     const entries = sipPayments(w, transactionIds);
-    const last = entries[entries.length - 1];
+    const drafts = sipDraftsOf(w, draftIds);
+    if (!entries.length && !drafts.length) throw new Error("Only payments read from Gmail can be SIPs");
+    const notes = [...entries.map((t) => t.note), ...drafts.map((d) => d.proposal.note)];
+    const latestEntry = entries[entries.length - 1];
+    const latestDraft = drafts[drafts.length - 1];
     const id = `sip_${w.opId}`;
-    w.setSips([...sipsOf(w.snap), {
+    const sip: Sip = clean({
       id,
-      name: sipName(name || last.note),
-      keys: [...new Set(entries.map((t) => sipKey(t.note)).filter(Boolean))],
-      amount: last.amount, lastDate: last.date, accountId: last.accountId,
-    }]);
-    for (const t of entries) w.patch("transactions", t._id, { sipId: id });
+      name: sipName(name || latestEntry?.note || latestDraft.proposal.note),
+      keys: [...new Set(notes.map(sipKey).filter(Boolean))],
+      amount: (latestEntry ?? latestDraft.proposal).amount,
+      // the bank account the debits come from: the latest saved one's, else what the latest mail named
+      accountId: [...entries].reverse().find((t) => !w.get("accounts", t.accountId)?.deletedAt)?.accountId ?? [...drafts].reverse().find((d) => d.proposal.accountId)?.proposal.accountId,
+      rhythm,
+    });
+    w.setSips([...sipsOf(w.snap), sip]);
+    if (!fillSip(w, sip, entries, drafts)) throw new Error("None of those payments could be saved");
     return id;
   },
-  "sips.mark": (w, { id, transactionIds }) => {
+  "sips.mark": (w, { id, transactionIds, draftIds, resume }) => {
     const sip = mustSip(w, id);
     const entries = sipPayments(w, transactionIds);
-    const last = entries[entries.length - 1];
-    const keys = [...new Set([...sip.keys, ...entries.map((t) => sipKey(t.note)).filter(Boolean)])];
-    w.patchSip(id, last.date >= (sip.lastDate ?? "") ? { keys, amount: last.amount, lastDate: last.date } : { keys });
-    for (const t of entries) w.patch("transactions", t._id, { sipId: id });
+    const drafts = sipDraftsOf(w, draftIds);
+    if (!entries.length && !drafts.length) throw new Error("Only payments read from Gmail can be SIPs");
+    const keys = [...new Set([...sip.keys, ...entries.map((t) => sipKey(t.note)), ...drafts.map((d) => sipKey(d.proposal.note))].filter(Boolean))];
+    // patchSip drops what is undefined after merging, so a resume clears stoppedAt
+    w.patchSip(id, { keys, stoppedAt: resume ? undefined : sip.stoppedAt, accountId: sip.accountId ?? entries[entries.length - 1]?.accountId });
+    fillSip(w, mustSip(w, id), entries, drafts);
+  },
+  "sips.saveDrafts": (w, { draftIds }) => {
+    const sips = sipsOf(w.snap);
+    if (!sips.length) return 0;
+    let saved = 0;
+    for (const d of sipDraftsOf(w, draftIds)) {
+      if (d.status !== "open") continue;
+      const sip = sipFor(sipsOf(w.snap), d.proposal);
+      if (sip && fillSip(w, sip, [], [d])) saved++;
+    }
+    return saved;
   },
   "sips.unmark": (w, { ids }) => {
     for (const id of ids) if (w.get("transactions", id)?.sipId) w.patch("transactions", id, { sipId: undefined });
