@@ -70,6 +70,7 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
           {tx.split ? <Users className="size-3 text-muted-foreground shrink-0" aria-label="Split on UnSplit" /> : null}
           {tx.merged ? <Merge className="size-3 text-muted-foreground shrink-0" aria-label="Merged" /> : null}
           {tx.type === "expense" && tx.amount < 0 ? <Badge variant="secondary" className="text-[10px] px-1 py-0">Refund</Badge> : null}
+          {tx.type === "expense" && tx.sipId ? <Badge variant="secondary" className="text-[10px] px-1 py-0">SIP</Badge> : null}
         </div>
         <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
           {isTransfer && !tx.note ? null : sub}
