@@ -334,6 +334,26 @@ test("a SIP shows how it is keeping up: on time, late after a missed debit, most
   expect(s.transactions.filter(isSip)).toHaveLength(4);
 });
 
+test("SIPs are listed by when they were last paid, most recent first; cancelled ones last", () => {
+  const { s: s0, other, bank } = base();
+  let s = s0;
+  const make = (name: string, dates: string[]) => {
+    for (const d of dates) s = gmailEntry(s, d, name, 100000, bank, other, GROWW).s;
+    const ids = s.transactions.filter((t) => t.note === name).map((t) => t._id);
+    const r = run(s, "sips.create", { name, transactionIds: ids, rhythm: "monthly" });
+    s = r.snap;
+    return r.result as string;
+  };
+  make("Old", ["2025-01-05", "2025-02-05"]); // stale, but with the most in it
+  make("Recent", ["2026-09-28", "2026-10-28"]);
+  const cancelled = make("Gone", ["2026-10-30"]);
+  make("Late", ["2026-08-15", "2026-09-15"]);
+  make("Earlier", ["2026-09-20", "2026-10-20"]);
+  s = run(s, "sips.update", { id: cancelled, stopped: true }).snap;
+  s = { ...s, settings: [{ ...s.settings[0], sips: [...s.settings[0].sips!, { id: "sip_none", name: "Nothing yet", keys: ["nothing yet"], amount: 100000 }] }] };
+  expect(sipsList(s, "2026-11-01", "2026-11-30", "2026-11-02").map((r) => r.sip.name)).toEqual(["Recent", "Earlier", "Late", "Old", "Nothing yet", "Gone"]);
+});
+
 test("missed debits follow the SIP's rhythm: three weeks for a weekly one, nine months for a quarterly one", () => {
   expect(missedDebits("weekly", ["2026-10-05"], "2026-10-14")).toBe(0);
   expect(missedDebits("weekly", ["2026-10-05"], "2026-10-15")).toBe(1);
