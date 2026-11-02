@@ -141,6 +141,17 @@ npx convex run gmail:addNewDefaultSenders        # add --prod for production
 
 It appends every default missing from each connection's list and leaves the rest alone; a default the user had removed comes back, so check the list in More › Gmail afterwards. It returns how many connections it changed.
 
+## Superadmin dashboard
+
+`/admin` is a dashboard of who uses UnMoney and how: active users, opens, session length, retention by sign-up week, when people open the app and log entries, platforms and installed-vs-browser, app versions still in use, screens visited, feature adoption, Gmail sync health, bandwidth and storage per user, and a users table with a drill-down per user. Filters (period, user, platform, installed or browser, include yourself) live in the address. Only `SUPERADMIN_EMAIL` in `shared/admin.ts` can open it: the route redirects everyone else before the page's chunk is requested, every function in `convex/admin.ts` refuses anyone else, and the chunk (`AdminPage-*.js`) is left out of the service worker's precache (`vite.config.ts`), so nobody else ever downloads it. More › Superadmin links to it for that account.
+
+Where the numbers come from:
+
+- **Usage** (`src/lib/usage.ts` → `convex/usage.ts`): every signed-in app sends its session's running totals about once a minute while on screen (time on screen, screens visited, sync bytes measured as JSON, upload sizes, photos fetched from the network, device, OS, browser, installed or not, app version, time zone). The server adds what grew since the last ping into `usageDaily` (one row per device per local day), so a retry counts nothing twice. Sessions are kept 120 days; daily rows until the account is deleted.
+- **Storage** (`admin.refreshStats`, daily cron and the dashboard's refresh button): every user's documents counted and sized with Convex's `getDocumentSize`, files by their stored size, plus which features they use. Counts only: no amounts, notes or names.
+
+Bandwidth is an estimate made on the devices, not Convex's bill; the Convex dashboard's Usage page has the real totals.
+
 ## Import from Money Manager
 
 More › Import from Money Manager reads Money Manager's Excel export (Settings › Backup › Export to Excel), as well as CSV and TSV. Every file goes through the same review: a dry run shows what will be added, which accounts and categories get created, which rows are skipped and which entries are already there.
