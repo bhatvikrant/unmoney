@@ -3,13 +3,15 @@ import { toast } from "sonner";
 import { useOp, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { dateLabel } from "@/lib/format";
-import { newSipOf, rhythmText, sipArgs, sipFor, sipsOf, similarPayments, type GmailPayment } from "../../../shared/sips";
+import { knowsAccount, newSipOf, rhythmText, sipArgs, sipFor, sipsOf, similarPayments, type GmailPayment } from "../../../shared/sips";
+import type { Id } from "../../../convex/_generated/dataModel";
 import type { Snapshot } from "../../../shared/ops";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { AccountPicker } from "@/components/tx/pickers";
 
 const keyOf = (p: GmailPayment) => (p.entry?._id ?? p.draft!._id) as string;
 const stateOf = (p: GmailPayment) => (p.entry ? "saved" : p.draft!.status === "open" ? "waiting in Gmail review" : "dismissed");
@@ -64,14 +66,18 @@ export function MarkSipSheet({ picked, open, onOpenChange, onDone }: {
   const [off, setOff] = useState<Set<string>>(() => new Set());
   const [name, setName] = useState(() => existing?.name ?? newSipOf(view, payments).name);
   const [busy, setBusy] = useState(false);
+  const [accountId, setAccountId] = useState<Id<"accounts"> | undefined>();
+  const [picking, setPicking] = useState(false);
   const chosen = payments.filter((p) => !off.has(keyOf(p)));
   const { rhythm, day } = newSipOf(view, chosen);
+  // no saved entry, no mail that named a bank, and no SIP that knows one: ask which bank paid
+  const needsAccount = !!chosen.length && !knowsAccount(view, chosen, existing);
 
   async function save() {
-    if (!chosen.length || busy) return;
+    if (!chosen.length || busy || (needsAccount && !accountId)) return;
     setBusy(true);
     try {
-      const args = sipArgs(chosen);
+      const args = { ...sipArgs(chosen), accountId: needsAccount ? accountId : undefined };
       if (existing) {
         await mark({ id: existing.id, ...args, resume: !!existing.stoppedAt });
         toast(`${chosen.length === 1 ? "Payment" : `${chosen.length} payments`} added to ${existing.name}${existing.stoppedAt ? ", running again" : ""}`, {
@@ -101,8 +107,16 @@ export function MarkSipSheet({ picked, open, onOpenChange, onDone }: {
       <div className="space-y-3 px-2">
         {!existing ? (
           <div className="flex items-center gap-2">
-            <label htmlFor="mark-sip-name" className="w-14 shrink-0 text-sm text-muted-foreground">Name</label>
+            <label htmlFor="mark-sip-name" className="w-16 shrink-0 text-sm text-muted-foreground">Name</label>
             <Input id="mark-sip-name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="e.g. Parag Parikh Flexi Cap" />
+          </div>
+        ) : null}
+        {needsAccount ? (
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-sm text-muted-foreground">Paid from</span>
+            <Button variant="outline" className="h-9 flex-1 justify-start" onClick={() => setPicking(true)}>
+              {accountId ? accountName(accountId) : "Pick the bank account"}
+            </Button>
           </div>
         ) : null}
         <div className="divide-y rounded-md border">
@@ -121,10 +135,12 @@ export function MarkSipSheet({ picked, open, onOpenChange, onDone }: {
             );
           })}
         </div>
-        <Button className="h-11 w-full" disabled={!chosen.length || busy || (!existing && !name.trim())} onClick={() => void save()}>
+        {needsAccount && !accountId ? <p className="px-1 text-xs text-muted-foreground">The mails didn't say which bank account these came from.</p> : null}
+        <Button className="h-11 w-full" disabled={!chosen.length || busy || (!existing && !name.trim()) || (needsAccount && !accountId)} onClick={() => void save()}>
           {existing ? `Add ${chosen.length} to ${existing.name}` : `Make it a SIP · ${chosen.length} payment${chosen.length === 1 ? "" : "s"}`}
         </Button>
       </div>
+      <AccountPicker open={picking} onOpenChange={setPicking} onPick={setAccountId} title="Paid from" />
     </BottomSheet>
   );
 }

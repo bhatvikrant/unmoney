@@ -6,9 +6,11 @@ import { useOp, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { useToday } from "@/lib/today";
 import { useOpenEntry } from "@/lib/nav";
-import { dateLabel } from "@/lib/format";
+import { dateLabel, monthLabel } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { monthKeyForDate, monthRange } from "../../../shared/period";
-import { perMonth, RHYTHM_LABEL, sipDrafts, sipsList, sipSuggestions, type SipRow, type SipSuggestion } from "../../../shared/sips";
+import { knowsAccount, ordinal, perMonth, RHYTHM_LABEL, sipDrafts, sipsList, sipSuggestions, usualDay, type Rhythm, type SipRow, type SipSuggestion } from "../../../shared/sips";
+import { parts } from "../../../shared/dates";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { EmptyState, InfoHint, Section } from "@/components/shell/misc";
 import { Money } from "@/components/shell/Money";
@@ -51,6 +53,8 @@ export default function SipsPage() {
 
   const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed");
   async function accept(s: SipSuggestion) {
+    // the mails didn't say which bank paid: the review sheet asks
+    if (!knowsAccount(snap, s.payments, s.sip)) return setReview(s);
     const n = s.payments.length;
     const ok = await confirm(s.sip ? {
       title: `Resume ${s.sip.name}?`,
@@ -106,22 +110,40 @@ export default function SipsPage() {
     } catch (e) { fail(e); }
   }
 
-  const suggestionRow = (s: SipSuggestion) => (
-    <div key={s.id} className="border-b last:border-b-0">
-      <button type="button" onClick={() => setReview(s)} className="flex w-full items-center gap-3 px-4 pt-2.5 pb-1 text-left text-sm hover:bg-accent/40">
-        <div className="min-w-0 flex-1">
-          <div className="truncate">{s.name}</div>
-          <div className="line-clamp-2 text-xs text-muted-foreground">{s.why} · last {dateLabel(s.payments[0].date)}</div>
+  // a date from another year says which
+  const lastLabel = (d: string) => dateLabel(d, { year: d.slice(0, 4) !== today.slice(0, 4) });
+  const suggestionRow = (s: SipSuggestion) => {
+    const n = s.payments.length;
+    // the block on the left says the day, so the name doesn't repeat it
+    const suffix = s.day ? ` · ${ordinal(s.day)}` : "";
+    const name = suffix && s.name.endsWith(suffix) ? s.name.slice(0, -suffix.length) : s.name;
+    const from = s.signal.startsWith("Mail from ") ? s.signal.slice("Mail from ".length) : null;
+    const when = [s.rhythm ? RHYTHM_LABEL[s.rhythm].replace(/^./, (c) => c.toUpperCase()) : "", `${n} payment${n === 1 ? "" : "s"}${n > 1 ? ` since ${monthLabel(s.payments[n - 1].date.slice(0, 7))}` : ""}`].filter(Boolean).join(" · ");
+    return (
+      <div key={s.id} className="border-b px-4 pt-3 pb-2.5 last:border-b-0">
+        <button type="button" onClick={() => setReview(s)} className="flex w-full items-start gap-3 text-left text-sm">
+          <DayBlock rhythm={s.rhythm} day={s.day} dim={!s.likely} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+              <Money amount={s.amount} className="shrink-0 font-medium" />
+            </div>
+            <div className="truncate text-xs text-muted-foreground">{when}</div>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              {from ? <Mail className="size-3 shrink-0" aria-label="Mail from" /> : null}
+              <span className="truncate">{from ?? s.signal}</span>
+              <span className="shrink-0">· last {lastLabel(s.payments[0].date)}</span>
+            </div>
+          </div>
+        </button>
+        <div className="mt-2 flex items-center gap-1 pl-14">
+          <Button size="sm" variant="outline" onClick={() => void accept(s)}>{s.sip ? `Resume ${s.sip.name}` : `Add ${n} as SIP`}</Button>
+          <Button size="sm" variant="ghost" onClick={() => setReview(s)}>Review</Button>
+          {!s.sip ? <Button size="sm" variant="ghost" className="ml-auto text-muted-foreground" onClick={() => void notASip(s)}>Not a SIP</Button> : null}
         </div>
-        <Money amount={s.amount} className="shrink-0" />
-      </button>
-      <div className="flex gap-2 px-4 pt-1 pb-2.5">
-        <Button size="sm" variant="outline" onClick={() => void accept(s)}>{s.sip ? `Resume ${s.sip.name}` : `Add ${s.payments.length} as SIP`}</Button>
-        <Button size="sm" variant="ghost" onClick={() => setReview(s)}>Review</Button>
-        {!s.sip ? <Button size="sm" variant="ghost" onClick={() => void notASip(s)}>Not a SIP</Button> : null}
       </div>
-    </div>
-  );
+    );
+  };
 
   const statusText = (r: SipRow) => {
     const last = r.entries[0];
@@ -152,16 +174,16 @@ export default function SipsPage() {
         ) : null}
 
         {!rows.length && !suggestions.length ? (
-          <EmptyState title="No SIPs yet" hint="SIPs are found in the debits Gmail reads: the same name and amount coming back every week, fortnight, month or quarter. Connect Gmail in More › Gmail, or open a payment read from Gmail and tap Mark as SIP." />
+          <EmptyState title="No SIPs yet" hint="SIPs are found in the debits Gmail reads: the same name and amount coming back every week, fortnight, month or quarter for at least six months. Connect Gmail in More › Gmail, or open a payment read from Gmail and tap Mark as SIP." />
         ) : null}
 
         {likely.length ? (
-          <Section title={<span className="inline-flex items-center gap-1">Looks like a SIP <InfoHint text="Debits Gmail read with the same name and amount, on a rhythm (weekly to quarterly), whose mail or name reads like an investment. Adding one saves its payments, and every later one from Gmail, into it: off the daily list and out of spending." /></span>}>
+          <Section title={<span className="inline-flex items-center gap-1">Looks like a SIP · {likely.length} <InfoHint text="Debits Gmail read with the same name and amount, on a rhythm (weekly to quarterly) for at least six months, whose mail or name reads like an investment. Adding one saves its payments, and every later one from Gmail, into it: off the daily list and out of spending." /></span>}>
             {likely.map(suggestionRow)}
           </Section>
         ) : null}
         {maybe.length ? (
-          <Section title={<span className="inline-flex items-center gap-1">Maybe a SIP <InfoHint text="These repeat like a SIP, but their mail doesn't say it's an investment: rent, a bill or an EMI looks the same. Add the ones that are SIPs; Not a SIP hides the rest for good." /></span>}>
+          <Section title={<span className="inline-flex items-center gap-1">Maybe a SIP · {maybe.length} <InfoHint text="These repeat like a SIP, but their mail doesn't say it's an investment: rent, a bill or an EMI looks the same. Add the ones that are SIPs; Not a SIP hides the rest for good." /></span>}>
             {maybe.map(suggestionRow)}
           </Section>
         ) : null}
@@ -170,9 +192,10 @@ export default function SipsPage() {
           <Section title="Your SIPs">
             {rows.map((r) => (
               <button key={r.sip.id} type="button" onClick={() => setOpenId(r.sip.id)} className="flex w-full items-center gap-3 border-b px-4 py-2.5 text-left text-sm last:border-b-0 hover:bg-accent/40">
+                <DayBlock rhythm={r.sip.rhythm ?? "monthly"} day={r.sip.day ?? (r.entries.length ? usualDay(r.entries.map((t) => parts(t.date).d)) : undefined)} dim={r.status !== "running"} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate">{r.sip.name}</span>
+                    <span className="truncate font-medium">{r.sip.name}</span>
                     {r.status !== "running" ? <Badge variant="secondary" className="px-1 py-0 text-[10px]">{r.status === "paused" ? "Paused" : "Cancelled"}</Badge> : null}
                   </div>
                   <div className="truncate text-xs text-muted-foreground"><Money amount={r.sip.amount} muted /> · {statusText(r)}</div>
@@ -190,6 +213,25 @@ export default function SipsPage() {
       <SipSheet key={open?.sip.id ?? "none"} row={open} onClose={() => setOpenId(null)} />
       {review ? <MarkSipSheet key={review.id} picked={[{ note: review.payments[0].note, amount: review.amount, date: review.payments[0].date }]} open onOpenChange={(o) => { if (!o) setReview(null); }} /> : null}
     </>
+  );
+}
+
+/**
+ * The day a SIP goes out, the way a calendar shows it: "7th" with "monthly" under it, or "W" for
+ * every week. Green (the recaps' Invested colour) when it reads as an investment, grey when it only
+ * might be one, or has stopped.
+ */
+function DayBlock({ rhythm, day, dim }: { rhythm?: Rhythm; day?: number; dim?: boolean }) {
+  const [big, sup, under] = rhythm === "weekly" ? ["W", "", "weekly"]
+    : rhythm === "fortnightly" ? ["2W", "", "2 weeks"]
+      : rhythm === "twiceMonthly" ? ["2×", "", "monthly"]
+        : day ? [String(day), ordinal(day).slice(String(day).length), rhythm === "quarterly" ? "quarterly" : "monthly"]
+          : ["–", "", ""];
+  return (
+    <div className={cn("flex size-11 shrink-0 flex-col items-center justify-center rounded-md border bg-muted/40 leading-none", dim ? "text-muted-foreground" : "text-chart-6")}>
+      <span className="tabular text-base font-semibold">{big}{sup ? <sup className="ml-px text-[9px] font-medium">{sup}</sup> : null}</span>
+      {under ? <span className="mt-1 text-[8px] uppercase tracking-wide text-muted-foreground">{under}</span> : null}
+    </div>
   );
 }
 
