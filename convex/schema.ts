@@ -48,7 +48,9 @@ export const sip = v.object({
   /** Date of the latest payment filed under it: only a payment on or after it moves `amount`. */
   lastDate: v.optional(v.string()),
   accountId: v.optional(v.id("accounts")),
-  /** Stopped SIPs keep their payments but no longer take new ones. */
+  /** How often it is debited (shared/sips.ts rhythmOf); monthly when unset. */
+  rhythm: v.optional(v.union(v.literal("weekly"), v.literal("fortnightly"), v.literal("twiceMonthly"), v.literal("monthly"), v.literal("quarterly"))),
+  /** When the user marked it cancelled: it keeps its payments and takes no new ones. A pause needs nothing: the next payment just goes in. */
   stoppedAt: v.optional(v.number()),
 });
 export const budgetPeriod = v.union(v.literal("weekly"), v.literal("monthly"), v.literal("yearly"));

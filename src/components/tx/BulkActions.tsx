@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bookmark, CalendarDays, Merge, StickyNote, Tag, Trash2, Users, WalletCards, X } from "lucide-react";
+import { Bookmark, CalendarDays, Merge, Sprout, StickyNote, Tag, Trash2, Users, WalletCards, X } from "lucide-react";
 import { useLocation } from "react-router";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -14,6 +14,8 @@ import type { BulkSelect } from "@/components/tx/useBulkSelect";
 import { SplitDialog } from "@/components/tx/SplitDialog";
 import { MergeDialog, type MergePair } from "@/components/tx/MergeDialog";
 import { canSplit } from "@/lib/unsplit";
+import { MarkSipSheet, pickOf } from "@/components/tx/MarkSipSheet";
+import { fromGmail } from "../../../shared/sips";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useBottomBar } from "@/components/shell/SplitLayout";
@@ -42,6 +44,7 @@ export function BulkBar({ bulk, txs, drafts = [] }: { bulk: BulkSelect; txs: Tx[
   const [sheet, setSheet] = useState<null | "category" | "account">(null);
   const [split, setSplit] = useState(false);
   const [merge, setMerge] = useState<MergePair | null>(null);
+  const [sip, setSip] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const chosen = useMemo(() => txs.filter((t) => bulk.selected.has(t._id)), [txs, bulk.selected]);
@@ -56,6 +59,10 @@ export function BulkBar({ bulk, txs, drafts = [] }: { bulk: BulkSelect; txs: Tx[
   const catType = chosen.some((t) => t.type === "expense") ? "expense" : "income";
   const ids = () => chosen.map((t) => t._id as Id<"transactions">);
   const splittable = chosen.some(canSplit);
+  // a SIP is made of payments Gmail read: every ticked row an expense from mail (an entry or a draft)
+  const sipPicks = useMemo(() => [...chosen, ...chosenDrafts.map((d) => d.proposal)].map(pickOf), [chosen, chosenDrafts]);
+  const sipable = n + chosenDrafts.length > 0 && chosen.every((t) => t.type === "expense" && t.amount > 0 && fromGmail(t))
+    && chosenDrafts.every((d) => d.proposal.type === "expense" && d.proposal.amount > 0);
 
   async function run(fn: () => Promise<string | null | void>) {
     if (busy) return;
@@ -127,6 +134,7 @@ export function BulkBar({ bulk, txs, drafts = [] }: { bulk: BulkSelect; txs: Tx[
                 <Merge className="size-4" />Merge
               </Button>
             ) : null}
+            <Button variant="outline" size="sm" disabled={busy || !sipable} title={sipable ? "Make a SIP of these and the earlier payments like them" : "Only expenses read from Gmail can be SIPs"} onClick={() => setSip(true)}><Sprout className="size-4" />Mark as SIP</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={() => setEdit("date")}><CalendarDays className="size-4" />Date</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={() => setSheet("category")}><Tag className="size-4" />Category</Button>
             <Button variant="outline" size="sm" disabled={off} onClick={() => setSheet("account")}><WalletCards className="size-4" />Payment method</Button>
@@ -141,6 +149,7 @@ export function BulkBar({ bulk, txs, drafts = [] }: { bulk: BulkSelect; txs: Tx[
       <AccountPicker open={sheet === "account"} onOpenChange={(o) => !o && setSheet(null)} onPick={pickAccount} title="Move to payment method" />
       <MergeDialog pair={merge} onOpenChange={(o) => !o && setMerge(null)} onDone={() => { setMerge(null); bulk.exit(); }} />
       <SplitDialog open={split} onOpenChange={(o) => !o && setSplit(false)} txs={chosen} />
+      {sip ? <MarkSipSheet picked={sipPicks} open onOpenChange={setSip} onDone={bulk.exit} /> : null}
       <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
         <DialogContent>
           <DialogHeader>

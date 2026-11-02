@@ -28,7 +28,7 @@ import { useOverText } from "@/lib/budgetText";
 /** The chart hue each card is tinted with, in the order the cards run. */
 const TINT: Record<RecapCard["kind"], string> = {
   cover: "var(--chart-rest)", total: "var(--chart-8)", categories: "var(--chart-1)", biggest: "var(--chart-2)", days: "var(--chart-4)",
-  repeat: "var(--chart-7)", changes: "var(--chart-5)", inout: "var(--chart-3)", budgets: "var(--chart-3)", closer: "var(--chart-rest)",
+  repeat: "var(--chart-7)", changes: "var(--chart-5)", inout: "var(--chart-3)", budgets: "var(--chart-3)", invested: "var(--chart-6)", closer: "var(--chart-rest)",
   months: "var(--chart-4)", top5: "var(--chart-7)", calendar: "var(--chart-8)", clock: "var(--chart-6)", methods: "var(--chart-3)", new: "var(--chart-4)", personality: "var(--chart-7)",
 };
 const WEEKDAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -155,8 +155,8 @@ const GUTTER = "-left-[18px] top-1/2 -translate-y-1/2";
 /** For a bar: near its foot, centred. */
 const BAR_FOOT = "bottom-2 left-1/2 -translate-x-1/2";
 /** A legend row that opens its entries: the three cells of `legendRow` on the Legend's own columns. */
-const TapRow = ({ drill, children, hint }: { drill: RecapDrill; children: ReactNode; hint?: boolean | string }) => (
-  <Tap drill={drill} hint={hint} className="col-span-3 -mx-1.5 grid grid-cols-subgrid items-center rounded px-1.5 py-px">{children}</Tap>
+const TapRow = ({ drill, children, hint, label }: { drill: RecapDrill; children: ReactNode; hint?: boolean | string; label?: string }) => (
+  <Tap drill={drill} hint={hint} label={label} className="col-span-3 -mx-1.5 grid grid-cols-subgrid items-center rounded px-1.5 py-px">{children}</Tap>
 );
 const Swatch = ({ color }: { color: string }) => <span className="size-2.5 shrink-0 rounded-[3px]" style={{ background: color }} />;
 /** A legend row: swatch, name, amount; three cells of the grid that holds them. */
@@ -501,6 +501,40 @@ export function InOutCard({ card }: Props<"inout">) {
         ) : null}
       </Vis>
       <Foot><span>{foot}</span></Foot>
+    </CardFrame>
+  );
+}
+
+/**
+ * What went into SIPs: the total, each SIP's share (tap for its payments) and the change from the
+ * month or year before. SIPs are not spending, so this is the only card that counts them.
+ */
+export function InvestedCard({ card }: Props<"invested">) {
+  const { fmt } = useApp();
+  const year = card.scope === "year";
+  const top = card.sips.slice(0, 4);
+  const rest = card.sips.slice(4);
+  const vs = card.prev !== undefined && card.prevLabel ? (() => {
+    const { pct: p, less } = pctChange((card.total - card.prev) / card.prev);
+    return p === 0 ? `The same as ${card.prevLabel}` : `${p}% ${less ? "less" : "more"} than ${card.prevLabel} (${fmt(card.prev)})`;
+  })() : `Nothing went into SIPs the ${year ? "year" : "month"} before`;
+  return (
+    <CardFrame kind="invested">
+      <Vis>
+        <Label>Invested</Label>
+        <Num>{fmt(card.total)}</Num>
+        <H className="-mt-1">into {plural(card.sips.length, "SIP")}</H>
+        <Ctx>{plural(card.count, "payment")}, not counted as spending{year && card.perMonth ? ` · about ${fmt(card.perMonth)} a month` : ""}</Ctx>
+        <Legend className="mt-4">
+          {top.map((s, i) => (
+            <TapRow key={s.id} drill={{ kind: "sip", id: s.id }} label={`${s.name}: see its payments`} hint={i === 0 ? "-left-2 top-1/2 -translate-y-1/2" : undefined}>
+              {legendRow(s.id, colorAt(i, top.length + 1), <>{s.name} <span className="text-muted-foreground">×{s.count}</span></>, <Money amount={s.amount} />)}
+            </TapRow>
+          ))}
+          {rest.length ? legendRow("rest", REST, `${plural(rest.length, "more SIP")}`, <Money amount={rest.reduce((n, s) => n + s.amount, 0)} />, true) : null}
+        </Legend>
+      </Vis>
+      <Foot><span>{vs}</span></Foot>
     </CardFrame>
   );
 }
@@ -972,6 +1006,7 @@ export function RecapCardView({ card, month, onClose }: { card: RecapCard; month
     case "changes": return <ChangesCard card={card} month={month} />;
     case "inout": return <InOutCard card={card} month={month} />;
     case "budgets": return <BudgetsCard card={card} month={month} />;
+    case "invested": return <InvestedCard card={card} month={month} />;
     case "closer": return <CloserCard card={card} month={month} onClose={onClose} />;
     case "months": return <MonthsCard card={card} month={month} />;
     case "top5": return <Top5Card card={card} month={month} />;
