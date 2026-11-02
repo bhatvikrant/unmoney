@@ -52,7 +52,7 @@ const METRICS: { key: keyof DayPoint | "users"; label: string; format?: (n: numb
 
 const FEATURES: Record<string, string> = {
   budgets: "Budgets", repeats: "Repeats", installments: "Installments", bookmarks: "Bookmarks", notes: "Daily notes",
-  subCurrencies: "Sub-currencies", photos: "Receipt photos", imports: "Imports", unsplit: "UnSplit", gmail: "Gmail sync", aiTidy: "AI tidy-up", tidyUp: "Category tidy-up", iphoneShortcut: "iPhone shortcut",
+  subCurrencies: "Sub-currencies", photos: "Receipt photos", imports: "Imports", unsplit: "UnSplit", gmail: "Gmail sync", gmailBackfill: "Gmail read-back", sips: "SIPs", aiTidy: "AI tidy-up", tidyUp: "Category tidy-up", iphoneShortcut: "iPhone shortcut",
   passcode: "Passcode", subcategories: "Subcategories", carryOver: "Carry-over", timeInput: "Time input",
 };
 
