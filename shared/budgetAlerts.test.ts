@@ -148,3 +148,15 @@ test("pending expenses count against their category's budget and the total, in t
     ["total", "2026-11-01", 10000, 490000],
   ]);
 });
+
+test("pending expenses are counted against the ledger as it is now, not as an earlier call saw it", () => {
+  const { s: base, food, spend } = ledger();
+  const acc = base.accounts[0]._id;
+  const pending = [{ type: "expense" as const, date: "2026-10-03", amount: 10000, accountId: acc, categoryId: food }];
+  expect(budgetImpact(base, pending)[0].after).toBe(90000);
+  // asked again with the same ledger: the same answer
+  expect(budgetImpact(base, pending)[0].after).toBe(90000);
+  // a new entry that month leaves less
+  expect(budgetImpact(spend(base, "2026-10-01", 50000), pending)[0].after).toBe(40000);
+  expect(budgetImpact(base, pending)[0].after).toBe(90000);
+});
