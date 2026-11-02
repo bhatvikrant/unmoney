@@ -15,6 +15,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { requireUser } from "./lib/auth";
 import { currentRev, deleteSynced, insertSynced, patchSynced } from "./lib/changes";
+import { runOps } from "./lib/snapshot";
 import { decryptText, encryptText, hasTokenKey, sign, verify } from "./lib/gmailCrypto";
 import * as gmailApi from "./lib/gmailApi";
 import { GmailAuthError, GmailSetupError, SCOPE } from "./lib/gmailApi";
@@ -907,10 +908,12 @@ export const writeSync = internalMutation({
     if (!c) return;
     let found = 0;
     const seen: SeenRow[] = processed.map((p) => ({ messageId: p.id, receivedAt: p.receivedAt, processed: true }));
+    const fresh: { id: Id<"drafts">; date: string }[] = [];
     for (const d of inserts) {
       const dup = await ctx.db.query("drafts").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", d.messageId)).first();
       if (dup) continue;
-      await insertSynced(ctx, userId, "drafts", { ...d, status: "open" });
+      const id = await insertSynced(ctx, userId, "drafts", { ...d, status: "open" });
+      if (d.proposal.type === "expense" && !d.matchedTransactionId) fresh.push({ id, date: d.proposal.date });
       seen.push(...seenOfDraft(d));
       found++;
     }
@@ -937,6 +940,13 @@ export const writeSync = internalMutation({
       await patchSynced(ctx, userId, m.id, { matchedTransactionId: m.transactionId });
     }
     await markSeen(ctx, userId, seen);
+    // a debit of a SIP the user set goes straight into it, through the same op the app runs (docs/specs/sips.md)
+    if (fresh.length) {
+      const settings = await ctx.db.query("settings").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+      if (settings?.sips?.some((x) => !x.stoppedAt)) {
+        await runOps(ctx, userId, [{ id: `gmail-sips-${userId}-${startedAt}`, kind: "sips.saveDrafts", args: { draftIds: fresh.map((f) => f.id), draftDates: fresh.map((f) => f.date) }, at: startedAt }]);
+      }
+    }
     // rows no window can reach any more: well before where the next one starts, even when held back
     const reach = Math.min(startedAt, windowStart({ ...c, syncedUpTo }, startedAt)) - SEEN_KEEP_MS;
     for (const r of await ctx.db.query("gmailSeen").withIndex("by_user_received", (q) => q.eq("userId", userId).lt("receivedAt", reach)).take(200)) await ctx.db.delete(r._id);

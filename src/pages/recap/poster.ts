@@ -22,6 +22,7 @@ export function posterRows(s: RecapSummary, year: boolean, fmt: (minor: number) 
   const repeat = s.repeat ? `“${s.repeat.text}” ×${s.repeat.count}` : "—";
   if (year) rows.push({ key: "repeat", label: "Most logged", value: repeat });
   rows.push(s.keptPct === undefined ? { key: "kept", label: "Kept", value: "no income logged" } : s.keptPct < 0 ? { key: "kept", label: "Spent", value: `${100 - s.keptPct}% of income` } : { key: "kept", label: "Kept", value: `${s.keptPct}% of income` });
+  if (s.invested) rows.push({ key: "invested", label: "Invested", value: fmt(s.invested), tone: "income" });
   rows.push({ key: "nospend", label: "No-spend days", value: String(s.noSpend) });
   // every budget held reads green; otherwise just the count
   if (s.budgets) {
