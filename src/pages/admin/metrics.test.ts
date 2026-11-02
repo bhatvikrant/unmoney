@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { applyFilters, cohorts, daySeries, hourOfWeek, streaks, userRows, weekOf, type Daily, type Overview } from "./metrics";
+import { aiSeries, aiTotals, applyFilters, cohorts, daySeries, fmtUsd, hourOfWeek, streaks, userRows, weekOf, type Ai, type Daily, type Overview } from "./metrics";
 
 const row = (over: object): Daily => ({
   userId: "u1", deviceId: "d1", day: "2026-11-02", opens: 1, activeMs: 60_000, bytesDown: 100, bytesUp: 10, photoFetches: 0, opsSent: 0,
@@ -10,6 +10,10 @@ const device = (over: object) => ({
   userId: "u1", deviceId: "d1", firstSeenAt: 0, lastSeenAt: 0, os: "iOS", browser: "Safari", formFactor: "phone", standalone: true, appVersion: "v1", tzOffset: 330, sessions: 1, ...over,
 }) as unknown as Overview["devices"][number];
 
+const ai = (over: object): Ai => ({
+  userId: "u1", day: "2026-11-02", feature: "gmail", calls: 1, inputTokens: 1000, outputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 0, costUsd: 0.00015, ...over,
+} as unknown as Ai);
+
 const overview = (): Overview => ({
   users: [
     { id: "me", name: "Me", email: "a", image: null, joinedAt: Date.UTC(2026, 9, 1) },
@@ -19,6 +23,7 @@ const overview = (): Overview => ({
   devices: [device({}), device({ userId: "u2", deviceId: "d2", os: "Android", standalone: false }), device({ userId: "me", deviceId: "d3" })],
   daily: [row({}), row({ day: "2026-11-01" }), row({ userId: "u2", deviceId: "d2", day: "2026-11-02" }), row({ userId: "me", deviceId: "d3" })],
   stats: [],
+  ai: [ai({}), ai({ feature: "tidy", costUsd: 0.0008 }), ai({ userId: "u2", day: "2026-11-01", costUsd: 0.002, calls: 4 }), ai({ userId: "me", costUsd: 1 })],
   truncated: false,
   now: 0,
 });
@@ -63,4 +68,21 @@ test("user rows sum each user's use", () => {
   const v = applyFilters(overview(), { days: 30, userId: "all", os: "all", mode: "all", includeMe: false }, "me");
   const u1 = userRows(v, v.daily, "2026-11-02").find((u) => u.id === "u1")!;
   expect(u1).toMatchObject({ opens: 2, activeDays: 2, devices: 1, installed: true, streak: 2 });
+});
+
+test("AI cost follows the users shown, and sums per user, feature and day", () => {
+  const v = applyFilters(overview(), { days: 30, userId: "all", os: "all", mode: "all", includeMe: false }, "me");
+  expect(v.ai).toHaveLength(3);
+  const t = aiTotals(v.ai);
+  expect(t.costUsd).toBeCloseTo(0.00295, 10);
+  expect(t).toMatchObject({ calls: 6, users: 2 });
+  expect(t.tidy).toBeCloseTo(0.0008, 10);
+  expect(aiSeries(v.ai, "2026-11-01", "2026-11-02").map((p) => [p.day, +p.gmail.toFixed(5), p.tidy])).toEqual([["2026-11-01", 0.002, 0], ["2026-11-02", 0.00015, 0.0008]]);
+  const rows = userRows(v, v.daily, "2026-11-02", v.ai);
+  expect(rows.find((u) => u.id === "u1")!.aiCost).toBeCloseTo(0.00095, 10);
+  expect(rows.find((u) => u.id === "u2")).toMatchObject({ aiCalls: 4 });
+});
+
+test("dollars keep the places a small bill needs", () => {
+  expect([0, 0.00078, 0.042, 3.1].map(fmtUsd)).toEqual(["$0", "$0.0008", "$0.042", "$3.10"]);
 });

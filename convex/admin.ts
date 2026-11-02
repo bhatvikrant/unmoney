@@ -32,7 +32,10 @@ export const overview = query({
     const daily = (await ctx.db.query("usageDaily").withIndex("by_day", (q) => q.gte("day", from).lte("day", to)).take(DAILY_LIMIT + 1))
       .map(({ _id, _creationTime, ...d }) => d);
     const stats = (await ctx.db.query("adminStats").collect()).map(({ _id, _creationTime, ...s }) => s);
-    return { users, devices, daily: daily.slice(0, DAILY_LIMIT), truncated: daily.length > DAILY_LIMIT, stats, now: Date.now() };
+    // a row per user, day and feature that used Claude: few next to the usage rows
+    const ai = (await ctx.db.query("aiDaily").withIndex("by_day", (q) => q.gte("day", from).lte("day", to)).take(DAILY_LIMIT))
+      .map(({ _id, _creationTime, ...d }) => d);
+    return { users, devices, daily: daily.slice(0, DAILY_LIMIT), truncated: daily.length > DAILY_LIMIT, stats, ai, now: Date.now() };
   },
 });
 

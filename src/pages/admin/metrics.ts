@@ -11,6 +11,7 @@ export type User = Overview["users"][number];
 export type Device = Overview["devices"][number];
 export type Daily = Overview["daily"][number];
 export type Stats = Overview["stats"][number];
+export type Ai = Overview["ai"][number];
 
 export type Filters = {
   /** The period, in days ending today. */
@@ -56,6 +57,8 @@ export type View = {
   devices: Device[];
   daily: Daily[];
   stats: Stats[];
+  /** Claude calls: like storage, they follow the users, not their devices. */
+  ai: Ai[];
 };
 
 /** What the filters leave. Device filters (OS, installed) narrow usage; storage and features follow the users. */
@@ -72,7 +75,7 @@ export function applyFilters(o: Overview, f: Filters, meId: string | null): View
   const withDevice = new Set(devices.map((d) => d.userId));
   const shown = deviceFiltered ? users.filter((u) => withDevice.has(u.id)) : users;
   const shownIds = new Set<string>(shown.map((u) => u.id));
-  return { users: shown, devices, daily, stats: o.stats.filter((s) => shownIds.has(s.userId)) };
+  return { users: shown, devices, daily, stats: o.stats.filter((s) => shownIds.has(s.userId)), ai: o.ai.filter((r) => shownIds.has(r.userId)) };
 }
 
 // ---- series ----
@@ -125,6 +128,28 @@ export function totals(daily: Daily[]) {
   return { ...t, activeUsers: users.size, userDays: userDays.size };
 }
 
+/** What Claude cost over some rows of aiDaily: in all, per feature, and how many users it was for. */
+export function aiTotals(rows: Ai[]) {
+  const t = { costUsd: 0, calls: 0, inputTokens: 0, outputTokens: 0, tidy: 0, gmail: 0 };
+  const users = new Set<string>();
+  for (const r of rows) {
+    users.add(r.userId);
+    t.costUsd += r.costUsd;
+    t.calls += r.calls;
+    t.inputTokens += r.inputTokens + r.cacheWriteTokens + r.cacheReadTokens;
+    t.outputTokens += r.outputTokens;
+    t[r.feature] += r.costUsd;
+  }
+  return { ...t, users: users.size };
+}
+
+/** Claude's cost per day from `from` to `to`, split by feature; zeros where nothing was asked. */
+export function aiSeries(rows: Ai[], from: string, to: string): { day: string; tidy: number; gmail: number }[] {
+  const by = new Map(daysBetween(from, to).map((day) => [day, { day, tidy: 0, gmail: 0 }]));
+  for (const r of rows) { const p = by.get(r.day); if (p) p[r.feature] += r.costUsd; }
+  return [...by.values()];
+}
+
 /** Photo downloads in bytes, estimated: fetches times the user's average stored photo. */
 export function photoBytes(daily: Daily[], stats: Stats[]): number {
   const avg = new Map(stats.map((s) => [s.userId as string, s.files.count ? s.files.bytes / s.files.count : 0]));
@@ -162,6 +187,8 @@ export type UserRow = User & {
   opens: number; activeDays: number; activeMs: number; bandwidth: number;
   entries: number; storage: number; devices: number; installed: boolean;
   appVersion: string | null; gmail: string | null; streak: number; longestStreak: number; nightShare: number;
+  /** Claude's cost in USD for this user over the period, and how many calls. */
+  aiCost: number; aiCalls: number;
 };
 
 /** Days in a row with any use, ending at the last one, and the longest such run. */
@@ -180,10 +207,12 @@ export function streaks(days: string[], today: string): { current: number; longe
   return { current, longest };
 }
 
-export function userRows(v: View, daily: Daily[], today: string): UserRow[] {
+/** One row per user. `daily` and `ai` are the period's. */
+export function userRows(v: View, daily: Daily[], today: string, ai: Ai[] = []): UserRow[] {
   const stats = new Map(v.stats.map((s) => [s.userId as string, s]));
   return v.users.map((u) => {
     const mine = daily.filter((r) => r.userId === u.id);
+    const spent = aiTotals(ai.filter((r) => r.userId === u.id));
     const t = totals(mine);
     const devs = v.devices.filter((d) => d.userId === u.id).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
     const s = stats.get(u.id);
@@ -206,6 +235,8 @@ export function userRows(v: View, daily: Daily[], today: string): UserRow[] {
       streak: current,
       longestStreak: longest,
       nightShare: t.opens ? night / t.opens : 0,
+      aiCost: spent.costUsd,
+      aiCalls: spent.calls,
     };
   });
 }
@@ -276,6 +307,14 @@ export function fmtDuration(ms: number): string {
 }
 
 export const fmtPct = (x: number) => `${Math.round(x * 100)}%`;
+
+/** Dollars, with as many places as a Claude bill of fractions of a cent needs: $0.0008, $0.042, $3.10. */
+export function fmtUsd(n: number): string {
+  if (!n) return "$0";
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  if (n < 1) return `$${n.toFixed(3)}`;
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 /** Change from the previous period, as "+12%"; null when there was nothing to compare with. */
 export function change(now: number, before: number): number | null {
