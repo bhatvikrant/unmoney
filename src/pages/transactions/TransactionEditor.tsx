@@ -39,6 +39,7 @@ import { useQuickSave } from "@/components/tx/QuickAdd";
 import { useToday } from "@/lib/today";
 import { useEntryBudgets } from "@/components/tx/entryBudgets";
 import { BudgetPill } from "@/components/BudgetBars";
+import { MergedFrom } from "@/components/tx/MergedFrom";
 
 /** Links already acted on (by history entry), so a re-render or React's double effect never saves twice. */
 const savedLinks = new Set<string>();
@@ -193,7 +194,9 @@ export default function TransactionEditor(props: { panel?: boolean }) {
   }, [id, existing, bookmarks, sp, draftId, draft, link]);
 
   if (!initial) return <div className="p-8 text-center text-sm text-muted-foreground">{id ? "Entry not found" : draftId ? "This draft was already saved or dismissed." : "Loading…"}</div>;
-  return <Editor key={realId ?? (draftId ? `draft:${draftId}` : "new")} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} draft={draftId && draft ? draft : undefined} panel={panel} />;
+  // a merge or an unmerge rewrites the entry under the open form: start the form again from what it is now
+  const mergedAt = (existing?.merged as { at: number } | undefined)?.at ?? "";
+  return <Editor key={realId ? `${realId}:${mergedAt}` : draftId ? `draft:${draftId}` : "new"} initial={initial} id={realId as Id<"transactions"> | undefined} existing={existing ?? undefined} draft={draftId && draft ? draft : undefined} panel={panel} />;
 }
 
 /**
@@ -643,6 +646,8 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
           <div className="px-4 py-2"><TagInput tags={f.tags} onChange={(t) => set("tags", t)} suggestions={tagList.map((t) => t.tag)} /></div>
           <div className="px-4 py-3"><PhotoField photoIds={f.photoIds} onChange={(ids) => set("photoIds", ids)} /></div>
         </div>
+
+        {saved?.merged ? <MergedFrom tx={saved} /> : null}
 
         {saved?.type === "expense" ? (
           <div className="mt-3 border-y bg-card">

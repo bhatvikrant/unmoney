@@ -191,6 +191,23 @@ export default defineSchema({
     importId: v.optional(v.string()),
     /** The mail this entry was read from (Gmail sync), so its detail screen can link back to it. */
     source: v.optional(v.object({ app: v.literal("gmail"), messageId: v.string() })),
+    /**
+     * Set when this entry was made by merging (transactions.merge, or drafts.link with a Gmail draft): what it
+     * was made of, shown on the entry, and what transactions.unmerge puts back. `kept` and `removed` are whole
+     * entries without their ids (shared/ops.ts EntrySnapshot), each with its own `merged` when it was merged before.
+     */
+    merged: v.optional(v.object({
+      at: v.number(),
+      /** This entry just before the merge. */
+      kept: v.any(),
+      /** The entry merged into it, which the merge deleted. */
+      removed: v.optional(v.any()),
+      /** Or the Gmail draft it was merged with, which the merge closed. */
+      draftId: v.optional(v.id("drafts")),
+      /** Bookmarks and drafts that pointed at `removed` and point here now, so an unmerge points them back. */
+      bookmarkIds: v.optional(v.array(v.id("bookmarks"))),
+      draftIds: v.optional(v.array(v.id("drafts"))),
+    })),
   })
     .index("by_user_date", ["userId", "date"])
     .index("by_user_account", ["userId", "accountId"])
