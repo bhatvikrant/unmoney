@@ -58,6 +58,7 @@ export function Fab({ onClick, onHold, label = "Add", className, icon, title }: 
     <Button
       aria-label={label}
       title={title}
+      data-fab=""
       onClick={(e) => { if (press.current.fired) { press.current.fired = false; return; } onClick(e); }}
       {...hold}
       className={cn("fixed bottom-[calc(var(--tabbar-h)+1.5rem)] right-4 md:bottom-8 md:right-8 z-30 size-14 rounded-full shadow-lg", onHold && "select-none [-webkit-touch-callout:none]", className)}
