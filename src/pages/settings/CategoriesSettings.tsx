@@ -49,6 +49,11 @@ export default function CategoriesSettings() {
     setShowArchived(true);
     offerUndo(`Archived "${c.name}"`, () => setArchived({ ids: [id], archived: false }));
   };
+  const unarchiveAsked = async (id: Id<"categories">, name: string) => {
+    const subs = ofType.filter((x) => x.parentId === id).length;
+    if (!(await confirm({ title: `Unarchive "${name}"?`, description: `${subs ? `It and its ${subs} ${subs === 1 ? "subcategory" : "subcategories"} show` : "It shows"} again when you add entries.`, action: "Unarchive", destructive: false }))) return;
+    await archive(id, false);
+  };
   const tidy = useTidyUndo();
   const [dialog, setDialog] = useState<null | { id?: Id<"categories">; name: string; parentId: string }>(null);
   const move = (list: typeof mains, id: string, dir: -1 | 1) => {
@@ -132,7 +137,7 @@ export default function CategoriesSettings() {
                     <SwipeToDelete key={c._id} className="border-b last:border-b-0" {...swipe.row(c._id)} onDelete={() => del(c._id, c.name)}>
                       <div className="flex items-center gap-1 px-4 py-1.5 text-sm text-muted-foreground">
                         <span className="flex-1 min-w-0 truncate">{c.parentId ? `${nameOf(c.parentId)} › ` : ""}{c.name}{subs ? <span className="text-xs"> · {subs} {subs === 1 ? "subcategory" : "subcategories"}</span> : null}</span>
-                        <Button variant="ghost" size="sm" className="h-7" onClick={() => archive(c._id, false)}><ArchiveRestore className="size-4" />Unarchive</Button>
+                        <Button variant="ghost" size="sm" className="h-7" onClick={() => unarchiveAsked(c._id, c.name)}><ArchiveRestore className="size-4" />Unarchive</Button>
                         <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Delete ${c.name}`} onClick={() => del(c._id, c.name)}><Trash2 className="size-4" /></Button>
                       </div>
                     </SwipeToDelete>
@@ -216,7 +221,12 @@ function useTidyUndo(): TidyUndo {
 
 function useUndo() {
   const undo = useOp("categories.undoCleanup");
-  return (id: Id<"categoryCleanups">) => undo({ id }).catch((e) => toast.error(e instanceof Error ? e.message : "Could not undo"));
+  const confirm = useConfirm();
+  return async (last: Doc<"categoryCleanups">) => {
+    const n = last.label.length;
+    if (!(await confirm({ title: "Undo the tidy-up?", description: `Puts back the ${n} ${n === 1 ? "change" : "changes"} it made: ${last.label.join(" · ")}.`, action: "Undo tidy-up", destructive: false }))) return;
+    await undo({ id: last._id }).catch((e) => toast.error(e instanceof Error ? e.message : "Could not undo"));
+  };
 }
 
 /** After a tidy-up: what changed, with Undo, until dismissed. */
@@ -234,7 +244,7 @@ function TidyBanner({ tidy: { last, bannerHidden, dismiss } }: { tidy: TidyUndo 
         <div className="text-xs text-muted-foreground line-clamp-2">{last.label.join(" · ")}</div>
         {skipped.length ? <div className="text-xs text-muted-foreground">{skipped.length} skipped: {skipped[0]}</div> : null}
       </div>
-      <Button variant="outline" size="sm" className="h-7" onClick={() => undo(last._id)}>Undo</Button>
+      <Button variant="outline" size="sm" className="h-7" onClick={() => undo(last)}>Undo</Button>
       <Button variant="ghost" size="icon" className="size-7" aria-label="Dismiss" onClick={dismiss}><X className="size-4" /></Button>
     </div>
   );
@@ -247,7 +257,7 @@ function UndoLastTidy({ tidy: { last, bannerHidden } }: { tidy: TidyUndo }) {
   const date = new Date(last.at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
   return (
     <div className="px-4 pb-6">
-      <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => undo(last._id)}>Undo last tidy-up ({date})</Button>
+      <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => undo(last)}>Undo last tidy-up ({date})</Button>
     </div>
   );
 }

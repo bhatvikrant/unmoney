@@ -11,6 +11,7 @@ import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { MonthNav } from "@/components/shell/MonthNav";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -47,6 +48,11 @@ export default function AccountDetail() {
   const data = useMemo(() => accountGet(view, realId, gran, r.from, r.to, today), [view, realId, gran, r.from, r.to, today]);
   const payCard = useOp("accounts.payCard");
   const setArchived = useOp("accounts.setArchived");
+  const confirm = useConfirm();
+  const unarchive = async (id: Id<"accounts">, name: string) => {
+    if (!(await confirm({ title: `Unarchive ${name}?`, description: "It shows again when you add entries.", action: "Unarchive", destructive: false }))) return;
+    await setArchived({ ids: [id], archived: false }).catch((e) => toast.error(e instanceof Error ? e.message : "Failed"));
+  };
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
   // a statement picked below: the entry list shows that cycle instead of the month
   const [cycle, setCycle] = useState<{ from: string; to: string } | null>(null);
@@ -81,7 +87,7 @@ export default function AccountDetail() {
           <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border bg-muted/50 px-3 py-2 text-sm" role="status">
             <Archive className="size-4 shrink-0 text-muted-foreground" />
             <span className="flex-1 text-muted-foreground">Archived. Not offered when adding entries; its entries still count.</span>
-            <Button size="sm" variant="outline" className="h-7" onClick={() => setArchived({ ids: [a._id], archived: false }).catch((e) => toast.error(e instanceof Error ? e.message : "Failed"))}>Unarchive</Button>
+            <Button size="sm" variant="outline" className="h-7" onClick={() => void unarchive(a._id, a.name)}>Unarchive</Button>
           </div>
         ) : null}
         {data.kind === "card" || data.kind === "debitCard" ? (

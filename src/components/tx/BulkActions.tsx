@@ -17,6 +17,7 @@ import { canSplit } from "@/lib/unsplit";
 import { MarkSipSheet, pickOf } from "@/components/tx/MarkSipSheet";
 import { fromGmail } from "../../../shared/sips";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { cn } from "@/lib/utils";
 import { useBottomBar } from "@/components/shell/SplitLayout";
 import { Input } from "@/components/ui/input";
@@ -98,7 +99,12 @@ export function BulkBar({ bulk, txs, drafts = [] }: { bulk: BulkSelect; txs: Tx[
   // Bookmark every selected entry; if they are all bookmarked already, this removes those bookmarks instead.
   const bookmarkOf = useMemo(() => new Map(view.bookmarks.flatMap((b) => (b.transactionId ? [[b.transactionId as string, b._id] as const] : []))), [view.bookmarks]);
   const allMarked = n > 0 && chosen.every((t) => bookmarkOf.has(t._id));
-  const toggleBookmarks = () => run(async () => {
+  const confirm = useConfirm();
+  const toggleBookmarks = async () => {
+    if (allMarked && !(await confirm({ title: `Remove ${n === 1 ? "the bookmark" : `${n} bookmarks`}?`, description: `${n === 1 ? "This entry is" : "These entries are"} no longer kept as ${n === 1 ? "a bookmark" : "bookmarks"} to add again from.`, action: "Remove" }))) return;
+    await toggleBookmarksNow();
+  };
+  const toggleBookmarksNow = () => run(async () => {
     if (allMarked) {
       for (const t of chosen) await removeBookmark({ id: bookmarkOf.get(t._id)! });
       return;
