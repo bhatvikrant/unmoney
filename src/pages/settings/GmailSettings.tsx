@@ -9,7 +9,9 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { ChevronDown, ChevronRight, Mail, Pause, Play, RefreshCw, Unplug, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
-import { LOOKBACKS, normaliseSender, SENDER_PRESETS, windowStart, type Lookback } from "../../../shared/gmail/query";
+import { DEFAULT_SPAN_DAYS, LOOKBACKS, normaliseSender, SENDER_PRESETS, windowStart, type Lookback } from "../../../shared/gmail/query";
+import { yearStart } from "../../../shared/gmail/backfill";
+import { BackfillEstimate, BackfillPreview, BackfillProgress, longDay, validYear, YearField } from "./GmailBackfill";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
@@ -52,10 +54,17 @@ export default function GmailSettings() {
   const update = useMutation(api.gmail.updateSettings);
   const muteSender = useMutation(api.gmail.muteSender);
   const claimConnection = useMutation(api.gmail.claimConnection);
+  const startBackfill = useMutation(api.gmail.startBackfill);
+  const stopBackfill = useMutation(api.gmail.stopBackfill);
   const confirm = useConfirm();
   const [sp, setSp] = useSearchParams();
-  const [lookback, setLookback] = useState<Lookback>(30);
-  const [busy, setBusy] = useState<null | "connect" | "check" | "disconnect">(null);
+  const [lookback, setLookback] = useState<Choice>(30);
+  /** The year typed for "Since a year", before connecting or before (re)starting a backfill. */
+  const [yearText, setYearText] = useState(() => String(new Date().getFullYear() - 1));
+  const year = validYear(yearText);
+  /** Connected, with "Since a year" picked but not started yet. */
+  const [choosingYear, setChoosingYear] = useState(false);
+  const [busy, setBusy] = useState<null | "connect" | "check" | "disconnect" | "backfill">(null);
   const [newSender, setNewSender] = useState("");
   /**
    * Back from connecting: what the first check finds opens as a list to pick from. It started as
@@ -64,8 +73,12 @@ export default function GmailSettings() {
    */
   const [waitingSince, setWaitingSince] = useState<number | null>(() => (sp.get("gmail") === "claim" || sp.get("gmail") === "connected" ? Date.now() - FIRST_CHECK_SLACK_MS : null));
   const firstCheck = waitingSince !== null && s?.connected ? s.log.find((l) => l.at >= waitingSince) : undefined;
-  const waiting = waitingSince !== null && !!s?.connected && s.lookbackDays !== 0 && !firstCheck && s.syncing;
-  const checking = !!s?.syncing || busy === "check";
+  /** Reading back to a year, and not finished: its card replaces the first check's. */
+  const backfilling = !!s?.backfill && s.backfill.state !== "done";
+  const waiting = waitingSince !== null && !!s?.connected && s.lookbackDays !== 0 && !firstCheck && s.syncing && !backfilling;
+  // a backfill holds the connection between its slices for hours: that isn't "checking"
+  const checking = (!!s?.syncing && !backfilling) || busy === "check";
+  const picked: Choice = choosingYear || s?.backfill ? "year" : (s?.lookbackDays ?? 30);
   const handled = useRef(false);
   const claimed = useRef<string | null>(null);
 
@@ -99,6 +112,8 @@ export default function GmailSettings() {
   // the first check finished: show what it found before anything is imported
   useEffect(() => {
     if (handled.current || waitingSince === null || !s?.connected) return;
+    // reading back to a year: its card shows the progress and what it finds
+    if (s.backfill) { handled.current = true; return; }
     if (s.lookbackDays === 0) {
       handled.current = true;
       toast("New money mail will show up in From Gmail for you to pick from.");
@@ -115,8 +130,12 @@ export default function GmailSettings() {
   async function connect() {
     setBusy("connect");
     try {
-      // reconnecting keeps the look-back already chosen; only a first connection takes the picker's
-      window.location.assign(await connectUrl({ lookbackDays: s?.connected ? s.lookbackDays : lookback }));
+      // reconnecting keeps the look-back already chosen (and a backfill carries on); only a first connection takes the picker's
+      if (!s?.connected && lookback === "year" && year === null) { toast.error("Enter the year to read back to"); setBusy(null); return; }
+      const args = s?.connected
+        ? { lookbackDays: s.lookbackDays }
+        : lookback === "year" ? { lookbackDays: DEFAULT_SPAN_DAYS as Lookback, since: { year: year!, from: yearStart(year!) } } : { lookbackDays: lookback };
+      window.location.assign(await connectUrl(args));
     } catch (e) {
       toast.error(errorText(e));
       setBusy(null);
@@ -127,7 +146,7 @@ export default function GmailSettings() {
     setBusy("check");
     try {
       const r = await syncNow({});
-      if (!r.ran) toast("Already checking, or checked less than a minute ago.");
+      if (!r.ran) toast(backfilling ? "Reading old mail right now. New mail is checked between its batches, at least every hour." : "Already checking, or checked less than a minute ago.");
       else if (r.error) toast.error(`The check failed: ${r.error}`);
       else if (r.found) toast.success(`Found ${r.found} new ${r.found === 1 ? "entry" : "entries"}`, { action: { label: "Pick what to import", onClick: () => nav("/gmail") } });
       else toast.success("Nothing new.");
@@ -164,14 +183,57 @@ export default function GmailSettings() {
     }
   }
 
-  async function changeLookback(d: Lookback) {
-    if (!s || d === s.lookbackDays) return;
+  async function changeLookback(d: Choice) {
+    if (!s) return;
+    if (d === "year") { setChoosingYear(true); return; }
+    if (d === s.lookbackDays && !s.backfill) { setChoosingYear(false); return; }
+    if (backfilling) {
+      const ok = await confirm({
+        title: "Stop reading old mail?",
+        description: `UnMoney is still reading back to ${s.backfill!.year}. Entries it already found stay; the rest of that mail isn't read.`,
+        action: "Stop reading",
+      });
+      if (!ok) return;
+    }
+    setChoosingYear(false);
     try {
       await update({ lookbackDays: d });
       const back = day(windowStart({ lookbackDays: d, readsFrom: Date.now() - d * DAY }, Date.now()));
       toast(d === 0 ? "Only new mail is read from now on." : `The next check reads back to ${back}.`, d ? { action: { label: "Check now", onClick: () => void check() } } : undefined);
     } catch (e) {
       toast.error(errorText(e));
+    }
+  }
+
+  async function onStartBackfill(y: number) {
+    setBusy("backfill");
+    try {
+      await startBackfill({ year: y, from: yearStart(y) });
+      setChoosingYear(false);
+      toast.success(`Reading your mail back to ${y}. You can close the app.`);
+    } catch (e) {
+      toast.error(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onStopBackfill() {
+    if (!s?.backfill) return;
+    const ok = await confirm({
+      title: "Stop reading old mail?",
+      description: `Entries already found stay for you to review. Mail before ${new Date(s.backfill.cursor).toLocaleDateString(undefined, { month: "short", year: "numeric" })} isn't read. You can start again later; what was read is skipped.`,
+      action: "Stop reading",
+    });
+    if (!ok) return;
+    setBusy("backfill");
+    try {
+      await stopBackfill({});
+      toast("Stopped reading old mail.");
+    } catch (e) {
+      toast.error(errorText(e));
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -222,11 +284,18 @@ export default function GmailSettings() {
             <Section title="Look back">
               <div className="px-4 py-3">
                 <LookbackPicker value={lookback} onChange={setLookback} />
-                <div className="mt-2 text-xs text-muted-foreground">{lookback === 0 ? "Only mail that arrives after you connect. Nothing already in your inbox is read." : `Every hourly check reads money mail from the last ${lookback} days. You can change this later.`}</div>
+                {lookback === "year" ? (
+                  <div className="mt-3">
+                    <YearField value={yearText} onChange={setYearText} />
+                    <BackfillPreview year={year} />
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-muted-foreground">{lookback === 0 ? "Only mail that arrives after you connect. Nothing already in your inbox is read." : `Every hourly check reads money mail from the last ${lookback} days. You can change this later.`}</div>
+                )}
               </div>
             </Section>
             <div className="px-4 pt-4">
-              <Button className="w-full h-11" disabled={busy !== null || !s.configured} onClick={() => void connect()}>
+              <Button className="w-full h-11" disabled={busy !== null || !s.configured || (lookback === "year" && year === null)} onClick={() => void connect()}>
                 <Mail className="size-4" />{busy === "connect" ? "Opening Google…" : "Connect Gmail"}
               </Button>
               {!s.configured ? <p className="mt-2 text-xs text-muted-foreground">Gmail sync isn't set up on this server yet (GMAIL_TOKEN_KEY is missing).</p> : null}
@@ -237,6 +306,9 @@ export default function GmailSettings() {
 
         {s && s.connected ? (
           <>
+            {s.backfill && backfilling ? (
+              <BackfillProgress b={s.backfill} paused={s.status !== "ok"} stopping={busy === "backfill"} onStop={() => void onStopBackfill()} onReview={() => nav("/gmail")} />
+            ) : null}
             {waiting ? (
               <div className="mx-4 mt-4 flex items-start gap-3 rounded-lg border bg-card p-3 text-sm" role="status">
                 <RefreshCw className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
@@ -263,7 +335,7 @@ export default function GmailSettings() {
                     <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", s.status === "ok" ? "bg-income" : s.status === "paused" ? "bg-muted-foreground" : "bg-amber-500")} />
                     <span>
                       {s.status === "ok" ? "Checks every hour" : s.status === "paused" ? "Paused" : "Needs reconnecting"}
-                      {" · "}{s.syncing ? "checking now…" : s.lastSyncAt ? `last checked ${ago(s.lastSyncAt)}` : "not checked yet"}
+                      {" · "}{s.syncing && !backfilling ? "checking now…" : s.lastSyncAt ? `last checked ${ago(s.lastSyncAt)}` : "not checked yet"}
                     </span>
                   </div>
                   {s.status === "paused" && s.lastError ? <div className="mt-1 text-xs text-destructive">Paused after repeated failures: {s.lastError}</div> : null}
@@ -290,12 +362,27 @@ export default function GmailSettings() {
 
             <Section title="Look back">
               <div className="px-4 py-3">
-                <LookbackPicker value={s.lookbackDays} onChange={(d) => void changeLookback(d)} />
-                <div className="mt-2 text-xs text-muted-foreground">
-                  {s.lookbackDays === 0
-                    ? <>Only mail that arrives from {day(s.readsFrom ?? Date.now())} on is read. Nothing older in your inbox.</>
-                    : <>Every hourly check reads money mail from the last {s.lookbackDays} days, now back to <span className="text-foreground">{day(windowStart({ lookbackDays: s.lookbackDays, readsFrom: s.readsFrom ?? undefined, syncedUpTo: s.syncedUpTo ?? undefined }, Date.now()))}</span>. Mail that already became a draft is skipped.</>}
-                </div>
+                <LookbackPicker value={picked} onChange={(d) => void changeLookback(d)} />
+                {choosingYear ? (
+                  <div className="mt-3">
+                    <YearField value={yearText} onChange={setYearText} />
+                    <BackfillEstimate year={year} busy={busy === "backfill" || s.status === "reauth"} onStart={(y) => void onStartBackfill(y)} />
+                    {s.backfill ? <Button variant="ghost" size="sm" className="mt-1 w-full" onClick={() => setChoosingYear(false)}>Keep reading back to {s.backfill.year}</Button> : null}
+                  </div>
+                ) : s.backfill ? (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    {s.backfill.state === "done"
+                      ? <>Read all money mail back to <span className="text-foreground">{longDay(s.backfill.from)}</span>{s.backfill.finishedAt ? <> (finished {day(s.backfill.finishedAt)}, {s.backfill.found} found)</> : null}. Hourly checks now read new mail.</>
+                      : <>Reading back to <span className="text-foreground">{longDay(s.backfill.from)}</span>; progress is at the top. Hourly checks keep reading new mail meanwhile.</>}
+                    {" "}<button type="button" className="text-foreground underline underline-offset-2" onClick={() => setChoosingYear(true)}>Pick another year</button>
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    {s.lookbackDays === 0
+                      ? <>Only mail that arrives from {day(s.readsFrom ?? Date.now())} on is read. Nothing older in your inbox.</>
+                      : <>Every hourly check reads money mail from the last {s.lookbackDays} days, now back to <span className="text-foreground">{day(windowStart({ lookbackDays: s.lookbackDays, readsFrom: s.readsFrom ?? undefined, syncedUpTo: s.syncedUpTo ?? undefined }, Date.now()))}</span>. Mail that already became a draft is skipped.</>}
+                  </div>
+                )}
               </div>
             </Section>
 
@@ -375,13 +462,17 @@ export default function GmailSettings() {
   );
 }
 
-function LookbackPicker({ value, onChange }: { value: Lookback; onChange: (d: Lookback) => void }) {
+/** A look-back in days, or "since a year" (read back to 1 January of it, then the usual 30 days each hour). */
+type Choice = Lookback | "year";
+const CHOICES: Choice[] = [...LOOKBACKS, "year"];
+
+function LookbackPicker({ value, onChange }: { value: Choice; onChange: (d: Choice) => void }) {
   return (
-    <div role="radiogroup" aria-label="Look back" className="grid grid-cols-4 gap-2">
-      {LOOKBACKS.map((d) => (
+    <div role="radiogroup" aria-label="Look back" className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+      {CHOICES.map((d) => (
         <button key={d} type="button" role="radio" aria-checked={value === d} onClick={() => onChange(d)}
-          className={cn("h-9 rounded-md border text-sm transition-colors", value === d ? "border-primary text-foreground font-medium bg-accent/40" : "text-muted-foreground hover:bg-accent/40")}>
-          {d === 0 ? "From now" : `${d} days`}
+          className={cn("h-9 rounded-md border text-sm transition-colors", d === "year" && "col-span-2 sm:col-span-1", value === d ? "border-primary text-foreground font-medium bg-accent/40" : "text-muted-foreground hover:bg-accent/40")}>
+          {d === 0 ? "From now" : d === "year" ? "Since a year" : `${d} days`}
         </button>
       ))}
     </div>
