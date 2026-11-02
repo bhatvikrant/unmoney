@@ -6,7 +6,7 @@ import { buildCtx, computeBalances, sumKinds } from "./ledger";
 import { backupExport, ledgerOf, statsByCategory } from "./views";
 import { monthRecap, recapDrill, recapText } from "./recap";
 import {
-  gmailPayments, isSip, lateBy, newSipOf, onePerPayment, ordinal, perMonth, rhythmOf, schedulesOf, similarPayments, sipArgs, sipDrafts, sipFor, sipKey, sipsInRange, sipsList, sipsOf,
+  gmailPayments, isSip, knowsAccount, lateBy, newSipOf, onePerPayment, ordinal, perMonth, rhythmOf, schedulesOf, similarPayments, sipArgs, sipDrafts, sipFor, sipKey, sipsInRange, sipsList, sipsOf,
   sipSuggestions, usualDay,
 } from "./sips";
 import { recurringSuggestions } from "./upcoming";
@@ -139,6 +139,31 @@ test("usualDay: the most common day, a tie going to the earlier one", () => {
 
 // ---------- detection: Gmail only ----------
 
+test("a suggestion needs six months of it: 6 monthly debits (one missed month inside is fine), 26 weekly, 3 quarterly", () => {
+  const { s: s0, bank } = base();
+  const suggested = (dates: string[]) => {
+    let s = s0;
+    for (const d of dates) s = draft(s, d, "Groww", 500000, bank, GROWW).s;
+    return sipSuggestions(s).map((x) => x.payments.length);
+  };
+  const months = debits(10, [2026, 1], 8); // Jan–Aug
+  expect(suggested(months.slice(0, 5))).toEqual([]);
+  expect(suggested(months.slice(0, 6))).toEqual([6]);
+  // March missed: Jan, Feb, Apr–Jul is still six in one stretch
+  expect(suggested([...months.slice(0, 2), ...months.slice(3, 7)])).toEqual([6]);
+  // April and May missed: three and three, no stretch of six
+  expect(suggested([...months.slice(0, 3), ...months.slice(5, 8)])).toEqual([]);
+  const mondays = Array.from({ length: 26 }, (_, i) => addDays("2026-03-02", 7 * i));
+  expect(suggested(mondays.slice(0, 25))).toEqual([]);
+  expect(suggested(mondays)).toEqual([26]);
+  expect(suggested(["2026-01-10", "2026-04-10"])).toEqual([]);
+  expect(suggested(["2026-01-10", "2026-04-10", "2026-07-10"])).toEqual([3]);
+  // Mark as SIP is the user's call: two payments are enough there
+  let s = s0;
+  for (const d of months.slice(0, 2)) s = draft(s, d, "Groww", 500000, bank, GROWW).s;
+  expect(similarPayments(s, [{ note: "Groww", amount: 500000, date: months[1] }])).toHaveLength(2);
+});
+
 test("only what Gmail read is a SIP candidate: entries typed by hand never are", () => {
   const { s: s0, other, bank } = base();
   let s = s0;
@@ -149,45 +174,50 @@ test("only what Gmail read is a SIP candidate: entries typed by hand never are",
 
 test("Gmail entries, waiting drafts and dismissed drafts of one name and amount on a rhythm are one suggestion", () => {
   const { s: s0, other, bank } = base();
-  let s = gmailEntry(s0, "2026-07-10", "Groww", 1000000, bank, other, GROWW).s;
+  let s = draft(s0, "2026-05-11", "Groww", 1000000, bank, GROWW).s;
+  s = draft(s, "2026-06-10", "Groww", 1000000, bank, GROWW).s;
+  s = gmailEntry(s, "2026-07-10", "Groww", 1000000, bank, other, GROWW).s;
   s = draft(s, "2026-08-08", "Groww", 1000000, bank, { ...GROWW, status: "dismissed" }).s;
   s = draft(s, "2026-09-10", "Groww", 1000000, bank, GROWW).s;
   s = draft(s, "2026-10-12", "Groww", 1000000, bank, GROWW).s;
   const [sug, ...more] = sipSuggestions(s);
   expect(more).toEqual([]);
-  expect(sug).toMatchObject({ name: "Groww", amount: 1000000, rhythm: "monthly", likely: true });
-  expect(sug.payments.map((p) => p.date)).toEqual(["2026-10-12", "2026-09-10", "2026-08-08", "2026-07-10"]);
+  expect(sug).toMatchObject({ name: "Groww", amount: 1000000, rhythm: "monthly", day: 10, likely: true, signal: "Mail from Groww" });
+  expect(sug.payments.map((p) => p.date)).toEqual(["2026-10-12", "2026-09-10", "2026-08-08", "2026-07-10", "2026-06-10", "2026-05-11"]);
   expect(sug.transactionIds).toHaveLength(1);
-  expect(sug.draftIds).toHaveLength(3);
-  expect(sug.why).toBe("Mail from Groww · 4 payments, monthly around the 10th, since Jul 2026");
+  expect(sug.draftIds).toHaveLength(5);
+  expect(sug.why).toBe("Mail from Groww · 6 payments, monthly around the 10th, since May 2026");
 });
 
 test("the amount has to match exactly to be suggested together; two SIPs on one platform are two", () => {
   const { s: s0, bank } = base();
   let s = s0;
-  for (const d of ["2026-08-05", "2026-09-05", "2026-10-05"]) s = draft(s, d, "Groww", 500000, bank, GROWW).s;
-  for (const d of ["2026-08-20", "2026-09-21", "2026-10-20"]) s = draft(s, d, "Groww", 200000, bank, GROWW).s;
+  for (const d of debits(5, [2026, 5], 6)) s = draft(s, d, "Groww", 500000, bank, GROWW).s;
+  for (const d of debits(20, [2026, 5], 6)) s = draft(s, d, "Groww", 200000, bank, GROWW).s;
   s = draft(s, "2026-10-25", "Groww", 520000, bank, GROWW).s; // a one-off near the first: on its own
-  expect(sipSuggestions(s).map((x) => [x.amount, x.payments.length])).toEqual([[500000, 3], [200000, 3]]);
+  expect(sipSuggestions(s).map((x) => [x.amount, x.payments.length])).toEqual([[500000, 6], [200000, 6]]);
 });
 
 test("likely when the mail reads like an investment; other regular debits are only 'maybe', after them", () => {
   const { s: s0, bank } = base();
   let s = s0;
-  for (const d of ["2026-08-01", "2026-09-01", "2026-10-01"]) s = draft(s, d, "Rent", 2500000, bank).s;
-  for (const d of ["2026-09-05", "2026-10-06"]) s = draft(s, d, "Payment", 300000, bank, { from: "CAMS <donotreply@camsonline.com>", subject: "SIP Purchase - Mirae Asset" }).s;
+  for (const d of debits(1, [2026, 5], 6)) s = draft(s, d, "Rent", 2500000, bank).s;
+  for (const d of debits(5, [2026, 5], 6)) s = draft(s, d, "Payment", 300000, bank, { from: "CAMS <donotreply@camsonline.com>", subject: "SIP Purchase - Mirae Asset" }).s;
   const sug = sipSuggestions(s);
   expect(sug.map((x) => [x.name, x.likely])).toEqual([["CAMS", true], ["Rent", false]]);
 });
 
 test("the bank alert and the fund's mail for one debit count once", () => {
   const { s: s0, other, bank } = base();
-  let s = gmailEntry(s0, "2026-09-10", "Groww", 1000000, bank, other).s;
+  let s = s0;
+  for (const d of ["2026-05-11", "2026-06-10", "2026-07-10", "2026-08-10"]) s = draft(s, d, "Groww", 1000000, bank, GROWW).s;
+  s = gmailEntry(s, "2026-09-10", "Groww", 1000000, bank, other).s;
   s = draft(s, "2026-09-11", "Groww", 1000000, bank, { ...GROWW, status: "dismissed" }).s;
   s = draft(s, "2026-10-10", "Groww", 1000000, bank, GROWW).s;
   const [sug] = sipSuggestions(s);
-  expect(sug.payments.map((p) => [p.date, !!p.entry])).toEqual([["2026-10-10", false], ["2026-09-10", true]]);
-  expect(onePerPayment(gmailPayments(s))).toHaveLength(2);
+  expect(sug.payments.slice(0, 2).map((p) => [p.date, !!p.entry])).toEqual([["2026-10-10", false], ["2026-09-10", true]]);
+  expect(sug.payments).toHaveLength(6);
+  expect(onePerPayment(gmailPayments(s))).toHaveLength(6);
 });
 
 test("names the user said are not SIPs are not suggested again", () => {
@@ -205,6 +235,7 @@ test("accepting files the Gmail entries and saves the drafts (waiting and dismis
   const savings = run(s0, "accounts.create", { name: "Savings", kind: "bank", initialBalance: 0, includeInTotals: true, hidden: false, transferAsExpense: false });
   let s = savings.snap;
   const sav = savings.result as Id<"accounts">;
+  for (const d of ["2026-05-11", "2026-06-10"]) s = draft(s, d, "Groww", 1000000, bank, GROWW).s;
   s = gmailEntry(s, "2026-07-10", "Groww", 1000000, bank, other, GROWW).s;
   s = draft(s, "2026-08-08", "Groww", 1000000, bank, { ...GROWW, status: "dismissed" }).s;
   s = draft(s, "2026-09-10", "Groww", 1000000, sav, GROWW).s;
@@ -216,16 +247,16 @@ test("accepting files the Gmail entries and saves the drafts (waiting and dismis
   const sip = sipsOf(s)[0];
   expect(sip).toMatchObject({ id: r.result, name: "Groww", rhythm: "monthly", amount: 1000000, lastDate: "2026-10-12", accountId: bank });
   const paid = s.transactions.filter(isSip).sort((a, b) => a.date.localeCompare(b.date));
-  expect(paid.map((t) => [t.date, t.accountId === sav ? "savings" : "bank"])).toEqual([["2026-07-10", "bank"], ["2026-08-08", "bank"], ["2026-09-10", "savings"], ["2026-10-12", "bank"]]);
+  expect(paid.map((t) => [t.date, t.accountId === sav ? "savings" : "bank"])).toEqual([["2026-05-11", "bank"], ["2026-06-10", "bank"], ["2026-07-10", "bank"], ["2026-08-08", "bank"], ["2026-09-10", "savings"], ["2026-10-12", "bank"]]);
   const investments = s.categories.find((c) => c.name === "Investments")!;
-  expect(paid.slice(1).every((t) => t.categoryId === investments._id && t.source?.app === "gmail")).toBe(true);
+  expect(paid.filter((t) => t.date !== "2026-07-10").every((t) => t.categoryId === investments._id && t.source?.app === "gmail")).toBe(true);
   expect(s.drafts.every((d) => d.status === "accepted")).toBe(true);
   expect(sipSuggestions(s)).toEqual([]);
   // out of spending, still out of the bank
   const oct = s.transactions.filter((t) => t.date >= "2026-10-01");
   expect(sumKinds(oct, ledgerOf(s)).expense).toBe(45000);
   expect(statsByCategory(s, "2026-10-01", "2026-10-31", "expense").total).toBe(45000);
-  expect(computeBalances(s.transactions, buildCtx(s.accounts, s.accountGroups, { cardExpenseDisplay: "atTime" })).get(bank)).toBe(-(3 * 1000000 + 45000));
+  expect(computeBalances(s.transactions, buildCtx(s.accounts, s.accountGroups, { cardExpenseDisplay: "atTime" })).get(bank)).toBe(-(5 * 1000000 + 45000));
   expect(recurringSuggestions(s, "2026-10-20")).toEqual([]);
 });
 
@@ -387,6 +418,43 @@ test("a SIP saved before days of the month were read keeps taking its debits on 
   expect(sipsOf(s)[0].day).toBeUndefined();
   expect(sipFor(sipsOf(s), { type: "expense", note: "Groww", amount: 1000000, date: "2026-11-23" })?.name).toBe("Flexi");
   expect(() => run(s, "sips.create", { name: "X", transactionIds: [s.transactions[0]._id], day: 32 })).toThrow("Bad day");
+});
+
+test("two SIPs of one amount on the same days (₹10,000 to PPFAS and to Tata on the 7th) both save their payments", () => {
+  const { s: s0, bank } = base();
+  let s = s0;
+  const dates = debits(7, [2024, 1], 6);
+  for (const d of dates) s = draft(s, d, "PPFASMutua", 1000000, bank).s;
+  const pp = sipSuggestions(s)[0];
+  s = run(s, "sips.create", { name: "PPFAS", transactionIds: [], draftIds: pp.draftIds, draftDates: pp.draftDates, rhythm: pp.rhythm, day: pp.day }).snap;
+  for (const d of dates) s = draft(s, d, "TataMutual", 1000000, bank).s;
+  const tata = sipSuggestions(s)[0];
+  expect(tata.name).toBe("TataMutual");
+  s = run(s, "sips.create", { name: "Tata", transactionIds: [], draftIds: tata.draftIds, draftDates: tata.draftDates, rhythm: tata.rhythm, day: tata.day }).snap;
+  const [ppfas, tataSip] = sipsOf(s);
+  expect(s.transactions.filter((t) => t.sipId === ppfas.id)).toHaveLength(6);
+  expect(s.transactions.filter((t) => t.sipId === tataSip.id)).toHaveLength(6);
+  // a payment typed by hand for that debit still stops it being saved twice, and says so
+  const { s: s1, other } = { s, other: s.categories.find((c) => c.name === "Other" && c.type === "expense")!._id };
+  let t = typed(s1, "2024-07-08", "Tata SIP", 1000000, bank, other).s;
+  t = draft(t, "2024-07-08", "TataMutual", 1000000, bank).s;
+  const id = t.drafts.at(-1)!._id;
+  expect(() => run(t, "sips.mark", { id: tataSip.id, transactionIds: [], draftIds: [id], draftDates: ["2024-07-08"] })).toThrow("already in the ledger");
+});
+
+test("when no mail named the bank account, nothing is saved until the user picks one", () => {
+  const { s: s0, bank } = base();
+  let s = s0;
+  for (const d of debits(7, [2024, 1], 6)) s = draft(s, d, "TataMutual", 1000000, bank, { account: null }).s;
+  const tata = sipSuggestions(s)[0];
+  expect(knowsAccount(s, tata.payments)).toBe(false);
+  const args = { name: "Tata", transactionIds: [], draftIds: tata.draftIds, draftDates: tata.draftDates, rhythm: tata.rhythm, day: tata.day };
+  expect(() => run(s, "sips.create", args)).toThrow("Pick the bank account");
+  s = run(s, "sips.create", { ...args, accountId: bank }).snap;
+  const sip = sipsOf(s)[0];
+  expect(sip.accountId).toBe(bank);
+  expect(s.transactions.filter((t) => t.sipId === sip.id).map((t) => t.accountId)).toEqual(Array(6).fill(bank));
+  expect(knowsAccount(s, [], sip)).toBe(true);
 });
 
 // ---------- recaps ----------

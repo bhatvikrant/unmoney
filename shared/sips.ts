@@ -79,6 +79,13 @@ export function sipFor(sips: Sip[], t: Payment, withCancelled = false): Sip | un
 const DRIFT: Record<Rhythm, number> = { weekly: 2, fortnightly: 2, twiceMonthly: 5, monthly: 5, quarterly: 5 };
 /** Missed instalments a run may skip and still be one rhythm (a bounced debit, a month's pause). */
 const MAX_SKIP: Record<Rhythm, number> = { weekly: 4, fortnightly: 2, twiceMonthly: 1, monthly: 3, quarterly: 2 };
+/**
+ * What a suggestion needs: six months of instalments in one steady stretch (6 monthly debits, 26
+ * weekly, 13 every two weeks, 3 quarterly), with no more than about a month missed between two of
+ * them (`STEADY_STEP`: how many instalments apart two payments may be). Marking by hand needs none.
+ */
+const STEADY: Record<Rhythm, number> = { weekly: 26, fortnightly: 13, twiceMonthly: 12, monthly: 6, quarterly: 3 };
+const STEADY_STEP: Record<Rhythm, number> = { weekly: 5, fortnightly: 3, twiceMonthly: 3, monthly: 2, quarterly: 1 };
 /** Two Gmail records of one name and amount this close are one payment (the bank's alert and the fund's mail). */
 export const SAME_PAYMENT_DAYS = 3;
 /**
@@ -123,21 +130,21 @@ function onWeekday(r: "weekly" | "fortnightly", anchor: string, date: string): {
  * debit two days late doesn't move the next one's date, and the 28th's debit followed by the 7th's
  * (nine days) is not a late week.
  */
-function step(r: Rhythm, a: string, b: string, anchor: string): number {
+function step(r: Rhythm, a: string, b: string, anchor: string, most = MAX_SKIP[r]): number {
   if (r === "weekly" || r === "fortnightly") {
     const from = onWeekday(r, anchor, a);
     const to = onWeekday(r, anchor, b);
     const k = from && to ? to.n - from.n : 0;
-    return k >= 1 && k <= MAX_SKIP[r] ? k : 0;
+    return k >= 1 && k <= most ? k : 0;
   }
-  for (let k = 1; k <= MAX_SKIP[r]; k++) {
+  for (let k = 1; k <= most; k++) {
     if (Math.abs(diffDays(addMonths(a, r === "quarterly" ? 3 * k : k), b)) <= DRIFT[r]) return k;
   }
   return 0;
 }
 
-/** Every stretch of dates (oldest first) on rhythm r with at least one back-to-back instalment, as [from, to] indexes. */
-function runsOf(r: Rhythm, dates: string[]): { from: number; to: number }[] {
+/** Every stretch of dates (oldest first) on rhythm r with at least one back-to-back instalment, as [from, to] indexes; two payments at most `most` instalments apart. */
+function runsOf(r: Rhythm, dates: string[], most = MAX_SKIP[r]): { from: number; to: number }[] {
   const runs: { from: number; to: number }[] = [];
   let start = 0;
   let next = false;
@@ -145,7 +152,7 @@ function runsOf(r: Rhythm, dates: string[]): { from: number; to: number }[] {
     if (end > start && next) runs.push({ from: start, to: end });
   };
   for (let i = 1; i < dates.length; i++) {
-    const k = step(r, dates[i - 1], dates[i], dates[start]);
+    const k = step(r, dates[i - 1], dates[i], dates[start], most);
     if (!k) {
       close(i - 1);
       start = i;
@@ -182,6 +189,11 @@ export function rhythmOf(dates: string[]): Rhythm | null {
 
 /** One SIP's share of the payments of one name and amount: its rhythm, its day of the month (monthly and quarterly), and its dates, oldest first. */
 export type Schedule = { rhythm: Rhythm; day?: number; dates: string[] };
+
+/** Whether a schedule has kept up for six months: enough instalments in one steady stretch to suggest it as a SIP (`STEADY`). */
+export function steady(schedule: Schedule): boolean {
+  return runsOf(schedule.rhythm, schedule.dates, STEADY_STEP[schedule.rhythm]).some((run) => run.to - run.from + 1 >= STEADY[schedule.rhythm]);
+}
 
 /**
  * The days of the month dates (oldest first) keep to, each with its dates and how many days late
@@ -386,6 +398,8 @@ export type SipSuggestion = {
   likely: boolean;
   /** One line on why. */
   why: string;
+  /** Just what says it's a SIP, without the history: "Mail from Axis Bank Alerts", "The name reads like a SIP". */
+  signal: string;
   /** One per payment, newest first. */
   payments: GmailPayment[];
   /** The entries and drafts accepting it files, and the drafts' dates (for the server's duplicate check). */
@@ -430,8 +444,8 @@ function splitByDay(sips: Sip[], key: string, schedules: Schedule[]): boolean {
 }
 
 /**
- * Payments Gmail read that look like a SIP: one name and the exact same amount, two or more times
- * on a rhythm (weekly to quarterly, each debit up to a few days off its date). Payments that keep
+ * Payments Gmail read that look like a SIP: one name and the exact same amount on a rhythm (weekly
+ * to quarterly, each debit up to a few days off its date), kept up for six months (`steady`). Payments that keep
  * several days of the month are a suggestion per day (`schedulesOf`), named with it. Each takes its
  * whole history, pauses and all. Payments a running SIP takes are left out (they are saved into
  * it); ones of a cancelled SIP come back as "resume it", one payment being enough. Names the user
@@ -454,12 +468,12 @@ export function sipSuggestions(snap: Snapshot): SipSuggestion[] {
     const group = onePerPayment(raw);
     const schedules = schedulesOf(group.map((p) => p.date));
     const split = splitByDay(sips, group[0].key, schedules);
-    // nothing repeats: only a cancelled SIP's payments are offered (to resume it)
+    // fewer than six months of it, or nothing repeating: only a cancelled SIP's payments are offered (to resume it)
     const shares = schedules.length ? schedules.map((sc) => ({ sc, list: group.filter((p) => sc.dates.includes(p.date)) })) : [{ sc: undefined, list: group }];
     for (const { sc, list } of shares) {
       const latest = list[list.length - 1];
       const cancelled = sipFor(sips, { type: "expense", note: latest.note, amount: latest.amount, date: latest.date }, true);
-      if (!sc && !cancelled) continue;
+      if (!(sc && steady(sc)) && !cancelled) continue;
       const key = split && sc?.day ? `${group[0].key}@${sc.day}` : group[0].key;
       if (dismissed.has(key)) continue;
       const dates = list.map((p) => p.date);
@@ -477,6 +491,7 @@ export function sipSuggestions(snap: Snapshot): SipSuggestion[] {
         day: sc?.day,
         likely: signal.likely || !!cancelled,
         why: cancelled ? `${cancelled.name} is marked cancelled, but payments came again · ${history}` : `${signal.why} · ${history}`,
+        signal: cancelled ? `${cancelled.name} is marked cancelled, but payments came again` : signal.why,
         payments,
         transactionIds: payments.flatMap((p) => (p.entry ? [p.entry._id] : [])),
         draftIds: drafts.map((d) => d._id),
@@ -532,6 +547,15 @@ export function newSipOf(snap: Snapshot, payments: GmailPayment[]): { name: stri
   const all = onePerPayment(gmailPayments(snap).filter((x) => x.key === p.key && x.amount === p.amount));
   const split = one?.day !== undefined && splitByDay(sipsOf(snap), p.key, schedulesOf(all.map((x) => x.date)));
   return { name: withDay(readSignal(payments).name ?? p.note, split ? one?.day : undefined), rhythm: one?.rhythm ?? rhythmOf(dates) ?? undefined, day: one?.day };
+}
+
+/**
+ * Whether a SIP of these payments knows the bank account they were paid from: a saved entry's, a
+ * mail that named one, or the SIP's own. When none does, the user picks one, or nothing can be saved.
+ */
+export function knowsAccount(snap: Snapshot, payments: GmailPayment[], sip?: Sip): boolean {
+  const live = (id?: Id<"accounts">) => !!id && snap.accounts.some((a) => a._id === id && !a.deletedAt);
+  return live(sip?.accountId) || payments.some((p) => (p.entry ? live(p.entry.accountId) : live(p.draft?.proposal.accountId)));
 }
 
 /** The ids `sips.create` and `sips.mark` take for these payments. */
