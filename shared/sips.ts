@@ -602,7 +602,11 @@ export type SipRow = {
   missed: number;
 };
 
-/** Every SIP with its payments: running, then late, then stale, then cancelled, each by what has gone into it. */
+/**
+ * Every SIP with its payments, the one paid most recently first, so the ones going today lead and
+ * the longest quiet trail. Cancelled ones (the user said so) come last whenever they were paid, and
+ * a SIP with no payment yet after everything else in its group.
+ */
 export function sipsList(snap: Snapshot, from: string, to: string, today: string): SipRow[] {
   const by = new Map<string, Doc<"transactions">[]>();
   for (const t of snap.transactions) {
@@ -611,7 +615,6 @@ export function sipsList(snap: Snapshot, from: string, to: string, today: string
     if (list) list.push(t);
     else by.set(t.sipId!, [t]);
   }
-  const order: Record<SipStatus, number> = { running: 0, late: 1, stale: 2, cancelled: 3 };
   return sipsOf(snap).map((sip): SipRow => {
     const entries = (by.get(sip.id) ?? []).sort((a, b) => b.date.localeCompare(a.date) || b._creationTime - a._creationTime);
     const total = entries.reduce((s, t) => s + t.amount, 0);
@@ -622,7 +625,9 @@ export function sipsList(snap: Snapshot, from: string, to: string, today: string
     const missed = sip.stoppedAt || !entries[0] ? 0 : missedDebits(rhythm, dates, today);
     const status: SipStatus = sip.stoppedAt ? "cancelled" : missed >= STALE_AFTER ? "stale" : missed ? "late" : "running";
     return { sip, entries, total, inRange, status, next, missed };
-  }).sort((a, b) => order[a.status] - order[b.status] || b.total - a.total || a.sip.name.localeCompare(b.sip.name));
+  }).sort((a, b) => Number(a.status === "cancelled") - Number(b.status === "cancelled")
+    || (b.entries[0]?.date ?? "").localeCompare(a.entries[0]?.date ?? "")
+    || b.total - a.total || a.sip.name.localeCompare(b.sip.name));
 }
 
 /** What the SIPs still going put in, in an average month: running and late ones, not stale or cancelled. */
