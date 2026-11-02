@@ -1,14 +1,13 @@
 import { useOp, useView } from "@/lib/store";
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { ArrowDown, ArrowUp, Plus, Pencil, Trash2, CornerDownRight, WandSparkles, ChevronRight, ChevronDown, Check, X, Archive, ArchiveRestore } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Pencil, Trash2, CornerDownRight, WandSparkles, ChevronRight, Check, X, Archive, ArchiveRestore } from "lucide-react";
 import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { CLEANUP_UNDO_MS } from "../../../shared/ops";
 import { lintCategories } from "../../../shared/categoryLint";
 import { useApp } from "@/lib/app";
-import { cn } from "@/lib/utils";
-import { HistorySection } from "@/components/HistorySection";
+import { ArchivedHistoryTabs, type BottomTab } from "@/components/ArchivedHistoryTabs";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SegmentedTabs } from "@/components/shell/misc";
 import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
@@ -29,7 +28,7 @@ export default function CategoriesSettings() {
   const confirm = useConfirm();
   const reorder = useOp("categories.reorder");
   const setArchived = useOp("categories.setArchived");
-  const [showArchived, setShowArchived] = useState(false);
+  const [bottomTab, setBottomTab] = useState<BottomTab | null>(null);
   const ofType = categories.filter((c) => c.type === type && !c.deletedAt);
   const live = ofType.filter((c) => !c.archivedAt);
   const mains = live.filter((c) => !c.parentId);
@@ -46,7 +45,7 @@ export default function CategoriesSettings() {
     const what = subs ? `It and its ${subs} ${subs === 1 ? "subcategory" : "subcategories"} stop` : "It stops";
     if (!asked && !(await confirm({ title: `Archive "${c.name}"?`, description: `${what} showing when you add entries; entries already on ${subs ? "them" : "it"} keep ${subs ? "them" : "it"}. You can unarchive it from Archived at any time.`, action: "Archive", destructive: false }))) return;
     await archive(id, true);
-    setShowArchived(true);
+    setBottomTab("archived");
     offerUndo(`Archived "${c.name}"`, () => setArchived({ ids: [id], archived: false }));
   };
   const unarchiveAsked = async (id: Id<"categories">, name: string) => {
@@ -121,35 +120,24 @@ export default function CategoriesSettings() {
             </div>
           ))}
         </div>
-        {archived.length ? (
-          <div className="mt-4">
-            <button type="button" onClick={() => setShowArchived(!showArchived)} aria-expanded={showArchived} className="w-full flex items-center px-4 py-1.5 text-sm text-muted-foreground">
-              <ChevronDown className={cn("size-4 mr-1 transition-transform", !showArchived && "-rotate-90")} />
-              <Archive className="size-3.5 mr-1.5" />
-              <span className="flex-1 text-left">Archived</span>
-              <span className="text-xs tabular">{archived.length}</span>
-            </button>
-            {showArchived ? (
-              <div className="bg-card border-y">
-                {archived.map((c) => {
-                  const subs = ofType.filter((x) => x.parentId === c._id).length;
-                  return (
-                    <SwipeToDelete key={c._id} className="border-b last:border-b-0" {...swipe.row(c._id)} onDelete={() => del(c._id, c.name)}>
-                      <div className="flex items-center gap-1 px-4 py-1.5 text-sm text-muted-foreground">
-                        <span className="flex-1 min-w-0 truncate">{c.parentId ? `${nameOf(c.parentId)} › ` : ""}{c.name}{subs ? <span className="text-xs"> · {subs} {subs === 1 ? "subcategory" : "subcategories"}</span> : null}</span>
-                        <Button variant="ghost" size="sm" className="h-7" onClick={() => unarchiveAsked(c._id, c.name)}><ArchiveRestore className="size-4" />Unarchive</Button>
-                        <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Delete ${c.name}`} onClick={() => del(c._id, c.name)}><Trash2 className="size-4" /></Button>
-                      </div>
-                    </SwipeToDelete>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
         <p className="px-4 py-3 text-xs text-muted-foreground">Subcategories need the Subcategories switch in Settings. Edit a subcategory and set its parent to "Main category" to promote it. Archive a category you no longer use (edit it): it stops showing when you add entries, and entries already on it keep it. Unarchive it from Archived to bring it back.</p>
         <UndoLastTidy tidy={tidy} />
-        <HistorySection scope="categories" className="mt-2" />
+        <ArchivedHistoryTabs scope="categories" open={bottomTab} onOpenChange={setBottomTab} className="mt-2" archivedCount={archived.length} archived={
+          <div className="divide-y">
+            {archived.map((c) => {
+              const subs = ofType.filter((x) => x.parentId === c._id).length;
+              return (
+                <SwipeToDelete key={c._id} {...swipe.row(c._id)} onDelete={() => del(c._id, c.name)}>
+                  <div className="flex items-center gap-1 px-4 py-1.5 text-sm text-muted-foreground">
+                    <span className="flex-1 min-w-0 truncate">{c.parentId ? `${nameOf(c.parentId)} › ` : ""}{c.name}{subs ? <span className="text-xs"> · {subs} {subs === 1 ? "subcategory" : "subcategories"}</span> : null}</span>
+                    <Button variant="ghost" size="sm" className="h-7" onClick={() => unarchiveAsked(c._id, c.name)}><ArchiveRestore className="size-4" />Unarchive</Button>
+                    <Button variant="ghost" size="icon" className="size-7 text-destructive" aria-label={`Delete ${c.name}`} onClick={() => del(c._id, c.name)}><Trash2 className="size-4" /></Button>
+                  </div>
+                </SwipeToDelete>
+              );
+            })}
+          </div>
+        } />
       </Page>
       <Dialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent>
