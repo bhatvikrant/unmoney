@@ -460,6 +460,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   /** "Not an entry": the draft goes, the mail is not offered again. */
   async function notAnEntry() {
     if (!draft) return;
+    if (!(await ask({ title: "Not an entry?", description: "It won't be imported, and this mail won't be offered again.", action: "Dismiss" }))) return;
     setBusy(true);
     try {
       await dismissDrafts({ ids: [draft._id] });
