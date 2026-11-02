@@ -8,6 +8,7 @@ import { useApp } from "@/lib/app";
 import { useOp } from "@/lib/store";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Money } from "@/components/shell/Money";
 import { EmptyState } from "@/components/shell/misc";
@@ -107,7 +108,13 @@ export default function AccountsPage() {
 
   // Archive the ticked methods, or bring them back when every one of them is archived already.
   const unarchiving = chosen.length > 0 && chosen.every((a) => a.archivedAt);
+  const confirm = useConfirm();
   async function archiveChosen() {
+    const what = chosen.length === 1 ? chosen[0].name : `${chosen.length} payment methods`;
+    const ok = unarchiving
+      ? await confirm({ title: `Unarchive ${what}?`, description: `${chosen.length === 1 ? "It shows" : "They show"} again when you add entries.`, action: "Unarchive", destructive: false })
+      : await confirm({ title: `Archive ${what}?`, description: `${chosen.length === 1 ? "It stops" : "They stop"} showing when you add entries; entries and balances stay as they are. You can unarchive at any time.`, action: "Archive", destructive: false });
+    if (!ok) return;
     try {
       await setArchived({ ids: chosen.map((a) => a._id), archived: !unarchiving });
       exit();

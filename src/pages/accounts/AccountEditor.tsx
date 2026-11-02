@@ -8,6 +8,7 @@ import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { useGoBack } from "@/lib/nav";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -61,7 +62,13 @@ export default function AccountEditor() {
   // Archived methods are not offered, unless one is already the billing or linked account.
   const others = accounts.filter((a) => a._id !== id && a.kind !== "card" && !a.linked && (!a.archivedAt || a._id === f.billingAccountId || a._id === f.linkedAccountId));
   const setArchived = useOp("accounts.setArchived");
+  const ask = useConfirm();
   async function toggleArchived() {
+    const name = existing?.name ?? "this payment method";
+    const ok = existing?.archivedAt
+      ? await ask({ title: `Unarchive ${name}?`, description: "It shows again when you add entries.", action: "Unarchive", destructive: false })
+      : await ask({ title: `Archive ${name}?`, description: "It stops showing when you add entries; its entries and balance stay as they are. You can unarchive it at any time.", action: "Archive", destructive: false });
+    if (!ok) return;
     try {
       await setArchived({ ids: [id as Id<"accounts">], archived: !existing?.archivedAt });
       nav("/payment-methods");

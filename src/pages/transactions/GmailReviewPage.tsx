@@ -157,6 +157,7 @@ export default function GmailReviewPage() {
     offerUndo(`Dismissed ${plural(n, "entry", "entries")}`, () => reopen({ ids }));
   }
   async function dismissOne(d: Draft) {
+    if (!(await confirm({ title: "Dismiss this entry?", description: "It won't be imported, and this mail won't be offered again.", action: "Dismiss" }))) return;
     await dismiss({ ids: [d._id] });
     offerUndo("Dismissed. This mail won't be offered again.", () => reopen({ ids: [d._id] }));
   }

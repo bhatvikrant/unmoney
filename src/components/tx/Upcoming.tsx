@@ -10,6 +10,7 @@ import { dateLabel } from "@/lib/format";
 import { Money } from "@/components/shell/Money";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { FREQ_LABEL } from "./RepeatSheet";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +54,7 @@ export function useUpcomingActions() {
   const { dispatch } = useStore();
   const openEntry = useOpenEntry();
   const today = useToday();
+  const confirm = useConfirm();
   const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed");
   // Putting the schedule back on the date brings it back to life too, if that was its last one.
   const restore = (o: Occurrence) => dispatch("repeats.update", { id: o.repeat._id, nextDate: o.date, active: true });
@@ -68,6 +70,7 @@ export function useUpcomingActions() {
       } catch (e) { fail(e); }
     },
     async skip(o: Occurrence) {
+      if (!(await confirm({ title: `Skip ${dateLabel(o.date)}?`, description: "No entry is added for this date; the schedule carries on with the next one.", action: "Skip", destructive: false }))) return;
       try {
         await dispatch("repeats.skip", { id: o.repeat._id, date: o.date });
         toast(`Skipped ${dateLabel(o.date)}`, { duration: 8000, action: { label: "Undo", onClick: () => void restore(o).catch(fail) } });
