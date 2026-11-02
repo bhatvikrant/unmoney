@@ -290,7 +290,7 @@ export interface Ops {
    * A SIP made from payments already in the ledger (a suggestion, or "Mark as SIP" on an entry): they are
    * filed under it, and so is every later expense with one of their notes and about the same amount.
    */
-  "sips.create": { args: { name: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; rhythm?: Rhythm }; result: string };
+  "sips.create": { args: { name: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; rhythm?: Rhythm; day?: number }; result: string };
   /** File more payments under a SIP; their notes become its keys too. */
   "sips.mark": { args: { id: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; resume?: boolean }; result: void };
   /**
@@ -2200,7 +2200,8 @@ const handlers: Handlers = {
     return repeatId;
   },
 
-  "sips.create": (w, { name, transactionIds, draftIds, rhythm }) => {
+  "sips.create": (w, { name, transactionIds, draftIds, rhythm, day }) => {
+    if (day !== undefined && (!Number.isInteger(day) || day < 1 || day > 31)) throw new Error("Bad day");
     const entries = sipPayments(w, transactionIds);
     const drafts = sipDraftsOf(w, draftIds);
     if (!entries.length && !drafts.length) throw new Error("Only payments read from Gmail can be SIPs");
@@ -2216,6 +2217,7 @@ const handlers: Handlers = {
       // the bank account the debits come from: the latest saved one's, else what the latest mail named
       accountId: [...entries].reverse().find((t) => !w.get("accounts", t.accountId)?.deletedAt)?.accountId ?? [...drafts].reverse().find((d) => d.proposal.accountId)?.proposal.accountId,
       rhythm,
+      day,
     });
     w.setSips([...sipsOf(w.snap), sip]);
     if (!fillSip(w, sip, entries, drafts)) throw new Error("None of those payments could be saved");

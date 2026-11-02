@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { useOp, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { dateLabel } from "@/lib/format";
-import { readSignal, rhythmOf, rhythmText, sipArgs, sipFor, sipsOf, similarPayments, type GmailPayment } from "../../../shared/sips";
+import { newSipOf, rhythmText, sipArgs, sipFor, sipsOf, similarPayments, type GmailPayment } from "../../../shared/sips";
 import type { Snapshot } from "../../../shared/ops";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 import { Money } from "@/components/shell/Money";
@@ -47,12 +47,12 @@ export function useSipUndo() {
 
 /**
  * "Mark as SIP" on payments the user picked (an entry or a draft read from Gmail, or several ticked
- * in the list): every earlier payment with the same name and exact amount, ticked, to untick any
- * that aren't part of it. Makes a SIP of them, or adds them to the SIP they already belong to
+ * in the list): every earlier payment with the same name and exact amount (of the picked one's day
+ * of the month, when they keep several), ticked, to untick any that aren't part of it. Makes a SIP of them, or adds them to the SIP they already belong to
  * (resuming it if it was marked cancelled). Mount it with a `key` per pick so it starts fresh.
  */
 export function MarkSipSheet({ picked, open, onOpenChange, onDone }: {
-  picked: { note: string; amount: number }[]; open: boolean; onOpenChange: (o: boolean) => void; onDone?: () => void;
+  picked: { note: string; amount: number; date: string }[]; open: boolean; onOpenChange: (o: boolean) => void; onDone?: () => void;
 }) {
   const view = useView();
   const { accountName } = useApp();
@@ -62,10 +62,10 @@ export function MarkSipSheet({ picked, open, onOpenChange, onDone }: {
   const payments = useMemo(() => similarPayments(view, picked), [view, picked]);
   const existing = useMemo(() => picked.map((p) => sipFor(sipsOf(view), { type: "expense", ...p }, true)).find(Boolean), [view, picked]);
   const [off, setOff] = useState<Set<string>>(() => new Set());
-  const [name, setName] = useState(() => existing?.name ?? readSignal([...payments]).name ?? payments[0]?.note ?? "");
+  const [name, setName] = useState(() => existing?.name ?? newSipOf(view, payments).name);
   const [busy, setBusy] = useState(false);
   const chosen = payments.filter((p) => !off.has(keyOf(p)));
-  const rhythm = rhythmOf(chosen.map((p) => p.date).reverse()) ?? undefined;
+  const { rhythm, day } = newSipOf(view, chosen);
 
   async function save() {
     if (!chosen.length || busy) return;
@@ -78,7 +78,7 @@ export function MarkSipSheet({ picked, open, onOpenChange, onDone }: {
           duration: 8000, action: { label: "Undo", onClick: () => void undo({ sipId: existing.id, created: false, payments: chosen })() },
         });
       } else {
-        const sipId = await create({ name: name.trim() || chosen[0].note, ...args, rhythm });
+        const sipId = await create({ name: name.trim() || chosen[0].note, ...args, rhythm, day });
         toast(`${name.trim() || chosen[0].note} is a SIP now. Its payments, and later ones from Gmail, stay off the daily list.`, {
           duration: 8000, action: { label: "Undo", onClick: () => void undo({ sipId, created: true, payments: chosen })() },
         });
@@ -130,5 +130,5 @@ export function MarkSipSheet({ picked, open, onOpenChange, onDone }: {
 }
 
 /** What MarkSipSheet takes for an entry or a draft. */
-export const pickOf = (x: { note: string; amount: number } | { proposal: { note: string; amount: number } }) =>
-  "proposal" in x ? { note: x.proposal.note, amount: x.proposal.amount } : { note: x.note, amount: x.amount };
+export const pickOf = (x: { note: string; amount: number; date: string } | { proposal: { note: string; amount: number; date: string } }) =>
+  "proposal" in x ? { note: x.proposal.note, amount: x.proposal.amount, date: x.proposal.date } : { note: x.note, amount: x.amount, date: x.date };

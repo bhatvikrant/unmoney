@@ -1,6 +1,6 @@
 # Spec: SIPs
 
-Status: built · 2026-11-02 (Gmail-only detection, rhythms, auto-save, recaps: this revision)
+Status: built · 2026-11-02 (days of the month: this revision)
 
 ## 1. The idea
 
@@ -23,18 +23,17 @@ An entry typed by hand is never suggested, never filed automatically, and can't 
 1. **Payments.** `gmailPayments` gathers the expenses Gmail read that aren't in a SIP. Each one carries the mail it came from (sender, subject).
 2. **Groups.** Payments are grouped by **name** (`sipKey`: the normalised note, with digits folded so "ACH D- ICCL-2398472" and next month's narration match) and the **exact amount**. Two SIPs on one platform become two groups.
 3. **One per payment.** `onePerPayment` treats records of one group within 3 days of each other as one payment (say, the bank's alert and the fund's mail). It keeps a saved entry over a waiting draft, and a waiting draft over a dismissed one.
-4. **Rhythm.** `rhythmOf` picks the rhythm whose longest regular stretch is longest:
-   - weekly or fortnightly: each debit may land ±2 days off
-   - monthly or quarterly: ±5 days
-   - twice a month: two days of the month, each ±5 days and anchored to its day, so fortnightly debits, which drift two days a month, don't pass for it
+4. **Days of the month.** One name and amount can be several SIPs: Mirae ₹2,500 on the 7th, 14th, 21st and 28th is four. `schedulesOf` reads a group two ways and keeps the one that explains more payments, or as many with the debits nearer their dates:
+   - **Days of the month.** Each day the payments keep (`daysOf`: the most common day first; each debit goes to the day it is least off, `lateBy`: up to 5 days late, the next working day, or 2 early) is a SIP of its own when its payments repeat monthly or quarterly (±5 days). Two days a month are two SIPs; nothing is read as "twice a month" any more.
+   - **One weekday.** Every week or every two weeks, counted from the first payment of the stretch, so it keeps its weekday (±2 days, which never adds up). The 28th's debit followed by the 7th's, nine days on, is not a late week.
 
-   The stretch needs two payments one instalment apart (three for twice a month). Up to three missed instalments may sit inside a stretch. Two payments are enough (8 Sep and 10 Oct). Two months apart is not.
-5. **Pauses.** A pause between stretches doesn't matter: the whole history of that name and amount goes with the suggestion.
+   A stretch needs two payments one instalment apart. Up to three missed instalments may sit inside it. Two payments are enough (8 Sep and 10 Oct). Two months apart is not. A day the payments stopped keeping and a later day they moved to (the SIP's date was changed) are one SIP, on the later day.
+5. **Pauses.** A pause between stretches doesn't matter: the whole history of that name and amount (that day's, when there are several) goes with the suggestion.
 6. **Ranking.**
    - **Looks like a SIP:** the mail, the name or the category reads like an investment (SIP, mutual fund, ICCL, CAMS, KFintech, Groww, Zerodha, Kuvera…).
    - **Maybe a SIP:** everything else that repeats (rent, an EMI, a bill). The user adds or dismisses those.
    - **Not a SIP** adds the name to `settings.dismissedSips`.
-7. **Naming.** A suggestion is named after the mail's name. When that name is a bank's generic one ("Payment") and the signal came from the mail, it's named after the sender ("CAMS").
+7. **Naming.** A suggestion is named after the mail's name. When that name is a bank's generic one ("Payment") and the signal came from the mail, it's named after the sender ("CAMS"). When the name's payments are several SIPs, or a SIP of that name keeps a day, the day goes on the end: "Mirae Asset Mutual Fund · 7th". "Not a SIP" on one of those remembers the name and day (`key@7`), leaving the others.
 8. **Already handled.** Payments a running SIP takes are left out (they get saved into it). Payments that fit a **cancelled** SIP come back as "*X* is marked cancelled, but payments came again". One payment is enough for that, and accepting resumes the SIP.
 
 ## 4. Accepting, marking, and what comes later
@@ -45,12 +44,12 @@ An entry typed by hand is never suggested, never filed automatically, and can't 
   - is filed under **Investments** (created if the user has none)
   - carries `source` pointing at its mail
 
-  A draft is **never saved twice**. It is skipped if it is flagged as an entry already typed (`matchedTransactionId`), or if any entry already has its amount within 2 days. It is also skipped (it stays in review) when no account is known. The SIP keeps its name, keys, usual amount, last date, bank account and rhythm. Its id is `sip_<op id>`, so the device and the server agree.
-- **Mark as SIP:** on a Gmail entry's or draft's screen, or for rows ticked in the daily list's select mode. `similarPayments` lists every Gmail payment with the same name and exact amount, from every month there is data for. Each has a tick box, all ticked; flagged drafts are left out. The user names the SIP and confirms. If the payments fit an existing SIP, the sheet adds them to it, resuming it if it was cancelled.
+  A draft is **never saved twice**. It is skipped if it is flagged as an entry already typed (`matchedTransactionId`), or if any entry already has its amount within 2 days. It is also skipped (it stays in review) when no account is known. The SIP keeps its name, keys, usual amount, last date, bank account, rhythm and, monthly or quarterly, its **day**. Its id is `sip_<op id>`, so the device and the server agree.
+- **Mark as SIP:** on a Gmail entry's or draft's screen, or for rows ticked in the daily list's select mode. `similarPayments` lists every Gmail payment with the same name and exact amount, from every month there is data for (only the picked payment's day when they are several SIPs). Each has a tick box, all ticked; flagged drafts are left out. The user names the SIP and confirms. If the payments fit an existing SIP, the sheet adds them to it, resuming it if it was cancelled.
 - **Later debits:**
   - After a Gmail check writes its drafts, `writeSync` runs `sips.saveDrafts` through `runOps`. That is the same reducer the device runs, so a running SIP's new debit is saved into it at once, with the same account and category rules.
   - A Gmail draft the user saves from review is filed as it is saved (`Work.insert`), within 20% of the SIP's amount (step-ups).
-  - The date never matters for filing.
+  - A SIP with a day takes only debits on that day (`sipFor` with `lateBy`), so the 7th's SIP never takes the 14th's debit. If the fund moves the date, the new debits go to the daily list and come back as a suggestion for the new day. A SIP saved before days were read, and a weekly one, takes a debit on any date.
   - A payment on or after `lastDate` moves the SIP's amount.
 - **Undo:** accepting or marking can be undone. The SIP goes (or the entries come out of it), and drafts it saved are as they were again, with the entries made from them deleted (`drafts.reopen`, then `drafts.dismiss` for ones that were dismissed).
 
@@ -74,7 +73,7 @@ An entry typed by hand is never suggested, never filed automatically, and can't 
 
 SIPs live on the settings document (`settings.sips`), not in a table of their own. A device still running an older version of the app, which has no such table, would crash on the first change it was sent from one; it already takes the settings document and ignores fields it doesn't know.
 
-A SIP is `{ id, name, keys, amount, lastDate?, accountId?, rhythm?, stoppedAt? }`.
+A SIP is `{ id, name, keys, amount, lastDate?, accountId?, rhythm?, day?, stoppedAt? }`. `twiceMonthly` is still a rhythm a saved SIP may have; it is no longer read.
 
 - Changing the main currency's decimals (or the currency, keeping data) rescales SIP amounts. A new currency without the data drops the SIPs, and so does wiping everything.
 - Backups restore exactly what was filed, and nothing is re-filed on restore or on an unmerge.
