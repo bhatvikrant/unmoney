@@ -54,16 +54,26 @@ An entry typed by hand is never suggested, never filed automatically, and can't 
   - A payment on or after `lastDate` moves the SIP's amount.
 - **Undo:** accepting or marking can be undone. The SIP goes (or the entries come out of it), and drafts it saved are as they were again, with the entries made from them deleted (`drafts.reopen`, then `drafts.dismiss` for ones that were dismissed).
 
-## 5. Pauses and cancellation
+## 5. Keeping up, pauses and cancellation
 
-- **Paused** needs nothing from the user. When the next due date (`nextDue`: the usual day by rhythm) is more than half an instalment plus its drift in the past, the SIP shows **Paused · last paid …** and drops out of "Every month". Nothing is changed or deleted. The next debit goes straight in and it is running again.
+Each SIP on the page says when it was last paid and how it is keeping up (`sipsList`, `missedDebits`): debits due since the last payment (`nextDue`: the usual day by rhythm) that never came, each counted once its drift has passed.
+
+| Status | When | Shown |
+|---|---|---|
+| Running | nothing missed | "Last paid 26 days ago · next Nov 7", grey |
+| Late | 1–2 debits missed (the 7th's monthly SIP with nothing by the 13th) | **Late** badge, "Last paid 6 weeks ago · 1 debit missed", amber |
+| Stale | 3 or more missed: 3 months for a monthly SIP, 3 weeks for a weekly one, 9 months for a quarterly one | **Stopped?** badge, "Last paid 7 months ago · Apr 7, 2026", red |
+| Cancelled | the user said so | **Cancelled** badge, grey |
+
+- Nothing is changed or deleted for a late or stale SIP. The next debit goes straight in and it is running again.
+- "Every month" counts running and late SIPs, not stale or cancelled ones.
 - **Cancelled** is the user's call (**Mark as cancelled**, `stoppedAt`). The SIP keeps its payments and takes no new ones, and they are left as they are. If debits with that name come again, it is offered back to resume (§3).
 
 ## 6. Where it lives
 
 | Where | What |
 |---|---|
-| More › Invest › SIPs (`/sips`) | This month / every month (each running SIP at its rhythm: weekly ×52/12, fortnightly ×26/12, twice a month ×2, quarterly ÷3) / so far. "N SIP payments waiting in Gmail review" with **Save** (`sips.saveDrafts`). **Looks like a SIP** and **Maybe a SIP**, each row with Add, Review (the Mark as SIP sheet) and Not a SIP. **Your SIPs**: running, then paused, then cancelled. A SIP opens a sheet: name edited in place, Mark as cancelled / Not cancelled, Delete (in-app confirm; payments go back to the ledger), and its payments, each with Not a SIP. |
+| More › Invest › SIPs (`/sips`) | This month / every month (each running SIP at its rhythm: weekly ×52/12, fortnightly ×26/12, twice a month ×2, quarterly ÷3) / so far. "N SIP payments waiting in Gmail review" with **Save** (`sips.saveDrafts`). **Looks like a SIP** and **Maybe a SIP**, each row with Add, Review (the Mark as SIP sheet) and Not a SIP. **Your SIPs**: running, then late, then stopped?, then cancelled, each with when it was last paid (§5). A SIP opens a sheet: name edited in place, Mark as cancelled / Not cancelled, Delete (in-app confirm; payments go back to the ledger), and its payments, each with Not a SIP. |
 | Daily ledger | SIP payments and the drafts a running SIP takes are not listed. One line under the summary says "₹17,000 into SIPs · not spending" and opens the page. Select mode has **Mark as SIP**, enabled when every ticked row is a Gmail expense. |
 | Entry / draft screen | **Mark as SIP** on an expense read from Gmail. On a SIP payment: "SIP · *name*" and **Not a SIP**. |
 | Gmail review | A **SIP** badge on drafts a running SIP takes. |

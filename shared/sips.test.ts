@@ -6,7 +6,7 @@ import { buildCtx, computeBalances, sumKinds } from "./ledger";
 import { backupExport, ledgerOf, statsByCategory } from "./views";
 import { monthRecap, recapDrill, recapText } from "./recap";
 import {
-  gmailPayments, isSip, knowsAccount, lateBy, newSipOf, onePerPayment, ordinal, perMonth, rhythmOf, schedulesOf, similarPayments, sipArgs, sipDrafts, sipFor, sipKey, sipsInRange, sipsList, sipsOf,
+  gmailPayments, isSip, knowsAccount, lateBy, missedDebits, newSipOf, onePerPayment, ordinal, perMonth, rhythmOf, schedulesOf, similarPayments, sipArgs, sipDrafts, sipFor, sipKey, sipsInRange, sipsList, sipsOf,
   sipSuggestions, usualDay,
 } from "./sips";
 import { recurringSuggestions } from "./upcoming";
@@ -311,18 +311,36 @@ test("the server loads what saving drafts needs", () => {
 
 // ---------- pause, cancel, resume ----------
 
-test("a SIP with no debit for a while reads as paused, nothing changes, and the next debit goes straight in", () => {
+test("a SIP shows how it is keeping up: on time, late after a missed debit, most likely stopped after three; the next debit puts it back", () => {
   const { s: s0, other, bank } = base();
   let s = s0;
   for (const d of ["2026-03-10", "2026-04-10", "2026-05-11"]) s = gmailEntry(s, d, "Groww", 1000000, bank, other, GROWW).s;
   s = run(s, "sips.create", { name: "Groww", transactionIds: s.transactions.map((t) => t._id), rhythm: "monthly" }).snap;
-  expect(sipsList(s, "2026-05-01", "2026-05-31", "2026-06-12")[0]).toMatchObject({ status: "running", next: "2026-06-10" });
-  const [paused] = sipsList(s, "2026-11-01", "2026-11-30", "2026-11-02");
-  expect(paused.status).toBe("paused");
-  expect(perMonth([paused])).toBe(0);
+  const at = (today: string) => sipsList(s, "2026-05-01", "2026-05-31", today)[0];
+  // due 10 Jun: a few working days late is still on time
+  expect(at("2026-06-12")).toMatchObject({ status: "running", next: "2026-06-10", missed: 0 });
+  expect(at("2026-06-15")).toMatchObject({ status: "running", missed: 0 });
+  expect(at("2026-06-16")).toMatchObject({ status: "late", missed: 1 });
+  expect(at("2026-07-16")).toMatchObject({ status: "late", missed: 2 });
+  expect(at("2026-08-15")).toMatchObject({ status: "late", missed: 2 });
+  expect(at("2026-08-16")).toMatchObject({ status: "stale", missed: 3 });
+  const stale = at("2026-11-02");
+  expect(stale).toMatchObject({ status: "stale", missed: 5 });
+  // what goes in a month counts the late, not the stopped
+  expect(perMonth([stale])).toBe(0);
+  expect(perMonth([at("2026-06-16")])).toBe(1000000);
   s = gmailEntry(s, "2026-11-10", "Groww", 1000000, bank, other, GROWW).s;
-  expect(sipsList(s, "2026-11-01", "2026-11-30", "2026-11-12")[0]).toMatchObject({ status: "running", next: "2026-12-10" });
+  expect(sipsList(s, "2026-11-01", "2026-11-30", "2026-11-12")[0]).toMatchObject({ status: "running", next: "2026-12-10", missed: 0 });
   expect(s.transactions.filter(isSip)).toHaveLength(4);
+});
+
+test("missed debits follow the SIP's rhythm: three weeks for a weekly one, nine months for a quarterly one", () => {
+  expect(missedDebits("weekly", ["2026-10-05"], "2026-10-14")).toBe(0);
+  expect(missedDebits("weekly", ["2026-10-05"], "2026-10-15")).toBe(1);
+  expect(missedDebits("weekly", ["2026-10-05"], "2026-10-29")).toBe(3);
+  expect(missedDebits("quarterly", ["2026-01-10"], "2026-07-20")).toBe(2);
+  expect(missedDebits("quarterly", ["2026-01-10"], "2026-10-16")).toBe(3);
+  expect(missedDebits("weekly", ["2020-01-06"], "2026-11-02")).toBe(60);
 });
 
 test("a cancelled SIP keeps its payments and takes no new ones; if debits come again it is offered back to resume", () => {
