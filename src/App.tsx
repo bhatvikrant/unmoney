@@ -71,6 +71,7 @@ const PreferencesSettings = screen(() => import("@/pages/settings/PreferencesSet
 const GmailSettings = screen(() => import("@/pages/settings/GmailSettings"));
 const GmailReviewPage = screen(() => import("@/pages/transactions/GmailReviewPage"));
 const UpcomingPage = screen(() => import("@/pages/transactions/UpcomingPage"));
+const SipsPage = screen(() => import("@/pages/transactions/SipsPage"));
 const PrivacyPage = screen(() => import("@/pages/legal/PrivacyPage"));
 
 /**
@@ -186,6 +187,7 @@ function Gate() {
           <Route path="unsplit/return" element={<UnsplitReturn />} />
           <Route path="recaps" element={<RecapsPage />} />
           <Route path="upcoming" element={<UpcomingPage />} />
+          <Route path="sips" element={<SipsPage />} />
           <Route path="stats" element={<SplitLayout list={<StatsPage />} label="Category" />}>
             <Route path="c/:id" element={<CategoryDetail />} />
           </Route>

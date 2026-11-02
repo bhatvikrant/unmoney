@@ -1,11 +1,12 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
-import { Bookmark, CalendarClock, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Tags, WalletCards } from "lucide-react";
+import { Bookmark, CalendarClock, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Sprout, Tags, WalletCards } from "lucide-react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useStore } from "@/lib/store";
 import { waitingDrafts } from "../../../shared/views";
+import { sipSuggestions, sipsOf } from "../../../shared/sips";
 import { SyncBadge } from "@/components/shell/SyncStatus";
 import { InstallRow } from "./InstallRow";
 import { DeleteAccountRow } from "./DeleteAccount";
@@ -30,6 +31,8 @@ export default function SettingsPage() {
   const { status, clearLocal, view } = useStore();
   const gmail = useQuery(api.gmail.status);
   const waiting = waitingDrafts(view);
+  const running = sipsOf(view).filter((x) => !x.stoppedAt).length;
+  const sipsSuggested = useMemo(() => sipSuggestions(view).length, [view]);
   const { signOut } = useAuthActions();
   const confirm = useConfirm();
   // changes that cannot reach the server would be lost with this device's copy: no signing out until they can
@@ -81,6 +84,9 @@ export default function SettingsPage() {
         </Section>
         <Section title="Look ahead">
           {link(<CalendarClock />, "Bills & subscriptions", "/upcoming", { hint: "What's due in the next 30 days" })}
+        </Section>
+        <Section title="Invest">
+          {link(<Sprout />, "SIPs", "/sips", { value: sipsSuggested ? `${sipsSuggested} to review` : running ? `${running}` : undefined, hint: "Investments, kept out of spending" })}
         </Section>
         <Section title="Look back">
           {link(<Sparkles />, "Recaps", "/recaps", { hint: "Every month and year as a short story", under: ["/recap"] })}

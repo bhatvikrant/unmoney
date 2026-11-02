@@ -17,6 +17,7 @@ import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
 import { normName, normNote } from "./categoryLint";
 import { describeOp, HISTORY_COALESCE_MS, HISTORY_KINDS, HISTORY_MAX, type HistoryLine } from "./history";
+import { sipFor, sipKey, sipsOf, type Sip } from "./sips";
 
 export const TABLES = [
   "settings", "accountGroups", "accounts", "categories", "transactions", "repeats", "bookmarks", "budgets", "notes", "currencies", "categoryCleanups", "history", "drafts",
@@ -121,7 +122,7 @@ export type AccountFields = {
 };
 export type SettingsPatch = Partial<Pick<Doc<"settings">,
   "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
-  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "dismissedRecurring" | "recentImports">>;
+  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "dismissedRecurring" | "dismissedSips" | "recentImports">>;
 export type ImportRow = {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
   description?: string; subAmount?: string; subCurrency?: string;
@@ -285,6 +286,20 @@ export interface Ops {
    */
   "repeats.create": { args: { template: Template; frequency: Frequency; after: string; today: string; fromTransactionId?: Id<"transactions"> }; result: Id<"repeats"> };
 
+  /**
+   * A SIP made from payments already in the ledger (a suggestion, or "Mark as SIP" on an entry): they are
+   * filed under it, and so is every later expense with one of their notes and about the same amount.
+   */
+  "sips.create": { args: { name: string; transactionIds: Id<"transactions">[] }; result: string };
+  /** File more payments under a SIP; their notes become its keys too. */
+  "sips.mark": { args: { id: string; transactionIds: Id<"transactions">[] }; result: void };
+  /** "Not a SIP": the entries go back to the ledger. Ones gone meanwhile are left out. */
+  "sips.unmark": { args: { ids: Id<"transactions">[] }; result: void };
+  /** Rename it, or stop (or restart) it: a stopped SIP keeps its payments and takes no new ones. */
+  "sips.update": { args: { id: string; name?: string; stopped?: boolean }; result: void };
+  /** Delete the SIP: every payment filed under it goes back to the ledger as an ordinary expense. */
+  "sips.remove": { args: { id: string }; result: void };
+
   "bookmarks.create": { args: { template: Template; transactionId?: Id<"transactions"> }; result: Id<"bookmarks"> };
   "bookmarks.update": { args: { id: Id<"bookmarks">; template: Template }; result: void };
   "bookmarks.remove": { args: { id: Id<"bookmarks"> }; result: void };
@@ -407,6 +422,11 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
   "repeats.addNext": ["repeats", "transactions", "accounts", "categories"],
   "repeats.skip": ["repeats"],
   "repeats.create": ["repeats", "transactions", "accounts", "categories"],
+  "sips.create": ["settings", "transactions"],
+  "sips.mark": ["settings", "transactions"],
+  "sips.unmark": ["transactions"],
+  "sips.update": ["settings"],
+  "sips.remove": ["settings", "transactions"],
   "bookmarks.create": ["accounts", "transactions", "bookmarks"],
   "bookmarks.update": ["bookmarks"],
   "bookmarks.remove": ["bookmarks"],
@@ -429,6 +449,8 @@ export const OP_TABLES: Record<OpKind, Table[]> = {
 // Ops that write a history line also load the history (to add to it) and the settings (amounts in
 // the sentence are written in the user's currency), on the server exactly as on the device.
 for (const k of HISTORY_KINDS) OP_TABLES[k] = [...new Set<Table>([...OP_TABLES[k], "history", "settings"])];
+// A new expense is filed under the SIP it pays (Work.insert), so every op that writes entries reads the SIPs (on settings).
+for (const k of Object.keys(OP_TABLES) as OpKind[]) if (OP_TABLES[k].includes("transactions") && !OP_TABLES[k].includes("settings")) OP_TABLES[k] = [...OP_TABLES[k], "settings"];
 
 /**
  * Which of the user's entries an op reads or writes, so the server loads just those rather than
@@ -451,6 +473,8 @@ export type TxScope = {
   categoryIds?: string[];
   /** The entries these tidy-up records moved, and those of the categories they created. */
   cleanupIds?: string[];
+  /** Every entry filed under these SIPs. */
+  sipIds?: string[];
 };
 
 export function txScope(op: Op): TxScope {
@@ -466,6 +490,10 @@ export function txScope(op: Op): TxScope {
     case "transactions.merge": return { ids: [a.keepId as string, a.removeId as string] };
     case "transactions.unmerge": return { ids: [id] };
     case "bookmarks.create": return { ids: a.transactionId ? [a.transactionId as string] : [] };
+    case "sips.create":
+    case "sips.mark": return { ids: a.transactionIds as string[] };
+    case "sips.unmark": return { ids: a.ids as string[] };
+    case "sips.remove": return { sipIds: [id] };
     case "drafts.link": return { ids: [a.transactionId as string] };
     case "drafts.reopen": return { ids: (a.transactionIds as string[] | undefined) ?? [] };
     case "repeats.remove": return { repeatIds: [id] };
@@ -501,7 +529,7 @@ export function txScope(op: Op): TxScope {
 /** One scope covering several ops. */
 export function mergeTxScopes(scopes: TxScope[]): TxScope {
   const out: TxScope = {};
-  const keys = ["ids", "seriesOf", "repeatIds", "accountIds", "dates", "categoryIds", "cleanupIds"] as const;
+  const keys = ["ids", "seriesOf", "repeatIds", "accountIds", "dates", "categoryIds", "cleanupIds", "sipIds"] as const;
   for (const s of scopes) {
     if (s.all) out.all = true;
     for (const k of keys) if (s[k]?.length) out[k] = [...new Set([...(out[k] ?? []), ...s[k]!])];
@@ -605,12 +633,40 @@ class Work {
     return d;
   }
   insert<T extends Table>(table: T, doc: Insertable<T>): Id<T> {
+    if (table === "transactions") doc = this.fileUnderSip(doc as Insertable<"transactions">) as Insertable<T>;
     this.n++;
     const _id = `${TMP_PREFIX}${this.op.id}_${this.n}` as Id<T>;
     const arr = this.t(table);
     arr.push(clean({ ...doc, _id, _creationTime: this.op.at + this.n, userId: this.ctx.userId } as unknown as Doc<T>));
     this.idx.get(table)?.set(_id, arr.length - 1);
     return _id;
+  }
+  /**
+   * A new expense that pays a running SIP (one of its notes, about its amount) is filed under it,
+   * whichever op wrote it: the entry form, a Gmail draft, an import, a repeat. A payment newer than
+   * the SIP's last one moves its usual amount along (a step-up).
+   */
+  private fileUnderSip(doc: Insertable<"transactions">): Insertable<"transactions"> {
+    const sips = sipsOf(this.snap);
+    if (doc.sipId !== undefined || doc.type !== "expense" || !sips.length) return doc;
+    // a backup, or an entry an unmerge puts back, comes back as it was: one the user took out of a SIP stays out
+    if (this.op.kind === "backup.restore" || this.op.kind === "transactions.restoreRows" || this.op.kind === "transactions.unmerge") return doc;
+    const sip = sipFor(sips, doc);
+    if (!sip) return doc;
+    if (doc.date >= (sip.lastDate ?? "")) this.patchSip(sip.id, { amount: doc.amount, lastDate: doc.date });
+    return { ...doc, sipId: sip.id };
+  }
+  /** The id of the op being applied: the same on the device and the server, so ids made from it agree. */
+  get opId(): string {
+    return this.op.id;
+  }
+  /** Write the user's SIPs (they live on settings). */
+  setSips(sips: Sip[]): void {
+    const s = this.requireSettings();
+    this.patch("settings", s._id, { sips: sips.length ? sips : undefined });
+  }
+  patchSip(id: string, patch: Partial<Sip>): void {
+    this.setSips(sipsOf(this.snap).map((x) => (x.id === id ? clean({ ...x, ...patch }) : x)));
   }
   patch<T extends Table>(table: T, id: Id<T>, patch: Partial<Doc<T>>): void {
     const arr = this.t(table);
@@ -1152,6 +1208,8 @@ function rescaleOtherAmounts(w: Work, factor: number) {
   const template = (t: Template): Template => ({ ...t, amount: scale(t.amount), feeAmount: t.feeAmount === undefined ? undefined : scale(t.feeAmount) });
   for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
   for (const b of [...w.snap.bookmarks]) w.patch("bookmarks", b._id, { template: template(b.template) });
+  // a SIP's usual amount is what later payments are matched against
+  if (sipsOf(w.snap).length) w.setSips(sipsOf(w.snap).map((x) => ({ ...x, amount: scale(x.amount) })));
   // a tidy-up undone later puts these budgets back, so they change scale too
   for (const c of [...w.snap.categoryCleanups]) {
     w.patch("categoryCleanups", c._id, {
@@ -1183,6 +1241,24 @@ export function restoreRowsFrom(data: BackupData, ids: RestoreIds): Record<strin
     }];
   });
 }
+
+/** Expenses that can be filed under a SIP, oldest first; ones gone meanwhile are left out. */
+function sipPayments(w: Work, ids: Id<"transactions">[]): Doc<"transactions">[] {
+  const entries = ids.map((id) => w.get("transactions", id)).filter((t): t is Doc<"transactions"> => !!t && t.type === "expense" && t.amount > 0)
+    .sort((a, b) => a.date.localeCompare(b.date) || a._creationTime - b._creationTime);
+  if (!entries.length) throw new Error("Only expenses can be SIPs");
+  return entries;
+}
+function mustSip(w: Work, id: string, msg = "That SIP was deleted"): Sip {
+  const sip = sipsOf(w.snap).find((x) => x.id === id);
+  if (!sip) throw new Error(msg);
+  return sip;
+}
+const sipName = (s: string) => {
+  const n = s.trim().slice(0, MAX_NAME * 2);
+  if (!n) throw new Error("Give the SIP a name");
+  return n;
+};
 
 const handlers: Handlers = {
   "settings.completeOnboarding": (w, { currency, symbolPosition }) => {
@@ -1220,6 +1296,8 @@ const handlers: Handlers = {
     const factor = 10 ** (info.decimals - s.decimals);
     if (!keepData) {
       if (entries) w.clear("transactions");
+      // their usual amounts were in the old currency
+      if (s.sips) w.setSips([]);
     } else if (factor !== 1) {
       if (entries) rescale(w, w.snap.transactions.map((t) => t._id), factor);
       rescaleOtherAmounts(w, factor);
@@ -2059,6 +2137,43 @@ const handlers: Handlers = {
     return repeatId;
   },
 
+  "sips.create": (w, { name, transactionIds }) => {
+    const entries = sipPayments(w, transactionIds);
+    const last = entries[entries.length - 1];
+    const id = `sip_${w.opId}`;
+    w.setSips([...sipsOf(w.snap), {
+      id,
+      name: sipName(name || last.note),
+      keys: [...new Set(entries.map((t) => sipKey(t.note)).filter(Boolean))],
+      amount: last.amount, lastDate: last.date, accountId: last.accountId,
+    }]);
+    for (const t of entries) w.patch("transactions", t._id, { sipId: id });
+    return id;
+  },
+  "sips.mark": (w, { id, transactionIds }) => {
+    const sip = mustSip(w, id);
+    const entries = sipPayments(w, transactionIds);
+    const last = entries[entries.length - 1];
+    const keys = [...new Set([...sip.keys, ...entries.map((t) => sipKey(t.note)).filter(Boolean)])];
+    w.patchSip(id, last.date >= (sip.lastDate ?? "") ? { keys, amount: last.amount, lastDate: last.date } : { keys });
+    for (const t of entries) w.patch("transactions", t._id, { sipId: id });
+  },
+  "sips.unmark": (w, { ids }) => {
+    for (const id of ids) if (w.get("transactions", id)?.sipId) w.patch("transactions", id, { sipId: undefined });
+  },
+  "sips.update": (w, { id, name, stopped }) => {
+    const sip = mustSip(w, id);
+    const patch: Partial<Sip> = {};
+    if (name !== undefined) patch.name = sipName(name);
+    if (stopped !== undefined) patch.stoppedAt = stopped ? sip.stoppedAt ?? w.at : undefined;
+    w.patchSip(id, patch);
+  },
+  "sips.remove": (w, { id }) => {
+    mustSip(w, id, "That SIP was already deleted");
+    for (const t of w.snap.transactions) if (t.sipId === id) w.patch("transactions", t._id, { sipId: undefined });
+    w.setSips(sipsOf(w.snap).filter((x) => x.id !== id));
+  },
+
   "bookmarks.create": (w, { template, transactionId }) => {
     w.must("accounts", template.accountId, "Pick an account");
     // the entry may have been deleted meanwhile: keep the bookmark, drop the link
@@ -2209,7 +2324,10 @@ const handlers: Handlers = {
       for (const t of data.transactions ?? []) {
         const s = mapTemplate(strip(t));
         if (!s.accountId) continue;
-        txIds.set(t._id as string, w.insert("transactions", { ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [], repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined } as never));
+        txIds.set(t._id as string, w.insert("transactions", {
+          ...s, photoIds: (s.photoIds as string[] | undefined) ?? [], tags: (s.tags as string[] | undefined) ?? [],
+          repeatId: s.repeatId ? repeatIds.get(s.repeatId as string) : undefined,
+        } as never));
       }
     }
     for (const b of data.bookmarks ?? []) {
@@ -2232,6 +2350,10 @@ const handlers: Handlers = {
       for (const k of PASSCODE_FIELDS) delete s[k];
       // Account ids were reissued above; point the default at the restored copy, or drop it.
       s.defaultAccountId = s.defaultAccountId ? accountIds.get(s.defaultAccountId as string) : undefined;
+      // SIPs are the backup's (entries keep their sipId as it was), with their payment method moved to the restored copy
+      s.sips = Array.isArray(s.sips) && s.sips.length
+        ? (s.sips as Sip[]).map((x) => clean({ ...x, accountId: x.accountId ? accountIds.get(x.accountId) : undefined }))
+        : undefined;
       if (existing) w.patch("settings", existing._id, s as never);
       else w.insert("settings", s as never);
     }
@@ -2242,6 +2364,7 @@ const handlers: Handlers = {
     if (confirm !== "DELETE") throw new Error("Not confirmed");
     for (const t of ["notes", "repeats", "bookmarks", "budgets", "categoryCleanups"] as const) w.clear(t);
     if (entries) w.clear("transactions");
+    if (w.settings()?.sips) w.setSips([]);
   },
 
   "files.upload": () => {
