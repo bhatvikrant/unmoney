@@ -106,6 +106,7 @@ export const status = query({
       backfill: c?.backfill ? {
         year: c.backfill.year, from: c.backfill.from, state: c.backfill.state, startedAt: c.backfill.startedAt, cursor: c.backfill.cursor,
         total: c.backfill.total ?? null, read: c.backfill.read, found: c.backfill.found, finishedAt: c.backfill.finishedAt ?? null,
+        timedMs: c.backfill.timedMs ?? 0, timedRead: c.backfill.timedRead ?? 0,
         aiResumesAt: nextMonthStart(Date.now()),
       } : null,
     };
@@ -347,7 +348,7 @@ export const stopBackfill = mutation({
 async function countUnread(ctx: ActionCtx, token: string, c: Connection, afterMs: number, beforeMs: number, max = COUNT_MAX): Promise<number> {
   const q = buildQuery({ senders: c.senders, scanPurchases: c.scanPurchases, afterSeconds: afterMs / 1000, beforeSeconds: beforeMs / 1000, muted: c.muted ?? [] });
   let count = 0;
-  for await (const page of gmailApi.listMessageIds(token, q)) {
+  for await (const page of gmailApi.aheadOne(gmailApi.listMessageIds(token, q))) {
     const seen = await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids: page });
     count += page.length - seen.length;
     if (count >= max) return max;
@@ -630,15 +631,15 @@ export const entriesFor = internalQuery({
   },
 });
 
-/** Which of these Gmail message ids a check has dealt with: a draft's (its own or folded in, open or handled), or read and made none. */
+/**
+ * Which of these Gmail message ids a check has dealt with: a draft's (its own or folded in, open
+ * or handled), or read and made none. The lookups run at once: a page is 500 of them.
+ */
 export const seenMessageIds = internalQuery({
   args: { userId: v.id("users"), ids: v.array(v.string()) },
   handler: async (ctx, { userId, ids }) => {
-    const seen: string[] = [];
-    for (const id of ids) {
-      if (await ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", id)).first()) seen.push(id);
-    }
-    return seen;
+    const hits = await Promise.all(ids.map((id) => ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", id)).first()));
+    return ids.filter((_, i) => hits[i]);
   },
 });
 
@@ -734,7 +735,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
   // are read now; the rest wait, and the window is held so the next check carries on from there.
   const unread: string[] = [];
   let scanned = 0;
-  for await (const page of gmailApi.listMessageIds(token, q)) {
+  for await (const page of gmailApi.aheadOne(gmailApi.listMessageIds(token, q))) {
     scanned += page.length;
     const seen = new Set(await ctx.runQuery(internal.gmail.seenMessageIds, { userId: c.userId, ids: page }));
     unread.push(...page.filter((id) => !seen.has(id)));
@@ -913,6 +914,8 @@ export const backfillStep = internalAction({
       const token = await gmailApi.accessToken(await decryptText(prep.connection.refreshTokenEnc, prep.connection.iv));
       // once, for the progress bar: everything left to read
       const total = b.total ?? await countUnread(ctx, token, prep.connection, b.from, b.cursor);
+      // the pace for time left starts after the count, which happens once
+      const readingFrom = Date.now();
       const spanDays = Math.min(b.spanDays, MAX_SPAN_DAYS);
       const sliceStart = Math.max(b.from, b.cursor - spanDays * DAY_MS);
       const got = await collect(ctx, prep, startedAt, {
@@ -924,14 +927,19 @@ export const backfillStep = internalAction({
       if (got.retryAt.length) cursor = Math.min(b.cursor, Math.max(cursor, Math.max(...got.retryAt) + 1000));
       const done = cursor <= b.from && !got.retryAt.length;
       const state = done ? "done" : got.aiCapped ? "waiting-ai" : "running";
+      const retrying = got.retryAt.length > 0;
       await ctx.runMutation(internal.gmail.writeBackfill, {
         userId, run, startedAt,
         inserts: got.inserts, updates: got.updates, matches: got.matches, learned: got.learned, learnedMerchants: got.learnedMerchants,
         aiCalls: got.aiCalls, processed: got.processed, learnedRev: prep.rev,
-        step: { cursor, spanDays: nextSpanDays(spanDays, got.unread, SYNC_MAX), total, read: got.fetched, state },
+        step: {
+          cursor, spanDays: nextSpanDays(spanDays, got.unread, SYNC_MAX), total, read: got.fetched, state,
+          // with the pause before the next step, which is part of the pace; a retry's longer wait isn't
+          timedMs: Date.now() - readingFrom + (state === "running" && !retrying ? STEP_GAP_MS : 0),
+        },
       });
       // the AI failed for a moment: give it time before asking again
-      if (state === "running") await ctx.scheduler.runAfter(got.retryAt.length ? STEP_RETRY_MS : STEP_GAP_MS, internal.gmail.backfillStep, { userId, run });
+      if (state === "running") await ctx.scheduler.runAfter(retrying ? STEP_RETRY_MS : STEP_GAP_MS, internal.gmail.backfillStep, { userId, run });
     } catch (e) {
       const message = e instanceof Error ? e.message : "Reading old mail failed";
       console.error("gmail backfill failed", { userId, message });
@@ -1159,7 +1167,7 @@ export const writeBackfill = internalMutation({
     userId: v.id("users"), run: v.string(), startedAt: v.number(), inserts: v.array(insertArg), updates: v.array(updateArg), matches: v.array(matchArg),
     learned: v.record(v.string(), v.id("accounts")), learnedMerchants: merchantArg, aiCalls: v.number(),
     processed: v.array(v.object({ id: v.string(), receivedAt: v.number() })), learnedRev: v.number(),
-    step: v.object({ cursor: v.number(), spanDays: v.number(), total: v.number(), read: v.number(), state: v.union(v.literal("running"), v.literal("waiting-ai"), v.literal("done")) }),
+    step: v.object({ cursor: v.number(), spanDays: v.number(), total: v.number(), read: v.number(), timedMs: v.optional(v.number()), state: v.union(v.literal("running"), v.literal("waiting-ai"), v.literal("done")) }),
   },
   handler: async (ctx, { userId, run, startedAt, inserts, updates, matches, learned, learnedMerchants = {}, aiCalls, processed, learnedRev, step }) => {
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
@@ -1168,7 +1176,11 @@ export const writeBackfill = internalMutation({
     const now = Date.now();
     // stopped or started again meanwhile: the drafts stand, the backfill is the newer one's
     const b = c.backfill && c.backfill.run === run ? c.backfill : undefined;
-    const next = b && { ...b, cursor: step.cursor, spanDays: step.spanDays, total: step.total, read: b.read + step.read, found: b.found + found, state: step.state, lastStepAt: now, ...(step.state === "done" ? { finishedAt: now } : {}) };
+    const next = b && {
+      ...b, cursor: step.cursor, spanDays: step.spanDays, total: step.total, read: b.read + step.read, found: b.found + found, state: step.state, lastStepAt: now,
+      timedMs: (b.timedMs ?? 0) + (step.timedMs ?? 0), timedRead: (b.timedRead ?? 0) + (step.timedMs === undefined ? 0 : step.read),
+      ...(step.state === "done" ? { finishedAt: now } : {}),
+    };
     const finished = next?.state === "done" ? { at: startedAt, scanned: next.read, found: next.found, note: `Read back to 1 Jan ${next.year}` } : undefined;
     await ctx.db.patch(c._id, {
       syncingSince: undefined, learnedRev,

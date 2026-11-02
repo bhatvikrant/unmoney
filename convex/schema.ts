@@ -475,6 +475,9 @@ export default defineSchema({
       /** Mails fetched and read so far, and the drafts they made. */
       read: v.number(),
       found: v.number(),
+      /** Time the steps spent reading (not counting, not waiting) and the mails they read in it: the pace for time left. */
+      timedMs: v.optional(v.number()),
+      timedRead: v.optional(v.number()),
       lastStepAt: v.optional(v.number()),
       finishedAt: v.optional(v.number()),
     })),

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { listMessageIds, tidyBody } from "./gmailApi";
+import { aheadOne, listMessageIds, tidyBody } from "./gmailApi";
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -54,4 +54,23 @@ test("a mail's indentation and CRLFs are stripped, so the details fit within the
   const text = tidyBody(raw.replace(/\r\n?/g, "\n"));
   expect(text.length).toBeLessThan(200);
   expect(text).toContain("Transaction Info:\nUPI/P2A/529312345690/PRIYA MENON");
+});
+
+test("the next page is asked for while the caller is still on this one, and a failure still surfaces", async () => {
+  const log: string[] = [];
+  async function* pages() {
+    for (const p of ["p1", "p2", "p3"]) { log.push(`fetch ${p}`); yield p; }
+  }
+  for await (const p of aheadOne(pages())) {
+    log.push(`work ${p}`);
+    await Promise.resolve();
+  }
+  expect(log).toEqual(["fetch p1", "fetch p2", "work p1", "fetch p3", "work p2", "work p3"]);
+
+  async function* failing() { yield "p1"; throw new Error("boom"); }
+  const got: string[] = [];
+  await expect((async () => { for await (const p of aheadOne(failing())) got.push(p); })()).rejects.toThrow("boom");
+  expect(got).toEqual(["p1"]);
+  // stopping early leaves no unhandled rejection behind
+  for await (const p of aheadOne(failing())) { if (p) break; }
 });
