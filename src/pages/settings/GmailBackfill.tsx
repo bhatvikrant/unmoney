@@ -127,19 +127,16 @@ export function BackfillEstimate({ year, busy, onStart }: { year: number | null;
   );
 }
 
-type Backfill = { year: number; from: number; state: "running" | "waiting-ai" | "done"; startedAt: number; cursor: number; total: number | null; read: number; found: number; finishedAt: number | null; aiResumesAt: number };
+type Backfill = { year: number; from: number; state: "running" | "waiting-ai" | "done"; startedAt: number; cursor: number; total: number | null; read: number; found: number; finishedAt: number | null; aiResumesAt: number; timedMs: number; timedRead: number };
 
 /** While the server reads back: how far, how long left, and that the app can close. */
 export function BackfillProgress({ b, paused, onStop, onReview, stopping }: { b: Backfill; paused: boolean; onStop: () => void; onReview: () => void; stopping: boolean }) {
-  // the time left counts down between the server's updates
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(t); }, []);
   const waitingAi = b.state === "waiting-ai";
   const counting = b.total === null;
   // never 100% before the server says done
   const pct = Math.min(99, Math.floor(progressOf(b) * 100));
   const capped = countCapped(b.total);
-  const left = remainingMs(b, now);
+  const left = remainingMs(b);
   return (
     <div className="mx-4 mt-4 rounded-lg border bg-card p-3 md:mx-4" role="status">
       <div className="flex items-start gap-3">

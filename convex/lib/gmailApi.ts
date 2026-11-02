@@ -146,6 +146,22 @@ export async function* listMessageIds(token: string, q: string): AsyncGenerator<
   } while (pageToken);
 }
 
+/**
+ * A listing's pages with the next one already on its way while the caller works on this one
+ * (checking which ids were seen, say), so the two take as long as the slower, not both.
+ */
+export async function* aheadOne<T>(pages: AsyncGenerator<T>): AsyncGenerator<T> {
+  let next = pages.next();
+  for (;;) {
+    const page = await next;
+    if (page.done) return;
+    next = pages.next();
+    // a failure is thrown when it is awaited above; a caller that stops early never waits for it
+    next.catch(() => undefined);
+    yield page.value;
+  }
+}
+
 type Part = { mimeType?: string; body?: { data?: string; size?: number }; parts?: Part[] };
 type Message = { id: string; threadId: string; internalDate?: string; payload?: Part & { headers?: { name: string; value: string }[] } };
 
