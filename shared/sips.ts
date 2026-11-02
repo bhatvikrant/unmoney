@@ -293,11 +293,24 @@ export function nextDue(rhythm: Rhythm, recent: string[]): string {
   return make(after.y, after.m, clampDay(after.y, after.m, day));
 }
 
-/** How long after its due date a SIP with no payment reads as paused: its drift and half an instalment. */
-export function pausedAfter(rhythm: Rhythm): number {
-  const cycle = { weekly: 7, fortnightly: 14, twiceMonthly: 15, monthly: 30, quarterly: 91 }[rhythm];
-  return DRIFT[rhythm] + Math.ceil(cycle / 2);
+/**
+ * Debits that were due after the last payment (dates newest first) and never came by `today`, each
+ * counted once its drift has passed: the 7th's monthly SIP with nothing by the 13th has missed one.
+ */
+export function missedDebits(rhythm: Rhythm, recent: string[], today: string): number {
+  let dates = recent;
+  let missed = 0;
+  // past 3 it only says "stopped?"; a cap keeps a weekly SIP stopped for years cheap
+  while (missed < 60) {
+    const due = nextDue(rhythm, dates);
+    if (diffDays(due, today) <= DRIFT[rhythm]) break;
+    missed++;
+    dates = [due, ...dates];
+  }
+  return missed;
 }
+/** Missed debits from which a SIP reads as most likely stopped, not just late. */
+export const STALE_AFTER = 3;
 
 // ---------- signals ----------
 
@@ -566,7 +579,12 @@ export function sipArgs(payments: GmailPayment[]): { transactionIds: Id<"transac
 
 // ---------- the SIPs page ----------
 
-export type SipStatus = "running" | "paused" | "cancelled";
+/**
+ * Running: paid on schedule. Late: one or two debits missed. Stale: three or more missed, so most
+ * likely stopped (it still takes the next debit, which makes it running again). Cancelled: the user
+ * said so.
+ */
+export type SipStatus = "running" | "late" | "stale" | "cancelled";
 
 export type SipRow = {
   sip: Sip;
@@ -576,13 +594,15 @@ export type SipRow = {
   total: number;
   /** Paid in [from, to]. */
   inRange: number;
-  /** Cancelled: the user said so. Paused: no payment for a while past when one was due; nothing changes, the next one goes in as usual. */
+  /** Nothing changes for a late or stale SIP: the next debit goes in as usual. */
   status: SipStatus;
-  /** About when the next payment is due; none once cancelled. */
+  /** About when the payment after the last one was due; none once cancelled. */
   next?: string;
+  /** Debits due since the last payment that never came. */
+  missed: number;
 };
 
-/** Every SIP with its payments: running, then paused, then cancelled, each by what has gone into it. */
+/** Every SIP with its payments: running, then late, then stale, then cancelled, each by what has gone into it. */
 export function sipsList(snap: Snapshot, from: string, to: string, today: string): SipRow[] {
   const by = new Map<string, Doc<"transactions">[]>();
   for (const t of snap.transactions) {
@@ -591,21 +611,23 @@ export function sipsList(snap: Snapshot, from: string, to: string, today: string
     if (list) list.push(t);
     else by.set(t.sipId!, [t]);
   }
-  const order: Record<SipStatus, number> = { running: 0, paused: 1, cancelled: 2 };
+  const order: Record<SipStatus, number> = { running: 0, late: 1, stale: 2, cancelled: 3 };
   return sipsOf(snap).map((sip): SipRow => {
     const entries = (by.get(sip.id) ?? []).sort((a, b) => b.date.localeCompare(a.date) || b._creationTime - a._creationTime);
     const total = entries.reduce((s, t) => s + t.amount, 0);
     const inRange = entries.reduce((s, t) => s + (t.date >= from && t.date <= to ? t.amount : 0), 0);
     const rhythm = sip.rhythm ?? "monthly";
-    const next = !sip.stoppedAt && entries[0] ? nextDue(rhythm, entries.map((t) => t.date)) : undefined;
-    const status: SipStatus = sip.stoppedAt ? "cancelled" : next && diffDays(next, today) > pausedAfter(rhythm) ? "paused" : "running";
-    return { sip, entries, total, inRange, status, next };
+    const dates = entries.map((t) => t.date);
+    const next = !sip.stoppedAt && entries[0] ? nextDue(rhythm, dates) : undefined;
+    const missed = sip.stoppedAt || !entries[0] ? 0 : missedDebits(rhythm, dates, today);
+    const status: SipStatus = sip.stoppedAt ? "cancelled" : missed >= STALE_AFTER ? "stale" : missed ? "late" : "running";
+    return { sip, entries, total, inRange, status, next, missed };
   }).sort((a, b) => order[a.status] - order[b.status] || b.total - a.total || a.sip.name.localeCompare(b.sip.name));
 }
 
-/** What the running SIPs put in, in an average month. */
+/** What the SIPs still going put in, in an average month: running and late ones, not stale or cancelled. */
 export function perMonth(rows: SipRow[]): number {
-  return Math.round(rows.filter((r) => r.status === "running").reduce((s, r) => s + r.sip.amount * PER_MONTH[r.sip.rhythm ?? "monthly"], 0));
+  return Math.round(rows.filter((r) => r.status === "running" || r.status === "late").reduce((s, r) => s + r.sip.amount * PER_MONTH[r.sip.rhythm ?? "monthly"], 0));
 }
 
 /** What went into SIPs in [from, to], by SIP (most first): for the ledger's line and the recaps. */
