@@ -290,9 +290,9 @@ export interface Ops {
    * A SIP made from payments already in the ledger (a suggestion, or "Mark as SIP" on an entry): they are
    * filed under it, and so is every later expense with one of their notes and about the same amount.
    */
-  "sips.create": { args: { name: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; rhythm?: Rhythm; day?: number }; result: string };
+  "sips.create": { args: { name: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; rhythm?: Rhythm; day?: number; accountId?: Id<"accounts"> }; result: string };
   /** File more payments under a SIP; their notes become its keys too. */
-  "sips.mark": { args: { id: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; resume?: boolean }; result: void };
+  "sips.mark": { args: { id: string; transactionIds: Id<"transactions">[]; draftIds?: Id<"drafts">[]; draftDates?: string[]; resume?: boolean; accountId?: Id<"accounts"> }; result: void };
   /**
    * Save waiting Gmail drafts that a running SIP takes into it (the Gmail check runs this for the
    * drafts it just made). `draftDates` are their dates, so the server loads the entries around them
@@ -1264,10 +1264,17 @@ function sipDraftsOf(w: Work, ids: Id<"drafts">[] = []): Doc<"drafts">[] {
     .sort((a, b) => a.proposal.date.localeCompare(b.proposal.date));
 }
 
-/** An entry already in the ledger for this draft's payment: the same amount within two days. Saving it again would count it twice. */
-function alreadySaved(w: Work, d: Doc<"drafts">): boolean {
+/**
+ * An entry already in the ledger for this draft's payment, which saving it again would count twice:
+ * the same amount within two days, typed by hand or read from Gmail under the same name. An entry
+ * filed under another SIP is that SIP's payment, and one Gmail read under another name is another
+ * mail's: two SIPs of one amount on one day (₹10,000 to PPFAS and to Tata on the 7th) are two payments.
+ */
+function alreadySaved(w: Work, d: Doc<"drafts">, sip: Sip): boolean {
   const p = d.proposal;
-  return w.snap.transactions.some((t) => t.type === "expense" && t.amount === p.amount && Math.abs(diffDays(t.date, p.date)) <= 2);
+  const key = sipKey(p.note);
+  return w.snap.transactions.some((t) => t.type === "expense" && t.amount === p.amount && Math.abs(diffDays(t.date, p.date)) <= 2
+    && (!t.sipId || t.sipId === sip.id) && (!fromGmail(t) || sipKey(t.note) === key));
 }
 
 /** The expense category SIP payments are saved under: "Investments", made if the user has none. */
@@ -1279,13 +1286,14 @@ function investmentsCategory(w: Work): Id<"categories"> {
 
 /**
  * Save a draft as a payment of `sip`: the date, amount and name the mail gave, the bank account it
- * named (else the SIP's), under Investments. Returns false (the draft stays as it is) when no
- * account is known or the account is gone.
+ * named (else the SIP's), under Investments. Says why not (the draft stays as it is) when no account
+ * is known (or it is gone), or the payment is already in the ledger.
  */
-function saveSipDraft(w: Work, d: Doc<"drafts">, sip: Sip, categoryId: Id<"categories">): boolean {
+function saveSipDraft(w: Work, d: Doc<"drafts">, sip: Sip, categoryId: Id<"categories">): "saved" | "noAccount" | "inLedger" {
   const p = d.proposal;
   const account = [p.accountId, sip.accountId].find((id) => id && !w.get("accounts", id)?.deletedAt);
-  if (!account || alreadySaved(w, d)) return false;
+  if (!account) return "noAccount";
+  if (alreadySaved(w, d, sip)) return "inLedger";
   const t = validateTx(w, {
     type: "expense", date: p.date, time: p.time, accountId: account, categoryId, amount: p.amount,
     subAmount: p.subAmount, subCurrency: p.subAmount !== undefined ? p.subCurrency : undefined,
@@ -1293,24 +1301,45 @@ function saveSipDraft(w: Work, d: Doc<"drafts">, sip: Sip, categoryId: Id<"categ
   });
   const transactionId = w.insert("transactions", { ...t, source: { app: "gmail", messageId: d.messageId }, sipId: sip.id });
   w.patch("drafts", d._id, { status: "accepted", transactionId, matchedTransactionId: undefined, resolvedAt: w.at });
-  return true;
+  return "saved";
 }
 
-/** File entries and save drafts under a SIP that is already in settings; moves its usual amount to the latest payment. Returns how many went in. */
-function fillSip(w: Work, sip: Sip, entries: Doc<"transactions">[], drafts: Doc<"drafts">[]): number {
+/**
+ * File entries and save drafts under a SIP that is already in settings; moves its usual amount to
+ * the latest payment. Returns how many went in, and how many drafts could not be saved, and why.
+ */
+function fillSip(w: Work, sip: Sip, entries: Doc<"transactions">[], drafts: Doc<"drafts">[]): { added: number; noAccount: number; inLedger: number } {
   const added: { date: string; amount: number }[] = [];
+  const skipped = { noAccount: 0, inLedger: 0 };
   for (const t of entries) {
     w.patch("transactions", t._id, { sipId: sip.id });
     added.push(t);
   }
   if (drafts.length) {
     const categoryId = investmentsCategory(w);
-    for (const d of drafts) if (saveSipDraft(w, d, sip, categoryId)) added.push(d.proposal);
+    for (const d of drafts) {
+      const r = saveSipDraft(w, d, sip, categoryId);
+      if (r === "saved") added.push(d.proposal);
+      else skipped[r]++;
+    }
   }
   const last = added.sort((a, b) => a.date.localeCompare(b.date))[added.length - 1];
   const current = sipsOf(w.snap).find((x) => x.id === sip.id)!;
   if (last && last.date >= (current.lastDate ?? "")) w.patchSip(sip.id, { amount: last.amount, lastDate: last.date });
-  return added.length;
+  return { added: added.length, ...skipped };
+}
+/** Fill a SIP the user just made or added to, or say why nothing went in. */
+function fillOrSay(w: Work, sip: Sip, entries: Doc<"transactions">[], drafts: Doc<"drafts">[]): void {
+  const r = fillSip(w, sip, entries, drafts);
+  if (r.added) return;
+  if (r.noAccount) throw new Error("Pick the bank account these were paid from: the mail didn't say");
+  throw new Error("These payments are already in the ledger: each has an entry of the same amount within 2 days");
+}
+/** A bank account the user picked for a SIP, checked. */
+function pickedAccount(w: Work, id: Id<"accounts"> | undefined): Id<"accounts"> | undefined {
+  if (!id) return undefined;
+  if (w.must("accounts", id, "That payment method was deleted").deletedAt) throw new Error("That payment method was deleted");
+  return id;
 }
 function mustSip(w: Work, id: string, msg = "That SIP was deleted"): Sip {
   const sip = sipsOf(w.snap).find((x) => x.id === id);
@@ -2200,7 +2229,7 @@ const handlers: Handlers = {
     return repeatId;
   },
 
-  "sips.create": (w, { name, transactionIds, draftIds, rhythm, day }) => {
+  "sips.create": (w, { name, transactionIds, draftIds, rhythm, day, accountId }) => {
     if (day !== undefined && (!Number.isInteger(day) || day < 1 || day > 31)) throw new Error("Bad day");
     const entries = sipPayments(w, transactionIds);
     const drafts = sipDraftsOf(w, draftIds);
@@ -2214,24 +2243,26 @@ const handlers: Handlers = {
       name: sipName(name || latestEntry?.note || latestDraft.proposal.note),
       keys: [...new Set(notes.map(sipKey).filter(Boolean))],
       amount: (latestEntry ?? latestDraft.proposal).amount,
-      // the bank account the debits come from: the latest saved one's, else what the latest mail named
-      accountId: [...entries].reverse().find((t) => !w.get("accounts", t.accountId)?.deletedAt)?.accountId ?? [...drafts].reverse().find((d) => d.proposal.accountId)?.proposal.accountId,
+      // the bank account the debits come from: the latest saved one's, else what the latest mail named, else the one the user picked
+      accountId: [...entries].reverse().find((t) => !w.get("accounts", t.accountId)?.deletedAt)?.accountId
+        ?? [...drafts].reverse().find((d) => d.proposal.accountId && !w.get("accounts", d.proposal.accountId)?.deletedAt)?.proposal.accountId
+        ?? pickedAccount(w, accountId),
       rhythm,
       day,
     });
     w.setSips([...sipsOf(w.snap), sip]);
-    if (!fillSip(w, sip, entries, drafts)) throw new Error("None of those payments could be saved");
+    fillOrSay(w, sip, entries, drafts);
     return id;
   },
-  "sips.mark": (w, { id, transactionIds, draftIds, resume }) => {
+  "sips.mark": (w, { id, transactionIds, draftIds, resume, accountId }) => {
     const sip = mustSip(w, id);
     const entries = sipPayments(w, transactionIds);
     const drafts = sipDraftsOf(w, draftIds);
     if (!entries.length && !drafts.length) throw new Error("Only payments read from Gmail can be SIPs");
     const keys = [...new Set([...sip.keys, ...entries.map((t) => sipKey(t.note)), ...drafts.map((d) => sipKey(d.proposal.note))].filter(Boolean))];
     // patchSip drops what is undefined after merging, so a resume clears stoppedAt
-    w.patchSip(id, { keys, stoppedAt: resume ? undefined : sip.stoppedAt, accountId: sip.accountId ?? entries[entries.length - 1]?.accountId });
-    fillSip(w, mustSip(w, id), entries, drafts);
+    w.patchSip(id, { keys, stoppedAt: resume ? undefined : sip.stoppedAt, accountId: sip.accountId ?? entries[entries.length - 1]?.accountId ?? pickedAccount(w, accountId) });
+    fillOrSay(w, mustSip(w, id), entries, drafts);
   },
   "sips.saveDrafts": (w, { draftIds }) => {
     const sips = sipsOf(w.snap);
@@ -2240,7 +2271,7 @@ const handlers: Handlers = {
     for (const d of sipDraftsOf(w, draftIds)) {
       if (d.status !== "open") continue;
       const sip = sipFor(sipsOf(w.snap), d.proposal);
-      if (sip && fillSip(w, sip, [], [d])) saved++;
+      if (sip && fillSip(w, sip, [], [d]).added) saved++;
     }
     return saved;
   },
