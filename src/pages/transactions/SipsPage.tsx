@@ -28,12 +28,13 @@ export default function SipsPage() {
   const snap = useView();
   const today = useToday();
   const nav = useNavigate();
-  const { settings } = useApp();
+  const { settings, fmt } = useApp();
   const create = useOp("sips.create");
   const mark = useOp("sips.mark");
   const saveDrafts = useOp("sips.saveDrafts");
   const updateSettings = useOp("settings.update");
   const undo = useSipUndo();
+  const confirm = useConfirm();
   const [openId, setOpenId] = useState<string | null>(null);
   const [review, setReview] = useState<SipSuggestion | null>(null);
 
@@ -50,6 +51,18 @@ export default function SipsPage() {
 
   const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : "Failed");
   async function accept(s: SipSuggestion) {
+    const n = s.payments.length;
+    const ok = await confirm(s.sip ? {
+      title: `Resume ${s.sip.name}?`,
+      description: `${n === 1 ? "This payment goes" : `These ${n} payments go`} into it, and later debits from Gmail with its name are saved into it again.`,
+      action: "Resume", destructive: false,
+    } : {
+      title: `Add ${s.name} as a SIP?`,
+      // the dialog renders outside AppDataProvider, so the amount goes in as text, not <Money>
+      description: `${n === 1 ? "Its payment" : `Its ${n} payments`} of ${fmt(s.amount)} ${n === 1 ? "leaves" : "leave"} the daily list and spending, and later debits from Gmail with this name are saved into it.`,
+      action: `Add ${n} as SIP`, destructive: false,
+    });
+    if (!ok) return;
     const args = { transactionIds: s.transactionIds, draftIds: s.draftIds, draftDates: s.draftDates };
     try {
       if (s.sip) {
@@ -64,6 +77,12 @@ export default function SipsPage() {
     } catch (e) { fail(e); }
   }
   async function notASip(s: SipSuggestion) {
+    const ok = await confirm({
+      title: `Stop suggesting ${s.name}?`,
+      description: "It won't be suggested as a SIP again. Its payments stay where they are.",
+      action: "Not a SIP", destructive: false,
+    });
+    if (!ok) return;
     const before = settings.dismissedSips ?? [];
     try {
       await updateSettings({ patch: { dismissedSips: [...before, s.key] } });
@@ -73,6 +92,13 @@ export default function SipsPage() {
     } catch (e) { fail(e); }
   }
   async function saveWaiting() {
+    const one = waiting.length === 1;
+    const ok = await confirm({
+      title: `Save ${waiting.length} SIP payment${one ? "" : "s"}?`,
+      description: `${one ? "It's" : "They're"} saved from Gmail review into ${one ? "its SIP" : "their SIPs"}, off the daily list.`,
+      action: "Save", destructive: false,
+    });
+    if (!ok) return;
     try {
       const n = await saveDrafts({ draftIds: waiting.map((d) => d._id), draftDates: waiting.map((d) => d.proposal.date) });
       const left = waiting.length - n;
