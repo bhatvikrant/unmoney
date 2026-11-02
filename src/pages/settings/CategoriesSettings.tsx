@@ -38,6 +38,17 @@ export default function CategoriesSettings() {
   const archived = ofType.filter((c) => c.archivedAt && (!c.parentId || mains.some((m) => m._id === c.parentId)));
   const nameOf = (id?: string) => categories.find((c) => c._id === id)?.name;
   const archive = (id: Id<"categories">, value: boolean) => setArchived({ ids: [id], archived: value }).then(() => setDialog(null)).catch((e) => toast.error(e instanceof Error ? e.message : "Failed"));
+  // Archiving asks first (unless it was already picked as "Archive instead" of a delete), and can be taken back from its toast
+  const archiveAsked = async (id: Id<"categories">, asked = false) => {
+    const c = categories.find((x) => x._id === id);
+    if (!c) return;
+    const subs = c.parentId ? 0 : subsOf(id).length;
+    const what = subs ? `It and its ${subs} ${subs === 1 ? "subcategory" : "subcategories"} stop` : "It stops";
+    if (!asked && !(await confirm({ title: `Archive "${c.name}"?`, description: `${what} showing when you add entries; entries already on ${subs ? "them" : "it"} keep ${subs ? "them" : "it"}. You can unarchive it from Archived at any time.`, action: "Archive", destructive: false }))) return;
+    await archive(id, true);
+    setShowArchived(true);
+    offerUndo(`Archived "${c.name}"`, () => setArchived({ ids: [id], archived: false }));
+  };
   const tidy = useTidyUndo();
   const [dialog, setDialog] = useState<null | { id?: Id<"categories">; name: string; parentId: string }>(null);
   const move = (list: typeof mains, id: string, dir: -1 | 1) => {
@@ -65,7 +76,7 @@ export default function CategoriesSettings() {
       const archived = !!categories.find((c) => c._id === id)?.archivedAt;
       const choice = archived ? await confirm(opts) : await confirm({ ...opts, alternative: "Archive instead" });
       if (!choice) return;
-      if (choice === "alternative") { await archive(id, true); return; }
+      if (choice === "alternative") { await archiveAsked(id, true); return; }
       await remove({ id });
       offerUndo(`Deleted "${name}"`, () => restore({ id }));
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
@@ -131,7 +142,7 @@ export default function CategoriesSettings() {
             ) : null}
           </div>
         ) : null}
-        <p className="px-4 py-3 text-xs text-muted-foreground">Subcategories need the Subcategories switch in Settings. Edit a subcategory and set its parent to "Main category" to promote it. Archive a category you no longer use (edit it): it stops showing when you add entries, and entries already on it keep it.</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground">Subcategories need the Subcategories switch in Settings. Edit a subcategory and set its parent to "Main category" to promote it. Archive a category you no longer use (edit it): it stops showing when you add entries, and entries already on it keep it. Unarchive it from Archived to bring it back.</p>
         <UndoLastTidy tidy={tidy} />
         <HistorySection scope="categories" className="mt-2" />
       </Page>
@@ -149,7 +160,7 @@ export default function CategoriesSettings() {
             </div>
           ) : null}
           <DialogFooter className="sm:justify-between">
-            {dialog?.id ? <Button variant="outline" onClick={() => archive(dialog.id!, true)}><Archive className="size-4" />Archive{!dialog.parentId || dialog.parentId === "main" ? (subsOf(dialog.id).length ? " with subcategories" : "") : ""}</Button> : <span />}
+            {dialog?.id ? <Button variant="outline" onClick={() => archiveAsked(dialog.id!)}><Archive className="size-4" />Archive{!dialog.parentId || dialog.parentId === "main" ? (subsOf(dialog.id).length ? " with subcategories" : "") : ""}</Button> : <span />}
             <Button onClick={save} disabled={!dialog?.name.trim()}>Save</Button>
           </DialogFooter>
         </DialogContent>
