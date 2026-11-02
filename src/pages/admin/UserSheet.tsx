@@ -7,13 +7,15 @@ import { Avatar } from "@/components/shell/Avatar";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BarList, DayChart, SLOT, Tile } from "./charts";
-import { addDays, daySeries, fmtBytes, fmtDuration, fmtNum, inRange, photoBytes, storageOf, streaks, totals, type Overview } from "./metrics";
+import { addDays, aiTotals, daySeries, fmtBytes, fmtDuration, fmtNum, fmtUsd, inRange, photoBytes, storageOf, streaks, totals, type Overview } from "./metrics";
 
 const FEATURE_LABELS: Record<string, string> = {
   budgets: "Budgets", repeats: "Repeats", installments: "Installments", bookmarks: "Bookmarks", notes: "Notes", subCurrencies: "Sub-currencies",
   photos: "Photos", imports: "Imports", unsplit: "UnSplit", gmail: "Gmail", gmailBackfill: "Gmail read-back", sips: "SIPs", aiTidy: "AI tidy-up",
   tidyUp: "Tidy-up", iphoneShortcut: "iPhone shortcut", passcode: "Passcode", subcategories: "Subcategories", carryOver: "Carry-over", timeInput: "Time input",
 };
+
+const AI_LABELS = { gmail: "Gmail reading", tidy: "Category tidy-up" } as const;
 
 export function UserSheet({ userId, onClose, data, today, days }: { userId: string | null; onClose: () => void; data: Overview; today: string; days: number }) {
   const user = data.users.find((u) => u.id === userId);
@@ -33,7 +35,9 @@ function Body({ user, data, today, days }: { user: Overview["users"][number]; da
   const stats = data.stats.find((s) => s.userId === user.id);
   const devices = data.devices.filter((d) => d.userId === user.id).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
   const t = totals(daily);
-  const view = { users: [user], devices, daily, stats: stats ? [stats] : [] };
+  const ai = data.ai.filter((r) => r.userId === user.id && r.day >= from && r.day <= today);
+  const view = { users: [user], devices, daily, stats: stats ? [stats] : [], ai };
+  const spent = aiTotals(ai);
   const series = daySeries(view, from, today);
   const allDays = data.daily.filter((r) => r.userId === user.id).map((r) => r.day);
   const streak = streaks(allDays, today);
@@ -79,6 +83,25 @@ function Body({ user, data, today, days }: { user: Overview["users"][number]; da
               </li>
             ))}
             {!devices.length ? <li className="px-3 py-3 text-muted-foreground">Not seen since usage counting began</li> : null}
+          </ul>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-sm font-medium">AI cost{spent.calls ? ` · ${fmtUsd(spent.costUsd)}` : ""}</h3>
+          <ul className="divide-y rounded-md border text-sm">
+            {(Object.keys(AI_LABELS) as (keyof typeof AI_LABELS)[]).map((k) => {
+              const t = aiTotals(ai.filter((r) => r.feature === k));
+              return t.calls ? (
+                <li key={k} className="flex items-center gap-2 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div>{AI_LABELS[k]}</div>
+                    <div className="text-xs text-muted-foreground">{fmtNum(t.calls)} {t.calls === 1 ? "call" : "calls"} · {fmtNum(t.inputTokens)} tokens in · {fmtNum(t.outputTokens)} out</div>
+                  </div>
+                  <span className="tabular-nums">{fmtUsd(t.costUsd)}</span>
+                </li>
+              ) : null;
+            })}
+            {!spent.calls ? <li className="px-3 py-3 text-muted-foreground">No AI calls in the period</li> : null}
           </ul>
         </section>
 

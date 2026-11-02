@@ -18,6 +18,7 @@ import { currentRev, deleteSynced, insertSynced, patchSynced } from "./lib/chang
 import { runOps } from "./lib/snapshot";
 import { decryptText, encryptText, hasTokenKey, sign, verify } from "./lib/gmailCrypto";
 import * as gmailApi from "./lib/gmailApi";
+import { recordSpend } from "./lib/aiSpend";
 import { GmailAuthError, GmailSetupError, SCOPE } from "./lib/gmailApi";
 import { addDays } from "../shared/dates";
 import { clean } from "../shared/ops";
@@ -702,7 +703,7 @@ function learnAccounts(prep: Prep, read: Read): Record<string, Id<"accounts">> {
   return learned;
 }
 
-async function askClaude(mails: Mail[], read: Read): Promise<{ reads: AiRead[]; dropped: number }> {
+async function askClaude(ctx: ActionCtx, userId: Id<"users">, mails: Mail[], read: Read): Promise<{ reads: AiRead[]; dropped: number }> {
   const { input, ids } = buildAiInput(mails, { categories: read.categories, accounts: read.accounts, mainCurrency: read.settings.mainCurrency });
   const client = new Anthropic({ timeout: 90_000, maxRetries: 1 });
   const res = await client.messages.create({
@@ -713,6 +714,7 @@ async function askClaude(mails: Mail[], read: Read): Promise<{ reads: AiRead[]; 
     messages: [{ role: "user", content: JSON.stringify(input) }],
   });
   console.log("gmail-ai", { mails: mails.length, stop: res.stop_reason, input: res.usage.input_tokens, output: res.usage.output_tokens });
+  await recordSpend(ctx, userId, "gmail", res);
   if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`model stopped: ${res.stop_reason}`);
   const text = res.content.find((b) => b.type === "text");
   const raw = JSON.parse(text && text.type === "text" ? text.text : "{}").results;
@@ -785,7 +787,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
       if (used + aiCalls >= aiCap) { aiSkipped += batch.length; retry.push(...batch); aiCapped = true; continue; }
       aiCalls++;
       try {
-        const { reads: answers, dropped } = await askClaude(batch, read);
+        const { reads: answers, dropped } = await askClaude(ctx, c.userId, batch, read);
         aiDropped += dropped;
         const byId = new Map(batch.map((m) => [m.id, m]));
         // not a payment, or an answer that failed validation: asking again next hour would say the same

@@ -41,6 +41,7 @@ const STEPS: { name: string; take: (ctx: MutationCtx, userId: Id<"users">) => Pr
   { name: "usageSessions", take: (ctx, u) => ctx.db.query("usageSessions").withIndex("by_user_started", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "usageDaily", take: (ctx, u) => ctx.db.query("usageDaily").withIndex("by_user_day", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "usageDevices", take: (ctx, u) => ctx.db.query("usageDevices").withIndex("by_user_device", (q) => q.eq("userId", u)).take(BATCH) },
+  { name: "aiDaily", take: (ctx, u) => ctx.db.query("aiDaily").withIndex("by_user_day", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "adminStats", take: (ctx, u) => ctx.db.query("adminStats").withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "authAccounts", take: (ctx, u) => ctx.db.query("authAccounts").withIndex("userIdAndProvider", (q) => q.eq("userId", u)).take(BATCH),
     also: async (ctx, d) => {
