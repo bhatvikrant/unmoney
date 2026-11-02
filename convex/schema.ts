@@ -50,6 +50,8 @@ export const sip = v.object({
   accountId: v.optional(v.id("accounts")),
   /** How often it is debited (shared/sips.ts rhythmOf); monthly when unset. */
   rhythm: v.optional(v.union(v.literal("weekly"), v.literal("fortnightly"), v.literal("twiceMonthly"), v.literal("monthly"), v.literal("quarterly"))),
+  /** The day of the month a monthly or quarterly SIP is due: it takes only debits on that day (or the next working day). Several SIPs of one name and amount are told apart by it. */
+  day: v.optional(v.number()),
   /** When the user marked it cancelled: it keeps its payments and takes no new ones. A pause needs nothing: the next payment just goes in. */
   stoppedAt: v.optional(v.number()),
 });
