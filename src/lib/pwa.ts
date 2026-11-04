@@ -1,6 +1,7 @@
 /**
  * Installed-app support: registers the service worker (which precaches the app so it opens with
- * no connection), offers new versions with a toast, and tracks whether the app can be installed.
+ * no connection), offers new versions with a toast, updates on its own once the running copy is a
+ * day old and behind (see checkLatest), and tracks whether the app can be installed.
  */
 import { useEffect, useSyncExternalStore } from "react";
 import { registerSW } from "virtual:pwa-register";
@@ -41,11 +42,18 @@ export function startPwa() {
     emit();
   });
 
+  // what was last typed into, so an update never reloads over a half-filled entry (see safeNow)
+  document.addEventListener("input", () => { typedOn = location.pathname; }, true);
+  // At launch, not once the worker is registered: when the browser is already fetching a new version, registering
+  // waits for that whole download, and the old copy would sit there usable (and typed into) all along.
+  void checkLatest();
+
   registerSW({
     onNeedRefresh: offerUpdate,
     onNeedReload: reloadOnce,
     onRegisteredSW(_url, reg) {
       if (!reg) return;
+      registration = reg;
       // Workbox only reports one update found after the page has been open a minute (it stops
       // listening once it decides an update came from elsewhere), so an app left open through
       // several deploys never heard about the second one. Watch the registration directly.
@@ -58,11 +66,16 @@ export function startPwa() {
       // an installed app can stay open for days: look for a new version hourly and when it comes back to the front
       const check = () => {
         if (navigator.onLine) void reg.update().catch(() => {});
+        void checkLatest();
       };
       setInterval(check, 60 * 60 * 1000);
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") check();
       });
+      // a day-old copy found while an entry was being typed: update once the user has left the form
+      setInterval(() => {
+        if (behind && document.visibilityState === "visible" && safeNow()) void applyForced();
+      }, 15 * 1000);
     },
   });
 }
@@ -76,6 +89,7 @@ function reloadOnce() {
 
 /** One toast however many versions arrive while it's up; Reload switches to the newest waiting one. */
 function offerUpdate() {
+  if (forced.state !== "idle") return;
   toast("A new version of UnMoney is ready", {
     id: "new-version",
     duration: Infinity,
@@ -90,6 +104,121 @@ function offerUpdate() {
       },
     },
   });
+}
+
+/**
+ * Forced updates. A new version is offered with the toast above; once the copy running here is a day
+ * old and a newer one is out, UnMoney stops asking and updates itself, covering the screen while it does.
+ * It only does so at a safe moment (opening the app, or any screen but a form that has been typed into),
+ * never offline, and never in a loop: a version it already tried to switch to this session is left to the toast.
+ */
+export const FORCE_AFTER = 24 * 60 * 60 * 1000;
+const BUILT_AT = Number(import.meta.env.VITE_APP_BUILT_AT ?? 0);
+const TRIED_KEY = "unmoney.forcedUpdateTried";
+
+/** current: when the running version was built */
+export type ForcedUpdate = { state: "idle" | "updating" | "failed"; current: number };
+let forced: ForcedUpdate = { state: "idle", current: BUILT_AT };
+let registration: ServiceWorkerRegistration | undefined;
+let behind: { version: string; builtAt: number } | null = null;
+let typedOn: string | null = null;
+
+function setForced(next: Partial<ForcedUpdate>) {
+  forced = { ...forced, ...next };
+  emit();
+}
+
+/** The entry, payment-method and settings forms: their unsaved fields live only in memory. */
+const FORM = /\/(t\/[^/]+|new|edit)$/;
+function safeNow() {
+  return !(FORM.test(location.pathname) && typedOn === location.pathname);
+}
+
+/** Asks the server for the newest version. Offline, or the server can't be reached: nothing happens. */
+async function checkLatest() {
+  if (!BUILT_AT || !navigator.onLine) return;
+  let latest: { version: string; builtAt: number };
+  try {
+    const res = await fetch("/version.json", { cache: "no-store" });
+    if (!res.ok) return;
+    latest = await res.json();
+    if (typeof latest?.builtAt !== "number") return;
+  } catch {
+    return;
+  }
+  if (latest.builtAt <= BUILT_AT) return;
+  if (Date.now() - BUILT_AT < FORCE_AFTER) return; // newer, but this copy is recent: the toast offers it
+  behind = latest;
+  if (safeNow()) void applyForced();
+}
+
+async function applyForced() {
+  const target = behind;
+  if (!target || forced.state !== "idle") return;
+  try {
+    // already switched to this version once and still on the old copy: let the toast handle it rather than loop
+    if (sessionStorage.getItem(TRIED_KEY) === target.version) return;
+    sessionStorage.setItem(TRIED_KEY, target.version);
+  } catch {
+    // private mode: no loop guard, but the switch below only reloads once a new worker has taken over
+  }
+  toast.dismiss("new-version");
+  setForced({ state: "updating" });
+  if (!(await switchToNewest())) setForced({ state: "failed" });
+}
+
+/** "Try again" on the failed screen. */
+export async function retryForcedUpdate() {
+  setForced({ state: "updating" });
+  if (!(await switchToNewest())) setForced({ state: "failed" });
+}
+
+/** "Not now" on the failed screen: keep using this copy. Opening the app again tries once more. */
+export function skipForcedUpdate() {
+  behind = null;
+  setForced({ state: "idle" });
+}
+
+/** Waits for the new version to finish downloading, then reloads into it. False when it couldn't. */
+async function switchToNewest(timeout = 60 * 1000): Promise<boolean> {
+  const reg = registration ?? (await navigator.serviceWorker?.getRegistration().catch(() => undefined));
+  if (!reg) {
+    // no service worker (an old browser): a plain reload already loads the newest version
+    reloadOnce();
+    return true;
+  }
+  const waiting = reg.waiting ?? (await nextInstalled(reg, timeout));
+  if (!waiting) return false;
+  navigator.serviceWorker.addEventListener("controllerchange", reloadOnce, { once: true });
+  waiting.postMessage({ type: "SKIP_WAITING" });
+  // Chrome can leave the new worker waiting after skipWaiting while this page still holds the old one (seen when it
+  // had been waiting a while); reloading lets go of the old one, and the reloaded page is the new version.
+  setTimeout(reloadOnce, 5000);
+  return true;
+}
+
+function nextInstalled(reg: ServiceWorkerRegistration, timeout: number): Promise<ServiceWorker | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (sw: ServiceWorker | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(sw);
+    };
+    const timer = setTimeout(() => done(reg.waiting), timeout);
+    const watch = (sw: ServiceWorker | null) => sw?.addEventListener("statechange", () => {
+      if (sw.state === "installed") done(sw);
+      else if (sw.state === "redundant") done(null);
+    });
+    watch(reg.installing);
+    reg.addEventListener("updatefound", () => watch(reg.installing));
+    if (!reg.installing) void reg.update().catch(() => done(null));
+  });
+}
+
+export function useForcedUpdate(): ForcedUpdate {
+  return useSyncExternalStore(subscribe, () => forced);
 }
 
 function subscribe(l: () => void) {
