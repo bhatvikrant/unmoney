@@ -742,7 +742,7 @@ export function CloserCard({ card, month, onClose }: Props<"closer">) {
           <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-60">
             <Logo size={14} wordmark={false} />
             <span className="mr-auto font-semibold tracking-[-0.01em] text-foreground">UnMoney</span>
-            <span>unmoney.vercel.app</span>
+            <span>unmoney.vikrantbhat.com</span>
           </div>
         </div>
         <div className="pointer-events-auto mt-3.5 flex gap-2 lg:mt-3">

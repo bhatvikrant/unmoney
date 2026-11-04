@@ -7,8 +7,8 @@ Everything below happens in the Google Cloud project that owns the production OA
 ## 1. Before you start
 
 - [x] **Contact address.** `CONTACT_EMAIL` in [src/pages/legal/PrivacyPage.tsx](../src/pages/legal/PrivacyPage.tsx) is `vik.bhat223@gmail.com`; use the same address as the support and developer contact below.
-- [ ] **Privacy policy is live** at <https://unmoney.vercel.app/privacy>, opens signed out, and its date is current. It must stay accurate to the code; re-read it whenever `convex/gmail.ts`, `shared/gmail/ai.ts` or what is stored changes.
-- [ ] **Homepage** is <https://unmoney.vercel.app/>. Signed out it is the sign-in screen, which says what UnMoney does, mentions the optional Gmail connection, and links the privacy policy in its footer. Google checks that the homepage is public (no sign-in needed to read it), names the app as the consent screen does, explains the app, and links the same privacy policy URL.
+- [ ] **Privacy policy is live** at <https://unmoney.vikrantbhat.com/privacy>, opens signed out, and its date is current. It must stay accurate to the code; re-read it whenever `convex/gmail.ts`, `shared/gmail/ai.ts` or what is stored changes.
+- [ ] **Homepage** is <https://unmoney.vikrantbhat.com/>. Signed out it is the sign-in screen, which says what UnMoney does, mentions the optional Gmail connection, and links the privacy policy in its footer. Google checks that the homepage is public (no sign-in needed to read it), names the app as the consent screen does, explains the app, and links the same privacy policy URL.
 - [ ] **Production is set up for Gmail**: `GMAIL_TOKEN_KEY` and `ANTHROPIC_API_KEY` are set with `--prod`, and the redirect URI `https://brilliant-cheetah-609.convex.site/gmail/callback` is on the OAuth client (README › Gmail sync). The reviewer will try the flow.
 - [ ] **Verify both domains in Google Search Console** (section 1a below). Both hosts must be verified: the app's, and the Convex one the sign-in and Gmail redirect URIs live on.
 - [ ] **Take the dev deployment off this client.** If the production OAuth client also lists `https://fortunate-bass-165.convex.site/...` redirect URIs, that domain would need authorizing and verifying as well. Simpler: give dev its own Google Cloud project and OAuth client, left in Testing with yourself as a test user, and set its `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` on the dev deployment only.
@@ -16,15 +16,16 @@ Everything below happens in the Google Cloud project that owns the production OA
 
 ## 1a. Domain verification, step by step
 
-Google only accepts domains that a project Owner or Editor has proven they own in Search Console. UnMoney has two, and because `vercel.app` and `convex.site` are both public suffixes, each subdomain is verified on its own as a **URL prefix** property (there is no DNS to edit). Do this signed in to Google as the account that owns the Cloud project.
+Google only accepts domains that a project Owner or Editor has proven they own in Search Console. UnMoney has two: the app on `unmoney.vikrantbhat.com` (it moved there from `unmoney.vercel.app`, which now 308-redirects to it), and the Convex server. `convex.site` is a public suffix, so that one is verified as a **URL prefix** property. Do this signed in to Google as the account that owns the Cloud project.
 
-**A. `https://unmoney.vercel.app/` (the app)**
+**A. `https://unmoney.vikrantbhat.com/` (the app)**
 
 1. Open <https://search.google.com/search-console>, click the property picker (top left) › **Add property**.
-2. In the right-hand box, **URL prefix**, enter `https://unmoney.vercel.app/` and press Continue.
-3. Under **HTML file**, download the file (named like `google1a2b3c4d5e6f7a8b.html`).
-4. Put it in this repo's `public/` folder, commit and push to `main` (or send it to Claude to do). Vercel serves files in `public/` before the app's catch-all rewrite.
-5. Once the deploy is live, check `https://unmoney.vercel.app/google1a2b3c4d5e6f7a8b.html` shows one line of text, then press **Verify** in Search Console.
+2. In the right-hand box, **URL prefix**, enter `https://unmoney.vikrantbhat.com/` and press Continue.
+3. Under **HTML file**, Search Console names a file like `google1a2b3c4d5e6f7a8b.html`. If it is `googlee7fb4d922eff4e5f.html`, it is already in `public/` and served; otherwise download it into `public/`, commit and push to `main`. Vercel serves files in `public/` before the app's catch-all rewrite.
+4. Check `https://unmoney.vikrantbhat.com/<that file>` shows one line of text, then press **Verify** in Search Console.
+
+(The old `https://unmoney.vercel.app/` property was verified with `public/googlee7fb4d922eff4e5f.html`; vercel.json leaves that one file un-redirected on the old host so the property stays verified.)
 
 **B. `https://brilliant-cheetah-609.convex.site/` (the server)**
 
@@ -42,10 +43,8 @@ This one needs no file: `convex/http.ts` serves a page at `/` with Google's meta
 
 **C. Tell the Cloud project**
 
-1. In Google Cloud › Google Auth Platform › **Branding** › Authorized domains, add `unmoney.vercel.app` and `brilliant-cheetah-609.convex.site` and save.
+1. In Google Cloud › Google Auth Platform › **Branding** › Authorized domains, add `vikrantbhat.com` and `brilliant-cheetah-609.convex.site` and save (remove `unmoney.vercel.app` once nothing on the consent screen points at it).
 2. Each should show as verified. If one doesn't, the Search Console property was verified by a Google account that isn't an Owner or Editor of the Cloud project: add that account in Search Console › Settings › Users and permissions as an Owner, or verify again with the right account.
-
-(The alternative to all of this is a custom domain for both the app and the Convex site, verified once by DNS; `SITE_URL` and Convex Auth's `CUSTOM_AUTH_SITE_URL` would then change with it, and so would the redirect URIs.)
 
 ## 2. Branding
 
@@ -54,10 +53,10 @@ This one needs no file: `convex/http.ts` serves a page at `/` with Google's meta
 | App name | `UnMoney` (exactly as on the homepage; no "Google" or "Gmail" in the name) |
 | User support email | `vik.bhat223@gmail.com` |
 | App logo | optional; 120×120 PNG made from `public/pwa-512x512.png`. Adding or changing it triggers a brand review |
-| Application home page | `https://unmoney.vercel.app` |
-| Application privacy policy link | `https://unmoney.vercel.app/privacy` |
+| Application home page | `https://unmoney.vikrantbhat.com` |
+| Application privacy policy link | `https://unmoney.vikrantbhat.com/privacy` |
 | Application terms of service link | leave empty (optional) |
-| Authorized domains | `unmoney.vercel.app` and `brilliant-cheetah-609.convex.site` |
+| Authorized domains | `vikrantbhat.com` and `brilliant-cheetah-609.convex.site` |
 | Developer contact information | `vik.bhat223@gmail.com` |
 
 ## 3. Audience
@@ -94,7 +93,7 @@ Gmail is asked for in a separate, later consent (`connectUrl` in `convex/gmail.t
 
 Upload to YouTube as **Unlisted** and paste the link in the verification form. English UI, roughly 3 to 5 minutes, one continuous recording of the **production** site in a desktop browser with the address bar visible throughout. Show, in order:
 
-1. [ ] `https://unmoney.vercel.app` signed out: the homepage, then open **Privacy policy** from its footer and scroll through it briefly.
+1. [ ] `https://unmoney.vikrantbhat.com` signed out: the homepage, then open **Privacy policy** from its footer and scroll through it briefly.
 2. [ ] **Continue with Google** and sign in (the non-sensitive sign-in consent).
 3. [ ] More › **Gmail**: the explanation of what the feature reads and keeps; pick a look-back and press **Connect Gmail**.
 4. [ ] **The Gmail consent screen**, in full. Pause on it with the address bar zoomed in or clearly readable so the `client_id=` in the URL can be matched to the production OAuth client ID, and so the Gmail permission ("View your email messages and settings") is visible in the list. Click through the "unverified app" warning if it shows; that is expected before verification.
@@ -115,7 +114,7 @@ Use a test mailbox with a few real-looking bank and shop mails, or blur anything
 
 Restricted scopes need a [Cloud Application Security Assessment](https://appdefensealliance.dev/casa) (CASA) through the App Defense Alliance: Tier 2 for an app like this, renewed every 12 months.
 
-- [ ] Pick an **authorized CASA lab** from the App Defense Alliance list and buy a Tier 2 assessment (labs set their own price; compare a few). Give the lab the scope: the web app `https://unmoney.vercel.app` and the backend `https://brilliant-cheetah-609.convex.cloud` / `.convex.site`.
+- [ ] Pick an **authorized CASA lab** from the App Defense Alliance list and buy a Tier 2 assessment (labs set their own price; compare a few). Give the lab the scope: the web app `https://unmoney.vikrantbhat.com` and the backend `https://brilliant-cheetah-609.convex.cloud` / `.convex.site`.
 - [ ] Run the **application scan** the lab asks for (Tier 2 is a scan you or the lab runs, plus a self-assessment questionnaire the lab reviews), fix what it finds, and rescan until it is clean.
 - [ ] Fill in the **self-assessment questionnaire**. What to point to in this repo:
   - token storage: `convex/lib/gmailCrypto.ts` (AES-256-GCM, fresh IV, key in `GMAIL_TOKEN_KEY`, never in the repo);
