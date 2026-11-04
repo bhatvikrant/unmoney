@@ -8,8 +8,8 @@ Some of what you record in UnMoney was paid for other people too: the dinner you
 
 The two apps share nothing but the user's Google account: separate Convex deployments, separate auth. Rather than tokens, a shared API or cross-deployment auth, the integration is **two URLs**:
 
-1. UnMoney → UnSplit: `https://unsplit.vercel.app/expenses/new#unmoney=<payload>`
-2. UnSplit → UnMoney: `https://unmoney.vercel.app/unsplit/return#unsplit=<payload>`
+1. UnMoney → UnSplit: `https://unsplit.vikrantbhat.com/expenses/new#unmoney=<payload>`
+2. UnSplit → UnMoney: `https://unmoney.vikrantbhat.com/unsplit/return#unsplit=<payload>`
 
 Both payloads are base64url JSON in the URL **fragment**, which the browser never sends to a server, so no amounts or notes end up in Vercel's or Convex's logs. There is nothing to configure on either deployment and nothing to keep secret.
 
