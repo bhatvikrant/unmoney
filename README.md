@@ -45,7 +45,7 @@ Expenses can be handed to [UnSplit](https://github.com/bhatvikrant/unsplit) to s
 
 ## Deploy
 
-Live at https://unmoney.vercel.app. Backend: Convex production deployment `brilliant-cheetah-609` (same project as the dev deployment); frontend: Vercel project `unmoney`. This is what was run to get there:
+Live at https://unmoney.vikrantbhat.com (moved from https://unmoney.vercel.app, which 308-redirects there; see below). Backend: Convex production deployment `brilliant-cheetah-609` (same project as the dev deployment); frontend: Vercel project `unmoney`. This is what was run to get there:
 
 ```bash
 npx convex deploy                                   # creates the prod deployment and pushes convex/
@@ -74,7 +74,13 @@ Once, after the deploy that added `fileOwners`: record who owns the photos and i
 npx convex run --prod files:backfillOwners
 ```
 
-If the production URL ever changes (custom domain), update it on the backend: `npx convex env set --prod SITE_URL https://<new host>`.
+If the production URL ever changes, update it on the backend: `npx convex env set --prod SITE_URL https://<new host>`.
+
+### Custom domain
+
+Production runs on `https://unmoney.vikrantbhat.com`: a Vercel project domain, with a DNS-only `CNAME unmoney → <id>.vercel-dns-017.com` record in Cloudflare (`vercel domains verify unmoney.vikrantbhat.com` prints the exact target). Convex's prod `SITE_URL` is set to it, so sign-in and the Gmail callback come back there. Google's sign-in and Gmail redirect URIs live on `brilliant-cheetah-609.convex.site` and did not change.
+
+`unmoney.vercel.app` is retired: `vercel.json` 308-redirects every path on that host to the same path on the new one, except `/sw.js` and the Search Console file `googlee7fb4d922eff4e5f.html`. Browsers that opened the app there keep a service worker that answers navigations from its cache, so they would never see the redirect, and a redirected worker script can't update. So on the old host `middleware.ts` (Vercel Routing Middleware, matched to `/sw.js` only) serves a stand-in worker that clears the caches, unregisters itself and sends each open tab to the new host. People land signed out there once (the session lives in the old origin's storage) and sign in with Google again.
 
 ### Google sign-in in production
 
