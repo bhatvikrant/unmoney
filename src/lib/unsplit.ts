@@ -11,7 +11,7 @@ import { formatNumber } from "../../shared/money";
 
 type Tx = Doc<"transactions">;
 
-export const UNSPLIT_URL = ((import.meta.env.VITE_UNSPLIT_URL as string | undefined) || "https://unsplit.vercel.app").replace(/\/$/, "");
+export const UNSPLIT_URL = ((import.meta.env.VITE_UNSPLIT_URL as string | undefined) || "https://unsplit.vikrantbhat.com").replace(/\/$/, "");
 
 /** Amounts are decimal strings in major units ("1234.50"), whatever either app's decimals setting; the date is an ISO day. */
 export type HandoffItem = { ref: string; name: string; amount: string };

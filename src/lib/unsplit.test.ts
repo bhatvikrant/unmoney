@@ -43,7 +43,7 @@ test("several entries become one itemised expense in date order; income and tran
     { ref: s.transactions[0]._id, name: "Taxi", amount: "45.50" },
   ]);
   expect(h.notes).toBeUndefined();
-  expect(handoffUrl(h)).toMatch(/^https:\/\/unsplit\.vercel\.app\/expenses\/new#unmoney=[A-Za-z0-9_-]+$/);
+  expect(handoffUrl(h)).toMatch(/^https:\/\/unsplit\.vikrantbhat\.com\/expenses\/new#unmoney=[A-Za-z0-9_-]+$/);
 });
 
 test("one entry goes as it is, with its description as the notes", () => {
@@ -66,7 +66,7 @@ test("the return trip names the expense and the entries; anything else is refuse
   expect(parseReturn("#unsplit=" + encodePayload({ v: 1, expenseId: "", refs: [] }))).toBeNull();
   expect(parseReturn("#unsplit=" + encodePayload({ v: 1, expenseId: "x", refs: [1] }))).toBeNull();
   expect(parseReturn("#other=1")).toBeNull();
-  expect(expenseUrl("k57abc")).toBe("https://unsplit.vercel.app/expenses/k57abc");
+  expect(expenseUrl("k57abc")).toBe("https://unsplit.vikrantbhat.com/expenses/k57abc");
 });
 
 test("setSplit links the entries that still exist, and null unlinks them", () => {
