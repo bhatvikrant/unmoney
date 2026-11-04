@@ -184,7 +184,7 @@ export async function posterImage(p: Poster): Promise<Blob> {
   ctx.fillStyle = color.muted;
   ctx.font = `400 30px ${FONT}`;
   ctx.textAlign = "right";
-  ctx.fillText("unmoney.vercel.app", W - PAD, y + 37);
+  ctx.fillText("unmoney.vikrantbhat.com", W - PAD, y + 37);
   ctx.globalAlpha = 1;
 
   return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error("toBlob failed"))), "image/png"));
