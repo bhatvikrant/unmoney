@@ -13,10 +13,24 @@ function appVersion(at = new Date()): string {
   return `${p.year}.${p.month}.${p.day}-${p.hour}:${p.minute}`;
 }
 
+const builtAt = new Date();
+const version = appVersion(builtAt);
+
 export default defineConfig({
-  define: { "import.meta.env.VITE_APP_VERSION": JSON.stringify(appVersion()) },
+  define: {
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(version),
+    "import.meta.env.VITE_APP_BUILT_AT": JSON.stringify(builtAt.getTime()),
+  },
   plugins: [
     react(),
+    // /version.json: what the newest deploy is. Never precached (not in globPatterns), so src/lib/pwa.ts always
+    // reads it from the server and can tell an app running an old copy from its service worker that it is behind.
+    {
+      name: "unmoney-version",
+      generateBundle() {
+        this.emitFile({ type: "asset", fileName: "version.json", source: JSON.stringify({ version, builtAt: builtAt.getTime() }) });
+      },
+    },
     tailwindcss(),
     VitePWA({
       // src/lib/pwa.ts registers the worker and asks before reloading into a new version
