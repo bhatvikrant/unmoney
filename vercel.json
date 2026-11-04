@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npx convex deploy --cmd 'npm run build' && node scripts/convex-preview-env.mjs",
+  "headers": [{ "source": "/version.json", "headers": [{ "key": "Cache-Control", "value": "no-store" }] }],
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }

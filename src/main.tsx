@@ -7,6 +7,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { OfflineProvider } from "@/lib/store";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ForcedUpdate } from "@/components/ForcedUpdate";
 import { startPwa } from "@/lib/pwa";
 import "./index.css";
 import App from "./App";
@@ -31,5 +32,6 @@ createRoot(document.getElementById("root")!).render(
         </OfflineProvider>
       </ConvexAuthProvider>
     </ErrorBoundary>
+    <ForcedUpdate />
   </StrictMode>,
 );
