@@ -13,6 +13,7 @@ import type { Doc } from "./_generated/dataModel";
 import schema from "./schema";
 import { loadSnapshot } from "./lib/snapshot";
 import { recordSpend } from "./lib/aiSpend";
+import { reportServerError } from "./lib/posthog";
 import {
   AI_MODEL, AI_RUN_EVERY_MS, OUTPUT_SCHEMA, SYSTEM_PROMPT, aiEligibility, buildSummary, summaryHash, validateSuggestions, type AiSuggestion,
 } from "../shared/tidyAi";
@@ -91,6 +92,7 @@ export const suggestCategoryCleanup = action({
       raw = JSON.parse(text && text.type === "text" ? text.text : "{}").suggestions;
     } catch (e) {
       console.error("tidy-ai failed", e instanceof Error ? e.message : e);
+      await reportServerError("ai.suggestCategoryCleanup", e, { userId });
       throw new ConvexError("Couldn't get AI suggestions. Try again later.");
     }
     const suggestions = validateSuggestions(raw, prep.categories, prep.idMap, prep.subcategoriesEnabled);

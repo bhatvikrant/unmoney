@@ -1,5 +1,6 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { reportError } from "@/lib/analytics";
 
 /** One render error would otherwise blank the whole app. Queued changes are in IndexedDB, so a reload keeps them. */
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -7,6 +8,10 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
 
   static getDerivedStateFromError(error: Error) {
     return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    reportError(error, { source: "error_boundary", componentStack: info.componentStack ?? undefined });
   }
 
   render() {
