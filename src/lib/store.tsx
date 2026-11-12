@@ -10,6 +10,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useConvex, useConvexConnectionState, useQuery, type ConvexReactClient } from "convex/react";
 import { toast } from "sonner";
+import { reportError } from "./analytics";
 import { opLabel } from "./opLabel";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
@@ -444,6 +445,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
           settle(op.id, error ?? null);
           if (error) {
             setLastError(error);
+            // the kind of change only: its arguments are ledger data
+            reportError(new Error(`Sync dropped: ${error}`), { source: "sync", op: op.kind });
             toast.error(`${opLabel(op.kind, op.args)} couldn't be synced and was undone: ${error}`);
           }
         };

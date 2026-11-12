@@ -19,6 +19,7 @@ import { runOps } from "./lib/snapshot";
 import { decryptText, encryptText, hasTokenKey, sign, verify } from "./lib/gmailCrypto";
 import * as gmailApi from "./lib/gmailApi";
 import { recordSpend } from "./lib/aiSpend";
+import { reportServerError } from "./lib/posthog";
 import { GmailAuthError, GmailSetupError, SCOPE } from "./lib/gmailApi";
 import { addDays } from "../shared/dates";
 import { clean } from "../shared/ops";
@@ -202,6 +203,8 @@ export const callback = httpAction(async (ctx, req) => {
     return back(`claim&claim=${claim}`);
   } catch (e) {
     console.error("gmail connect failed", e instanceof Error ? e.message : e);
+    // a setup problem is a known outcome the settings page explains, not a bug
+    if (!(e instanceof GmailSetupError)) await reportServerError("gmail.callback", e, { userId: state.userId });
     return back(e instanceof GmailSetupError ? e.kind : "error");
   }
 });
@@ -796,6 +799,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
         for (const r of answers) reads.push({ mail: byId.get(r.mailId)!, parsed: r.parsed, ai: r });
       } catch (e) {
         console.error("gmail-ai failed", e instanceof Error ? e.message : e);
+        await reportServerError("gmail.ai", e, { userId: c.userId, context: { batch: batch.length } });
         aiSkipped += batch.length;
         retry.push(...batch);
         notes.push("AI reading failed for some mail; it will be retried");
@@ -877,6 +881,8 @@ export const syncUser = internalAction({
     } catch (e) {
       const message = e instanceof Error ? e.message : "Check failed";
       console.error("gmail sync failed", { userId, message });
+      // an expired Google grant is the user's to reconnect, not a bug
+      if (!(e instanceof GmailAuthError)) await reportServerError("gmail.syncUser", e, { userId });
       await ctx.runMutation(internal.gmail.failSync, { userId, startedAt, error: message, reauth: e instanceof GmailAuthError });
       return { ran: true, error: message };
     }
@@ -945,6 +951,7 @@ export const backfillStep = internalAction({
     } catch (e) {
       const message = e instanceof Error ? e.message : "Reading old mail failed";
       console.error("gmail backfill failed", { userId, message });
+      if (!(e instanceof GmailAuthError)) await reportServerError("gmail.backfillStep", e, { userId });
       // a few failures in a row pause the connection, and the next step stops
       await ctx.runMutation(internal.gmail.failSync, { userId, startedAt, error: message, reauth: e instanceof GmailAuthError });
       if (!(e instanceof GmailAuthError)) await ctx.scheduler.runAfter(STEP_RETRY_MS, internal.gmail.backfillStep, { userId, run });
