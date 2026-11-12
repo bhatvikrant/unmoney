@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { aiSeries, aiTotals, applyFilters, cohorts, daySeries, fmtUsd, hourOfWeek, streaks, userRows, weekOf, type Ai, type Daily, type Overview } from "./metrics";
+import { aiSeries, aiTotals, applyFilters, cohorts, daySeries, fmtUsd, hourOfWeek, streaks, usageGap, userRows, weekOf, GAP_AFTER_MS, type Ai, type Daily, type Overview } from "./metrics";
 
 const row = (over: object): Daily => ({
   userId: "u1", deviceId: "d1", day: "2026-11-02", opens: 1, activeMs: 60_000, bytesDown: 100, bytesUp: 10, photoFetches: 0, opsSent: 0,
@@ -16,9 +16,9 @@ const ai = (over: object): Ai => ({
 
 const overview = (): Overview => ({
   users: [
-    { id: "me", name: "Me", email: "a", image: null, joinedAt: Date.UTC(2026, 9, 1) },
-    { id: "u1", name: "One", email: "b", image: null, joinedAt: Date.UTC(2026, 9, 26) },
-    { id: "u2", name: "Two", email: "c", image: null, joinedAt: Date.UTC(2026, 9, 27) },
+    { id: "me", name: "Me", email: "a", image: null, joinedAt: Date.UTC(2026, 9, 1), lastSyncAt: null },
+    { id: "u1", name: "One", email: "b", image: null, joinedAt: Date.UTC(2026, 9, 26), lastSyncAt: null },
+    { id: "u2", name: "Two", email: "c", image: null, joinedAt: Date.UTC(2026, 9, 27), lastSyncAt: null },
   ] as Overview["users"],
   devices: [device({}), device({ userId: "u2", deviceId: "d2", os: "Android", standalone: false }), device({ userId: "me", deviceId: "d3" })],
   daily: [row({}), row({ day: "2026-11-01" }), row({ userId: "u2", deviceId: "d2", day: "2026-11-02" }), row({ userId: "me", deviceId: "d3" })],
@@ -85,4 +85,21 @@ test("AI cost follows the users shown, and sums per user, feature and day", () =
 
 test("dollars keep the places a small bill needs", () => {
   expect([0, 0.00078, 0.042, 3.1].map(fmtUsd)).toEqual(["$0", "$0.0008", "$0.042", "$3.10"]);
+});
+
+test("usage gap: saving changes but reporting no usage", () => {
+  const day = GAP_AFTER_MS;
+  expect(usageGap(null, null)).toBe(null);
+  expect(usageGap(null, 5)).toBe("none");
+  expect(usageGap(10 * day, 10 * day + day / 2)).toBe(null);
+  expect(usageGap(10 * day, 12 * day)).toBe("stopped");
+  // reports newer than the last change are the normal case
+  expect(usageGap(12 * day, 10 * day)).toBe(null);
+});
+
+test("a user with changes but no usage is seen by their last change", () => {
+  const v = overview();
+  v.users.push({ id: "u3", name: "Three", email: "d", image: null, joinedAt: 0, lastSyncAt: 1_000 } as Overview["users"][number]);
+  const u3 = userRows(v, v.daily, "2026-11-02").find((u) => u.id === "u3")!;
+  expect(u3).toMatchObject({ lastSeenAt: 1_000, lastPingAt: null, gap: "none", opens: 0 });
 });

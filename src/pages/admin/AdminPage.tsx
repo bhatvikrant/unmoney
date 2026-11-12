@@ -420,7 +420,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
             <Select value={f.mode} onValueChange={(v) => setF({ mode: v as Filters["mode"] })}>
               <SelectTrigger aria-label="Installed or browser" className="h-9 w-full sm:h-8 sm:w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">App and browser</SelectItem>
+                <SelectItem value="all">App + browser</SelectItem>
                 <SelectItem value="installed">Installed app</SelectItem>
                 <SelectItem value="browser">Browser tab</SelectItem>
               </SelectContent>
@@ -524,6 +524,18 @@ function sortValue(u: UserRow, key: SortKey): string {
   return fmtNum(u[key] ?? 0);
 }
 
+/** Why a user's usage reads zero though they are still saving changes (metrics.ts usageGap). */
+function GapNote({ u, ago, className }: { u: UserRow; ago: (ms: number | null) => string; className?: string }) {
+  if (!u.gap) return null;
+  return (
+    <div className={cn("flex min-w-0 items-start gap-1 text-xs text-amber-600 dark:text-amber-400", className)} title="Their app saves changes but sends no usage counts: most likely an installed copy stuck on an older version. Opens and time are not real.">
+      <TriangleAlert className="mt-0.5 size-3 shrink-0" aria-hidden />
+      {/* wraps on a phone rather than cut: the time is the point */}
+      <span>{u.gap === "none" ? "No usage reported" : "Usage stopped reporting"} · last synced {ago(u.lastSyncAt)}</span>
+    </div>
+  );
+}
+
 function UsersTable({ rows, onPick, period, now }: { rows: UserRow[]; onPick: (id: string) => void; period: string; now: number }) {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "lastSeenAt", desc: true });
@@ -563,6 +575,7 @@ function UsersTable({ rows, onPick, period, now }: { rows: UserRow[]; onPick: (i
                   <span className="shrink-0 text-xs text-muted-foreground">{ago(u.lastSeenAt)}</span>
                 </div>
                 <div className="truncate text-xs text-muted-foreground">{u.email}</div>
+                <GapNote u={u} ago={ago} />
                 <div className="mt-1 flex flex-wrap gap-x-3 text-xs tabular-nums text-muted-foreground">
                   <span><b className="font-medium text-foreground">{fmtNum(u.opens)}</b> opens</span>
                   <span><b className="font-medium text-foreground">{u.activeDays}</b> {u.activeDays === 1 ? "day" : "days"}</span>
@@ -603,6 +616,8 @@ function UsersTable({ rows, onPick, period, now }: { rows: UserRow[]; onPick: (i
                     <div className="min-w-0">
                       <button type="button" className="block max-w-[200px] truncate text-left font-medium" onClick={(e) => { e.stopPropagation(); onPick(u.id); }}>{nameOf(u)}</button>
                       <div className="max-w-[200px] truncate text-xs text-muted-foreground">{u.email}</div>
+                      {/* the table scrolls sideways, so one line */}
+                      <GapNote u={u} ago={ago} className="whitespace-nowrap" />
                     </div>
                   </div>
                 </td>
