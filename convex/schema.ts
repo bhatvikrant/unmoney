@@ -412,7 +412,10 @@ export default defineSchema({
     status: v.union(v.literal("applied"), v.literal("rejected")),
     error: v.optional(v.string()),
     idMap: v.optional(v.record(v.string(), v.string())),
-  }).index("by_user_op", ["userId", "opId"]),
+  })
+    .index("by_user_op", ["userId", "opId"])
+    // newest last: a user's latest change, for the superadmin dashboard (admin.overview)
+    .index("by_user", ["userId"]),
 
   /**
    * A user's Gmail connection (docs/specs/gmail-sync.md). Server-only: the refresh token is

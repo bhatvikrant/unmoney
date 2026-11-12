@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beforeSend, stripQuery } from "./analytics";
+import { beforeSend, deviceProperties, stripQuery } from "./analytics";
 import type { CaptureResult } from "posthog-js";
 
 describe("stripQuery", () => {
@@ -27,7 +27,24 @@ describe("beforeSend", () => {
     expect(out.$set_once!.$initial_referrer).toBe("$direct");
   });
 
+  it("names the screen with ids taken out, as the superadmin dashboard does", () => {
+    const at = (props: object) => beforeSend({ uuid: "1", event: "$pageview", properties: props } as unknown as CaptureResult)!.properties.screen;
+    expect(at({ $pathname: "/t/k57abc123" })).toBe("t/:id");
+    expect(at({ $pathname: "/" })).toBe("ledger");
+    expect(at({ $current_url: "https://a.app/stats/2026-10?x=1" })).toBe("stats/:id");
+    expect(at({})).toBeUndefined();
+  });
+
   it("passes a dropped event through", () => {
     expect(beforeSend(null)).toBeNull();
+  });
+});
+
+describe("deviceProperties", () => {
+  it("splits devices the way the dashboard does", () => {
+    expect(deviceProperties({ os: "iOS", browser: "Safari", formFactor: "tablet", standalone: true }))
+      .toMatchObject({ display_mode: "installed", form_factor: "tablet", device_os: "iOS" });
+    expect(deviceProperties({ os: "macOS", browser: "Chrome", formFactor: "desktop", standalone: false }))
+      .toMatchObject({ display_mode: "browser", form_factor: "desktop", device_os: "macOS" });
   });
 });
