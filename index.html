@@ -32,9 +32,22 @@
         document.addEventListener("wheel", function (e) { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
       }
     </script>
+    <style>
+      /* The boot screen, painted before any script or stylesheet arrives: on a slow first visit the bundle takes
+         seconds, and without it the page is blank white (in dark mode too). React replaces it on mount; Splash in
+         App.tsx draws the same mark in the same place. The mark fades in after 300 ms, so a warm start never shows it. */
+      #boot { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #fff; }
+      #boot svg { animation: boot-in 200ms ease-out 300ms both; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12)); }
+      #boot rect { fill: #0a0a0a; }
+      #boot path { fill: #fff; }
+      html.dark #boot { background: #0a0a0a; }
+      html.dark #boot rect { fill: #fafafa; }
+      html.dark #boot path { fill: #0a0a0a; }
+      @keyframes boot-in { from { opacity: 0; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div id="boot"><svg width="56" height="56" viewBox="0 0 512 512" aria-label="UnMoney" role="img"><rect width="512" height="512" rx="112" /><path d="M128 352V160h48l80 112 80-112h48v192h-48V240l-80 112-80-112v112z" /></svg></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
