@@ -21,7 +21,7 @@ export function StatsHeaderBar({ tabs: withTabs = true }: { tabs?: boolean } = {
         {withTabs ? (
           <div className="flex rounded-md bg-muted p-0.5 text-sm">
             {tabs.map((t) => (
-              <button key={t.to} type="button" onClick={() => nav(t.to + (t.to === "/notes" ? "" : search))} className={cn("px-4 py-1 rounded-[5px]", pathname.startsWith(t.to) ? "bg-background shadow-sm font-medium" : "text-muted-foreground")}>{t.label}</button>
+              <button key={t.to} type="button" onClick={() => nav(t.to + (t.to === "/notes" ? "" : search))} className={cn("px-3 min-[360px]:px-4 py-1 rounded-[5px]",pathname.startsWith(t.to) ? "bg-background shadow-sm font-medium" : "text-muted-foreground")}>{t.label}</button>
             ))}
           </div>
         ) : null}
