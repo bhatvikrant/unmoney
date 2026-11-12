@@ -113,7 +113,8 @@ export default function AppShell() {
             return (
               <NavLink key={t.to} to={t.to} aria-label={t.to === "/" ? "Transactions" : undefined} className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", active ? "text-primary" : "text-muted-foreground")}>
                 <span className="relative"><t.icon className="size-5" strokeWidth={active ? 2.4 : 1.8} />{t.to === "/settings" && toReview ? <ReviewCount n={toReview} /> : null}{t.to === "/stats" && budgetOver ? <OverDot /> : null}</span>
-                <span>{t.to === "/" ? today : t.label}</span>
+                {/* one line even at 320px, where "Payment methods" is a few pixels wider than its column: wrapping pushed its icon out of line */}
+                <span className="whitespace-nowrap">{t.to === "/" ? today : t.label}</span>
               </NavLink>
             );
           })}
