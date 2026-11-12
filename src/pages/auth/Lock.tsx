@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useMutation } from "convex/react";
 import { toast } from "sonner";
+import { resetAnalytics } from "@/lib/analytics";
 import { api } from "../../../convex/_generated/api";
 import { clearFailures, hashPin, lockoutRemaining, markUnlocked, recordFailure } from "@/lib/passcode";
 import { Button } from "@/components/ui/button";
@@ -109,6 +110,7 @@ export default function Lock({ hash, salt, resetRequested, onUnlock }: { hash: s
               setBusy(true);
               try { await requestReset(); } catch { toast.error("Resetting the passcode needs a connection."); setBusy(false); return; }
               await signOut();
+              resetAnalytics();
             }}>Sign out to reset</Button>
           </div>
         </div>
