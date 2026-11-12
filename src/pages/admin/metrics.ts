@@ -183,13 +183,33 @@ export function tally<T>(items: T[], key: (t: T) => string | null | undefined): 
 // ---- per user ----
 
 export type UserRow = User & {
+  /** The latest of the app's last usage report and the last change it saved. */
   lastSeenAt: number | null;
+  /** When the app last reported usage (usage.ping), on any device. */
+  lastPingAt: number | null;
+  /** Usage that is missing though the user is still around (usageGap). */
+  gap: UsageGap;
   opens: number; activeDays: number; activeMs: number; bandwidth: number;
   entries: number; storage: number; devices: number; installed: boolean;
   appVersion: string | null; gmail: string | null; streak: number; longestStreak: number; nightShare: number;
   /** Claude's cost in USD for this user over the period, and how many calls. */
   aiCost: number; aiCalls: number;
 };
+
+/**
+ * A user still saving changes whose app reports no usage, so their zeros are not real: an installed
+ * build from before usage counting, or one stuck on an old version. "none": no usage report ever;
+ * "stopped": the last report is more than a day older than the last change saved.
+ */
+export type UsageGap = "none" | "stopped" | null;
+
+export const GAP_AFTER_MS = 24 * 60 * 60 * 1000;
+
+export function usageGap(lastPingAt: number | null, lastSyncAt: number | null): UsageGap {
+  if (!lastSyncAt) return null;
+  if (!lastPingAt) return "none";
+  return lastSyncAt - lastPingAt > GAP_AFTER_MS ? "stopped" : null;
+}
 
 /** Days in a row with any use, ending at the last one, and the longest such run. */
 export function streaks(days: string[], today: string): { current: number; longest: number } {
@@ -219,9 +239,12 @@ export function userRows(v: View, daily: Daily[], today: string, ai: Ai[] = []):
     const hours = sumRecords(mine.map((r) => r.hours));
     const night = [0, 1, 2, 3, 4].reduce((n, h) => n + (hours[`h${h}`] ?? 0), 0);
     const { current, longest } = streaks(mine.map((r) => r.day), today);
+    const lastPingAt = devs[0]?.lastSeenAt ?? null;
     return {
       ...u,
-      lastSeenAt: devs[0]?.lastSeenAt ?? null,
+      lastSeenAt: Math.max(lastPingAt ?? 0, u.lastSyncAt ?? 0) || null,
+      lastPingAt,
+      gap: usageGap(lastPingAt, u.lastSyncAt),
       opens: t.opens,
       activeDays: new Set(mine.map((r) => r.day)).size,
       activeMs: t.activeMs,

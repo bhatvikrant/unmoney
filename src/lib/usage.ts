@@ -9,7 +9,7 @@ import { useLocation } from "react-router";
 import { useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { screenKey } from "../../shared/admin";
-import { isStandalone } from "./pwa";
+import { device } from "./device";
 
 const DEVICE_KEY = "unmoney:deviceId";
 /** Back after this long away: a new session, as if opened again. */
@@ -65,18 +65,6 @@ function deviceId(): string {
   } catch {
     return "unknown";
   }
-}
-
-function device() {
-  const ua = navigator.userAgent;
-  // iPadOS asks for desktop sites, so it reads as a Mac with a touch screen
-  const iPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
-  const os = iPad || /iPhone|iPod/.test(ua) ? "iOS" : /Android/.test(ua) ? "Android" : /CrOS/.test(ua) ? "ChromeOS"
-    : /Mac OS X|Macintosh/.test(ua) ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "Other";
-  const browser = /Edg\//.test(ua) ? "Edge" : /SamsungBrowser/.test(ua) ? "Samsung" : /Firefox|FxiOS/.test(ua) ? "Firefox"
-    : /OPR\//.test(ua) ? "Opera" : /Chrome|CriOS/.test(ua) ? "Chrome" : /Safari/.test(ua) ? "Safari" : "Other";
-  const formFactor = iPad || (/Android/.test(ua) && !/Mobile/.test(ua)) ? "tablet" as const : /Mobi|iPhone/.test(ua) ? "phone" as const : "desktop" as const;
-  return { os, browser, formFactor, standalone: isStandalone() };
 }
 
 /** Counts this signed-in session and reports it while the app is open. Rendered once, inside the signed-in app. */
