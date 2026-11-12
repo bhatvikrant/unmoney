@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
+import { resetAnalytics } from "@/lib/analytics";
 import { Bookmark, CalendarClock, ChartNoAxesCombined, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Sprout, Tags, WalletCards } from "lucide-react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
@@ -48,6 +49,7 @@ export default function SettingsPage() {
     clearUnlock();
     await clearLocal();
     await signOut();
+    resetAnalytics();
   }
   /** A menu row. `under`: other pages that belong to this one, so it stays highlighted while one of them is open beside the menu. */
   const link = (icon: ReactNode, label: string, to: string, opts: { value?: string; hint?: string; under?: string[] } = {}) => {

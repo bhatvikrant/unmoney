@@ -96,6 +96,13 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  // PostHog (src/lib/analytics.ts) sends to /ingest; vercel.json passes it on in production, this does in dev
+  server: {
+    proxy: {
+      "/ingest/static": { target: "https://us-assets.i.posthog.com", changeOrigin: true, rewrite: (p) => p.replace(/^\/ingest/, "") },
+      "/ingest": { target: "https://us.i.posthog.com", changeOrigin: true, rewrite: (p) => p.replace(/^\/ingest/, "") },
+    },
+  },
   build: {
     rollupOptions: {
       output: {
@@ -105,6 +112,8 @@ export default defineConfig({
           if (!id.includes("node_modules")) return;
           if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/.test(id)) return "react";
           if (/[\\/]node_modules[\\/](convex|@convex-dev|@auth)[\\/]/.test(id)) return "convex";
+          // fetched after the first paint (src/lib/analytics.ts), and only when a PostHog key is set
+          if (/[\\/]node_modules[\\/](posthog-js|@posthog)[\\/]/.test(id)) return "posthog";
         },
       },
     },

@@ -1,7 +1,8 @@
 /**
  * /privacy — the privacy policy, outside the app shell and the sign-in gate so Google's reviewers
  * (and anyone signed out) can read it. Written to match what the code does: convex/gmail.ts,
- * shared/gmail/ai.ts, convex/account.ts, convex/sync.ts (pruneDrafts). Change it when they change.
+ * shared/gmail/ai.ts, convex/account.ts, convex/sync.ts (pruneDrafts), src/lib/analytics.ts and
+ * convex/lib/posthog.ts (PostHog). Change it when they change.
  */
 import { useEffect, type ReactNode } from "react";
 import { ChevronLeft } from "lucide-react";
@@ -12,7 +13,7 @@ import { applyTheme } from "@/lib/theme";
 
 /** Also the support and developer contact on Google's consent screen (docs/google-verification.md). */
 const CONTACT_EMAIL = "vik.bhat223@gmail.com";
-const UPDATED = "2 November 2026";
+const UPDATED = "12 November 2026";
 const USER_DATA_POLICY = "https://developers.google.com/terms/api-services-user-data-policy";
 const LIMITED_USE = "https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes";
 
@@ -77,6 +78,14 @@ export default function PrivacyPage() {
             category or merchant names. They stay in UnMoney's own database, are seen only by UnMoney's developer, and are not
             shared with anyone or used for advertising.
           </Sub>
+          <Sub title="Product analytics and crash reports">
+            UnMoney also uses PostHog to see how the app is used and to find bugs: which screens are opened, which buttons are
+            tapped, recordings of how the screens were used, and the errors the app or its server runs into. Every piece of
+            text and every field on screen is masked before it leaves your device, and photos are left out, so PostHog never
+            receives your amounts, notes, merchant, category or payment-method names, receipt photos or anything read from
+            your mail. Web addresses are sent without their search terms or filters. You are known to PostHog by an account
+            id, not your name or email. Your browser's Do Not Track setting turns this off.
+          </Sub>
         </Section>
 
         <Section title="Gmail: what is read and what is kept">
@@ -138,11 +147,12 @@ export default function PrivacyPage() {
             <li><strong className="font-medium text-foreground">Vercel</strong>: serves the web app's files. It does not receive your ledger or your mail.</li>
             <li><strong className="font-medium text-foreground">Google</strong>: sign-in, and the Gmail API if you connect Gmail.</li>
             <li><strong className="font-medium text-foreground">Anthropic</strong>: reads the mail no rule could read, as described above.</li>
+            <li><strong className="font-medium text-foreground">PostHog</strong>: product analytics and crash reports, with all text masked, as described above. It never receives your ledger or your mail.</li>
           </ul>
           <p className="mt-3">
             Your data could also be disclosed if the law requires it, or passed to a new owner if UnMoney were ever sold or
-            merged, in which case you would be told first. There are no ads and no third-party analytics or tracking in the app; the
-            usage counts described above are UnMoney's own and never leave its database.
+            merged, in which case you would be told first. There are no ads in the app, and nothing is shared for advertising or
+            tracking across other sites. The usage counts described above are UnMoney's own and never leave its database.
           </p>
         </Section>
 
@@ -153,6 +163,7 @@ export default function PrivacyPage() {
             <li>The encrypted Gmail token and connection settings: until you disconnect Gmail or delete your account.</li>
             <li>Your entries (including ones saved from Gmail), and the rest of your ledger: until you delete them or your account.</li>
             <li>Usage counts: each app session for 120 days; the daily totals made from them until you delete your account.</li>
+            <li>PostHog analytics, recordings and crash reports: up to one year, then deleted by PostHog.</li>
           </ul>
         </Section>
 

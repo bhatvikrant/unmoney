@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { toast } from "sonner";
+import { resetAnalytics } from "@/lib/analytics";
 import { api } from "../../../convex/_generated/api";
 import { useStore } from "@/lib/store";
 import { backupExport } from "../../../shared/views";
@@ -28,6 +29,7 @@ export function DeleteAccountRow() {
       clearUnlock();
       await clearLocal();
       await signOut();
+      resetAnalytics();
       toast.success("Your account and all its data are being deleted.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not delete the account");

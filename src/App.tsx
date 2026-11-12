@@ -16,6 +16,7 @@ import { useMediaQuery, WIDE } from "@/lib/media";
 import TransactionEditor from "@/pages/transactions/TransactionEditor";
 import { SplitLayout } from "@/components/shell/SplitLayout";
 import { useUsageTracking } from "@/lib/usage";
+import { identifyUser } from "@/lib/analytics";
 import { isSuperadmin } from "../shared/admin";
 
 // Only the ledger, the entry form and the shell load with the app. Every other screen is fetched the
@@ -152,10 +153,11 @@ function usePasscodeLock(settings: ReturnType<typeof settingsOf>) {
 }
 
 function Gate() {
-  const { view, user } = useStore();
+  const { view, user, userId } = useStore();
   const settings = settingsOf(view);
   const lock = usePasscodeLock(settings);
   useUsageTracking();
+  useEffect(() => { if (userId) identifyUser(userId); }, [userId]);
   // the other tabs' code, once the ledger has had a moment to settle, so the first tap on them is instant
   useEffect(() => {
     const t = setTimeout(() => { void loadStats(); void loadAccounts(); void loadSettings(); }, 1500);
