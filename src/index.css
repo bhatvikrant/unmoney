@@ -209,3 +209,8 @@ nav { user-select: none; }
 .tabular { font-variant-numeric: tabular-nums; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
+/* the bar along the top while a screen's code downloads (ScreenLoadingBar in App.tsx) */
+@keyframes screen-loading {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentType } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigationType } from "react-router";
 import { useConvexAuth } from "@convex-dev/auth/react";
 import { AppDataProvider } from "@/lib/app";
@@ -18,6 +18,8 @@ import { SplitLayout } from "@/components/shell/SplitLayout";
 import { useUsageTracking } from "@/lib/usage";
 import { identifyUser } from "@/lib/analytics";
 import { isSuperadmin } from "../shared/admin";
+import { Logo } from "@/components/shell/Logo";
+import { cn } from "@/lib/utils";
 
 // Only the ledger, the entry form and the shell load with the app. Every other screen is fetched the
 // first time it is opened (from the service worker's cache once installed), so a cold start parses a
@@ -29,12 +31,46 @@ import { isSuperadmin } from "../shared/admin";
  */
 function screen<T extends ComponentType<object>>(load: () => Promise<{ default: T }>) {
   const RETRIED = "unmoney:chunkRetried";
-  return lazy(() => load().then((m) => { sessionStorage.removeItem(RETRIED); return m; }, (e: unknown) => {
+  return lazy(() => screenLoading.track(load()).then((m) => { sessionStorage.removeItem(RETRIED); return m; }, (e: unknown) => {
     if (sessionStorage.getItem(RETRIED)) throw e;
     sessionStorage.setItem(RETRIED, "1");
     window.location.reload();
     return new Promise<{ default: T }>(() => {});
   }));
+}
+
+/**
+ * How many screens' code is on its way. Opening a screen is a transition, which keeps the current
+ * screen up while the next one's code arrives: on a slow connection a tap would otherwise look dead
+ * for seconds. ScreenLoadingBar shows while this is above zero. The prefetch below isn't counted.
+ */
+const screenLoading = (() => {
+  let count = 0;
+  const listeners = new Set<() => void>();
+  // a lazy screen starts loading while React renders it: tell the bar afterwards, not mid-render
+  const change = (d: number) => { count += d; queueMicrotask(() => listeners.forEach((l) => l())); };
+  return {
+    track<T>(p: Promise<T>): Promise<T> { change(1); return p.finally(() => change(-1)); },
+    subscribe(l: () => void) { listeners.add(l); return () => { listeners.delete(l); }; },
+    busy: () => count > 0,
+  };
+})();
+
+/** A thin bar along the top while a screen's code downloads, after a moment so a fast load never shows it. */
+function ScreenLoadingBar() {
+  const busy = useSyncExternalStore(screenLoading.subscribe, screenLoading.busy);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!busy) return;
+    const t = setTimeout(() => setShown(true), 250);
+    return () => { clearTimeout(t); setShown(false); };
+  }, [busy]);
+  if (!busy || !shown) return null;
+  return (
+    <div role="progressbar" aria-label="Loading" className="fixed inset-x-0 top-0 z-[100] h-[3px] overflow-hidden">
+      <div className="h-full w-1/3 bg-primary animate-[screen-loading_1s_ease-in-out_infinite] motion-reduce:w-full motion-reduce:animate-none motion-reduce:opacity-60" />
+    </div>
+  );
 }
 
 const loadStats = () => import("@/pages/stats/StatsPage");
@@ -79,18 +115,35 @@ const PrivacyPage = screen(() => import("@/pages/legal/PrivacyPage"));
 // Its own chunk (AdminPage-*.js), left out of the service worker's precache (vite.config.ts): only the superadmin ever downloads it.
 const AdminPage = screen(() => import("@/pages/admin/AdminPage"));
 
+/** When the mark fades in, counted from the start of the page load: the same 300 ms as index.html's boot screen. */
+const MARK_AT_MS = 300;
+
 /**
  * Shown while there is nothing to show yet. The text waits a moment: a warm start is over before it
  * could be read, and a flash of "Loading…" between the splash and the ledger reads as a stutter.
+ * The mark is index.html's boot screen carried on, in the same place: on a slow first load the app
+ * mark stays up from the first paint until the first screen, instead of going blank in between.
  */
 function Splash({ text = "Loading…", delay = 400 }: { text?: string; delay?: number }) {
   const [show, setShow] = useState(!delay);
+  // still before the boot screen's mark appeared: fade in when it would have; after that, it is already up
+  const [fadeIn] = useState(() => { const left = MARK_AT_MS - performance.now(); return left > 0 ? left : null; });
   useEffect(() => {
     if (!delay) return;
     const t = setTimeout(() => setShow(true), delay);
     return () => clearTimeout(t);
   }, [delay]);
-  return <div className="min-h-dvh flex items-center justify-center text-sm text-muted-foreground">{show ? text : null}</div>;
+  return (
+    <div className="min-h-dvh flex items-center justify-center">
+      <div className="relative">
+        {/* boot-in: the keyframes in index.html */}
+        <span className={cn("block", fadeIn !== null && "animate-[boot-in_200ms_ease-out_both]")} style={fadeIn !== null ? { animationDelay: `${fadeIn}ms` } : undefined}>
+          <Logo wordmark={false} size={56} />
+        </span>
+        <p className="absolute left-1/2 top-full mt-4 w-72 -translate-x-1/2 text-center text-sm text-muted-foreground">{show ? text : null}</p>
+      </div>
+    </div>
+  );
 }
 
 /** First load on this device needs the server once; after that the local copy is used. */
@@ -244,6 +297,7 @@ export default function App() {
   return (
     <>
       <ScrollToTop />
+      <ScreenLoadingBar />
       <Suspense fallback={<Splash />}>
         <Screens />
       </Suspense>
