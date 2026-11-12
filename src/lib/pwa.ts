@@ -6,6 +6,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { registerSW } from "virtual:pwa-register";
 import { toast } from "sonner";
+import { isStandalone } from "./device";
 
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 
@@ -17,9 +18,7 @@ let installed = false;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
-export function isStandalone() {
-  return window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-}
+export { isStandalone };
 
 export function isIOS() {
   const ua = navigator.userAgent;

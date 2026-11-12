@@ -27,7 +27,11 @@ export const overview = query({
   args: { from: v.string(), to: v.string() },
   handler: async (ctx, { from, to }) => {
     await requireSuperadmin(ctx);
-    const users = (await ctx.db.query("users").collect()).map((u) => ({ id: u._id, name: u.name ?? null, email: u.email ?? null, image: u.image ?? null, joinedAt: u._creationTime }));
+    const users = await Promise.all((await ctx.db.query("users").collect()).map(async (u) => {
+      // the last change the user's app saved: seen even by a build too old to report usage
+      const op = await ctx.db.query("syncOps").withIndex("by_user", (q) => q.eq("userId", u._id)).order("desc").first();
+      return { id: u._id, name: u.name ?? null, email: u.email ?? null, image: u.image ?? null, joinedAt: u._creationTime, lastSyncAt: op?._creationTime ?? null };
+    }));
     const devices = (await ctx.db.query("usageDevices").collect()).map(({ _id, _creationTime, ...d }) => d);
     const daily = (await ctx.db.query("usageDaily").withIndex("by_day", (q) => q.gte("day", from).lte("day", to)).take(DAILY_LIMIT + 1))
       .map(({ _id, _creationTime, ...d }) => d);

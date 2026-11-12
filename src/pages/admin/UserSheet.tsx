@@ -1,13 +1,14 @@
 /** One user on the superadmin dashboard: their use over the period, devices, what they store, latest sessions. */
 import { useQuery } from "convex/react";
 import { formatDistanceToNowStrict } from "date-fns";
+import { TriangleAlert } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { Avatar } from "@/components/shell/Avatar";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BarList, DayChart, SLOT, Tile } from "./charts";
-import { addDays, aiTotals, daySeries, fmtBytes, fmtDuration, fmtNum, fmtUsd, inRange, photoBytes, storageOf, streaks, totals, type Overview } from "./metrics";
+import { addDays, aiTotals, daySeries, fmtBytes, fmtDuration, fmtNum, fmtUsd, inRange, photoBytes, storageOf, streaks, totals, usageGap, type Overview } from "./metrics";
 
 const FEATURE_LABELS: Record<string, string> = {
   budgets: "Budgets", repeats: "Repeats", installments: "Installments", bookmarks: "Bookmarks", notes: "Notes", subCurrencies: "Sub-currencies",
@@ -41,6 +42,7 @@ function Body({ user, data, today, days }: { user: Overview["users"][number]; da
   const series = daySeries(view, from, today);
   const allDays = data.daily.filter((r) => r.userId === user.id).map((r) => r.day);
   const streak = streaks(allDays, today);
+  const gap = usageGap(devices[0]?.lastSeenAt ?? null, user.lastSyncAt);
   const features = stats ? Object.entries(stats.features).filter(([k, on]) => on && FEATURE_LABELS[k]).map(([k]) => FEATURE_LABELS[k]) : [];
   return (
     <>
@@ -56,6 +58,15 @@ function Body({ user, data, today, days }: { user: Overview["users"][number]; da
         </div>
       </SheetHeader>
       <div className="space-y-5 px-4 pb-8">
+        {gap && user.lastSyncAt ? (
+          <div className="flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+            <div>
+              <div className="font-medium">{gap === "none" ? "No usage reported" : "Usage stopped reporting"} · last synced {formatDistanceToNowStrict(user.lastSyncAt, { addSuffix: true })}</div>
+              <div className="text-muted-foreground">Their app still saves changes but {gap === "none" ? "has never sent" : "no longer sends"} usage counts, most likely an installed copy stuck on an older version. Opens and time here are not real.</div>
+            </div>
+          </div>
+        ) : null}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <Tile small label="Opens" value={fmtNum(t.opens)} sub={`${t.userDays} active days`} />
           <Tile small label="Time in app" value={fmtDuration(t.activeMs)} sub={t.opens ? `${fmtDuration(t.activeMs / t.opens)} a session` : undefined} />
