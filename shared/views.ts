@@ -599,6 +599,22 @@ export function budgetStatus(snap: Snapshot, period: Doc<"budgets">["period"], k
 }
 
 /**
+ * The entries one budget counts between `from` and `to`, newest first, chosen the way budgetStatus
+ * counts its spending: whatever counts as an expense, and with `categoryId` only those in that main
+ * category or one of its subcategories. Their expense amounts add up to that budget's `spent`.
+ */
+export function budgetEntries(snap: Snapshot, categoryId: string | undefined, from: string, to: string): Doc<"transactions">[] {
+  const ledger = ledgerOf(snap);
+  const parentOf = new Map(snap.categories.filter((c) => c.type === "expense").map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
+  return snap.transactions
+    .filter((t) => {
+      if (t.date < from || t.date > to || !kindsOf(t, ledger).expense) return false;
+      return !categoryId || (!!t.categoryId && (parentOf.get(t.categoryId) ?? t.categoryId) === categoryId);
+    })
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b._creationTime - a._creationTime));
+}
+
+/**
  * What went out per `period` on average over the `months` whole months before today's, in one main
  * category (or in all, without one), counted the way budgetStatus counts it. Months before the first
  * entry are left out so a new ledger isn't averaged down; null when no earlier month has any entries.
