@@ -98,7 +98,8 @@ export default function BudgetPage() {
         {status && !status.total && !status.perCategory.length ? <EmptyState title={`No ${label.toLowerCase()} budgets`} hint="Set a total budget or one per category. The bar fills as you spend; the marker shows where today falls." action={<Button onClick={() => nav(`/budget/settings?period=${period}`)}>Set a budget</Button>} /> : null}
       </Page>
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="max-h-[85dvh] grid-rows-[auto_auto_auto_minmax(0,1fr)]">
+        {/* not focusing the chart on open: that would pin a tooltip over its first bar */}
+        <DialogContent className="max-h-[85dvh] grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()}>
           <DialogHeader><DialogTitle>{detail?.label}</DialogTitle></DialogHeader>
           {trend && detail ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} limit={detail.item.limit} limits={limits}
             selected={picked} onPick={(i) => patch({ bar: ranges[i]?.key ?? null })} /> : <div className="h-48" />}
