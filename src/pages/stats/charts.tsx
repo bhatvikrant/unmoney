@@ -64,15 +64,17 @@ export function CategoryPie({ items: all }: { items: { id: string; name: string;
 
 const barConfig = { major: { label: "Amount" } } satisfies ChartConfig;
 
-/** `onPick`: tapping a bar opens that period. */
+/** `onPick`: tapping a bar (anywhere in its column, so a tiny bar is still easy to hit) opens that period. */
 /** `limit` draws the dashed line; `limits` (one per bar, else `limit`) decides which bars are over. */
-export function TrendBars({ data, color = "var(--expense)", limit, limits, onPick }: { data: { label: string; amount: number }[]; color?: string; limit?: number; limits?: number[]; onPick?: (index: number) => void }) {
+/** `selected`: the bar being looked at; the others are dimmed. */
+export function TrendBars({ data, color = "var(--expense)", limit, limits, onPick, selected }: { data: { label: string; amount: number }[]; color?: string; limit?: number; limits?: number[]; onPick?: (index: number) => void; selected?: number }) {
   const { fmt, settings } = useApp();
   const rows = data.map((d, i) => ({ ...d, major: toMajor(d.amount, settings.decimals), limit: limits?.[i] ?? limit }));
   const fillFor = (d: { amount: number; limit?: number }) => (d.limit === undefined ? color : d.amount > d.limit ? "var(--expense)" : "var(--income)");
   return (
     <ChartContainer config={barConfig} className="h-48 w-full">
-      <BarChart accessibilityLayer data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%">
+      <BarChart accessibilityLayer data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%"
+        onClick={onPick ? (st) => { const i = Number(st?.activeTooltipIndex); if (Number.isInteger(i) && i >= 0 && i < rows.length) onPick(i); } : undefined} className={onPick ? "cursor-pointer" : undefined}>
         <CartesianGrid vertical={false} />
         <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={16} />
         <YAxis tickLine={false} axisLine={false} width={40} tickFormatter={axisTick} />
@@ -80,9 +82,8 @@ export function TrendBars({ data, color = "var(--expense)", limit, limits, onPic
         {limit !== undefined ? (
           <ReferenceLine y={toMajor(limit, settings.decimals)} stroke="var(--muted-foreground)" strokeDasharray="4 4" ifOverflow="extendDomain" />
         ) : null}
-        <Bar dataKey="major" fill={color} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false}
-          onClick={onPick ? (_d, i) => onPick(i) : undefined} className={onPick ? "cursor-pointer" : undefined}>
-          {limit !== undefined ? rows.map((d, i) => <Cell key={i} fill={fillFor(d)} />) : null}
+        <Bar dataKey="major" fill={color} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false}>
+          {limit !== undefined || selected !== undefined ? rows.map((d, i) => <Cell key={i} fill={limit !== undefined ? fillFor(d) : color} fillOpacity={selected === undefined || selected === i ? 1 : 0.35} />) : null}
         </Bar>
       </BarChart>
     </ChartContainer>
