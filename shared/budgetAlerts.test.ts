@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "./ops";
-import { budgetAverage, budgetCrossings, budgetImpact, budgetLevel, budgetStatus, budgetsAt, budgetsForCategory, currentBudgetLevels } from "./views";
+import { budgetAverage, budgetCrossings, budgetEntries, budgetImpact, budgetLevel, budgetStatus, budgetsAt, budgetsForCategory, currentBudgetLevels } from "./views";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -159,4 +159,18 @@ test("pending expenses are counted against the ledger as it is now, not as an ea
   // a new entry that month leaves less
   expect(budgetImpact(spend(base, "2026-10-01", 50000), pending)[0].after).toBe(40000);
   expect(budgetImpact(base, pending)[0].after).toBe(90000);
+});
+
+test("a budget's entries are the ones its spending counts", () => {
+  const { s: base, food, spend } = ledger();
+  let s = spend(base, "2026-10-03", 20000);
+  s = spend(s, "2026-10-20", 5000);
+  s = spend(s, "2026-09-30", 7000);
+  const other = s.categories.find((c) => c.type === "expense" && c._id !== food && !c.parentId)!._id;
+  s = run(s, "transactions.create", { type: "expense", date: "2026-10-05", accountId: s.accounts[0]._id, categoryId: other, amount: 900, note: "", tags: [], photoIds: [] }).snap;
+  const { from, to } = budgetStatus(s, "monthly", "2026-10")!.range;
+  const food10 = budgetEntries(s, food, from, to);
+  expect(food10.map((t) => t.amount)).toEqual([5000, 20000]);
+  expect(food10.reduce((n, t) => n + t.amount, 0)).toBe(budgetStatus(s, "monthly", "2026-10")!.perCategory[0].spent);
+  expect(budgetEntries(s, undefined, from, to)).toHaveLength(3);
 });
