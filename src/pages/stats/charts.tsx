@@ -4,6 +4,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } f
 import { useApp } from "@/lib/app";
 import { toMajor } from "../../../shared/money";
 import { colorAt, colouredCount } from "@/lib/theme";
+import { cn } from "@/lib/utils";
 
 export { colorAt, colouredCount, SERIES_SLOTS } from "@/lib/theme";
 
@@ -64,6 +65,16 @@ export function CategoryPie({ items: all }: { items: { id: string; name: string;
 
 const barConfig = { major: { label: "Amount" } } satisfies ChartConfig;
 
+/**
+ * The column under a tap, from where it landed in the plot area. Not the chart's own active index:
+ * on a touch screen the click arrives before the tooltip moves, so that index is the previous column.
+ */
+function pickColumn(e: React.MouseEvent<HTMLElement>, n: number, onPick: (index: number) => void) {
+  const plot = e.currentTarget.querySelector(".recharts-cartesian-grid")?.getBoundingClientRect();
+  if (!plot || !plot.width || e.clientX < plot.left || e.clientX > plot.right) return;
+  onPick(Math.min(n - 1, Math.floor(((e.clientX - plot.left) / plot.width) * n)));
+}
+
 /** `onPick`: tapping a bar (anywhere in its column, so a tiny bar is still easy to hit) opens that period. */
 /** `limit` draws the dashed line; `limits` (one per bar, else `limit`) decides which bars are over. */
 /** `selected`: the bar being looked at; the others are dimmed. */
@@ -72,9 +83,8 @@ export function TrendBars({ data, color = "var(--expense)", limit, limits, onPic
   const rows = data.map((d, i) => ({ ...d, major: toMajor(d.amount, settings.decimals), limit: limits?.[i] ?? limit }));
   const fillFor = (d: { amount: number; limit?: number }) => (d.limit === undefined ? color : d.amount > d.limit ? "var(--expense)" : "var(--income)");
   return (
-    <ChartContainer config={barConfig} className="h-48 w-full">
-      <BarChart accessibilityLayer data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%"
-        onClick={onPick ? (st) => { const i = Number(st?.activeTooltipIndex); if (Number.isInteger(i) && i >= 0 && i < rows.length) onPick(i); } : undefined} className={onPick ? "cursor-pointer" : undefined}>
+    <ChartContainer config={barConfig} className={cn("h-48 w-full", onPick && "cursor-pointer")} onClick={onPick ? (e) => pickColumn(e, rows.length, onPick) : undefined}>
+      <BarChart accessibilityLayer data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%">
         <CartesianGrid vertical={false} />
         <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={16} />
         <YAxis tickLine={false} axisLine={false} width={40} tickFormatter={axisTick} />
