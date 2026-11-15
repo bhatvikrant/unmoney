@@ -18,6 +18,7 @@ import {
   TABLES, applyOp, emptySnapshot, isTmpId, rewriteIds, tmpIdsIn, type Op, type OpArgs, type OpKind, type OpResult, type Snapshot, type Table,
 } from "../../shared/ops";
 import { applyChanges } from "../../shared/changes";
+import { viewOf, type Landed } from "./replay";
 import * as local from "./db";
 import { SHARE_CACHE } from "./share";
 import { clearSafetyCopies } from "./safetyCopy";
@@ -109,7 +110,6 @@ async function loadEverything(convex: ConvexReactClient): Promise<{ rev: number;
   return { rev, snapshot };
 }
 
-/** The base snapshot with every queued op replayed on top. Ops that no longer apply are skipped. */
 /** How long the websocket may be down before it counts as offline: covers the connect on open and quick reconnects. */
 const OFFLINE_GRACE_MS = 4000;
 
@@ -132,29 +132,6 @@ function useOffline(connected: boolean): boolean {
   return !connected && (!online || stale);
 }
 
-/**
- * The last replay. When the same queue has only grown since (another change made while earlier
- * ones wait to sync, an import's chunks), only the new ops are applied on top of it, instead of
- * every queued op from the base again.
- */
-let lastReplay: { base: Snapshot; ops: QueuedOp[]; idMap: Record<string, string>; userId: string; snap: Snapshot } | null = null;
-
-function replay(base: Snapshot, ops: QueuedOp[], idMap: Record<string, string>, userId: string): Snapshot {
-  const prev = lastReplay;
-  const grown = !!prev && prev.base === base && prev.idMap === idMap && prev.userId === userId && prev.ops.length <= ops.length && prev.ops.every((op, i) => op === ops[i]);
-  let snap = grown ? prev.snap : base;
-  for (const op of grown ? ops.slice(prev.ops.length) : ops) {
-    if (op.kind === "files.upload") continue;
-    try {
-      snap = applyOp(snap, { ...op, args: rewriteIds(op.args, idMap) }, { userId: userId as Id<"users"> }).snap;
-    } catch {
-      // the server will reject it too; leave the view consistent
-    }
-  }
-  lastReplay = { base, ops, idMap, userId, snap };
-  return snap;
-}
-
 export function OfflineProvider({ children }: { children: ReactNode }) {
   const convex = useConvex();
   const conn = useConvexConnectionState();
@@ -168,6 +145,15 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const [syncing, setSyncing] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [blobUrls, setBlobUrls] = useState<Record<string, string>>({});
+  /** Queued ops the server has applied, waiting for what they wrote to arrive (replay.ts): replayed only until it has. */
+  const [landed, setLanded] = useState<Landed>(() => new Map());
+  const landedRef = useRef(landed);
+  /**
+   * A batch is with the server. Convex can bring what it wrote through `changes` before the mutation
+   * returns, and until it returns nothing says which queued ops that arrival holds: replayed on top of
+   * it, they would count twice. So changes that come meanwhile wait, and land together with `landed`.
+   */
+  const [sending, setSending] = useState(false);
 
   const opsRef = useRef<QueuedOp[]>([]);
   const metaRef = useRef(meta);
@@ -347,11 +333,11 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const following = ready && me != null && !!base && meta.rev !== null && meta.userId === me.userId && !reload;
   const changes = useQuery(api.sync.changes, following ? { since: meta.rev! } : "skip");
   useEffect(() => { if (changes) usage.down(changes); }, [changes]);
-  const merged = useMemo(() => (base && following && changes && changes.rev > (meta.rev ?? 0) ? applyChanges(base, changes) : base), [base, following, changes, meta.rev]);
+  const merged = useMemo(() => (base && following && !sending && changes && changes.rev > (meta.rev ?? 0) ? applyChanges(base, changes) : base), [base, following, sending, changes, meta.rev]);
   /** The user whose copy has caught up with the server in this session. */
   const [caughtUpFor, setCaughtUpFor] = useState<string | null>(null);
   useEffect(() => {
-    if (!following || !changes || !merged) return;
+    if (!following || sending || !changes || !merged) return;
     if (changes.reset) {
       setReload(true);
       setCaughtUpFor(null);
@@ -371,7 +357,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     metaRef.current = next;
     setMeta(next);
     for (const check of [...arrivals.current]) check();
-  }, [following, changes, merged, base, queueWrite]);
+  }, [following, sending, changes, merged, base, queueWrite]);
   /** Resolves once the copy is up to change number `rev` (or after a while regardless). */
   const arrived = useCallback((rev: number) => new Promise<void>((resolve) => {
     const done = () => { clearTimeout(timer); arrivals.current.delete(check); resolve(); };
@@ -386,14 +372,23 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   connectedRef.current = conn.isWebSocketConnected;
 
   const effectiveBase = merged;
-  const view = useMemo(() => (effectiveBase ? replay(effectiveBase, ops, meta.idMap, meta.userId ?? "") : emptySnapshot()), [effectiveBase, ops, meta.idMap, meta.userId]);
+  /** The change number the copy on screen is at: `merged` is ahead of meta.rev for the render before the effect above moves it on. */
+  const baseRev = following && !sending && changes && changes.rev > (meta.rev ?? 0) ? changes.rev : meta.rev;
+  const view = useMemo(() => (effectiveBase ? viewOf(effectiveBase, baseRev, ops, meta.idMap, landed, meta.userId ?? "") : emptySnapshot()), [effectiveBase, baseRev, ops, meta.idMap, landed, meta.userId]);
   viewRef.current = view;
 
   // ---- queue ----
+  const setLandedTo = useCallback((next: Landed) => {
+    landedRef.current = next;
+    setLanded(next);
+  }, []);
   const setQueue = useCallback((next: QueuedOp[]) => {
     opsRef.current = next;
     setOps(next);
-  }, []);
+    // an op that left the queue is no longer replayed, so its landing need not be kept
+    const keep = new Set(next.map((o) => o.id));
+    if ([...landedRef.current.keys()].some((id) => !keep.has(id))) setLandedTo(new Map([...landedRef.current].filter(([id]) => keep.has(id))));
+  }, [setLandedTo]);
 
   const mergeIdMap = useCallback(async (extra: Record<string, string>) => {
     if (!Object.keys(extra).length) return;
@@ -405,11 +400,13 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   const effectiveBaseRef = useRef<Snapshot | null>(null);
   effectiveBaseRef.current = effectiveBase;
+  const baseRevRef = useRef(baseRev);
+  baseRevRef.current = baseRev;
 
   const dispatchTracked = useCallback(async <K extends OpKind>(kind: K, args: OpArgs<K>): Promise<{ id: string; result: OpResult<K> }> => {
     const op: Op = { id: uuid(), kind, args, at: Date.now() };
     const userId = metaRef.current.userId ?? "";
-    const current = replay(effectiveBaseRef.current ?? emptySnapshot(), opsRef.current, metaRef.current.idMap, userId);
+    const current = viewOf(effectiveBaseRef.current ?? emptySnapshot(), baseRevRef.current, opsRef.current, metaRef.current.idMap, landedRef.current, userId);
     const { result } = applyOp(current, { ...op, args: rewriteIds(args, metaRef.current.idMap) }, { userId: userId as Id<"users"> });
     const seq = await local.addOp(op);
     setQueue([...opsRef.current, { ...op, seq }]);
@@ -502,8 +499,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         try {
           usage.up(sent);
           usage.ops(sent.length);
+          setSending(true);
           results = await convex.mutation(api.sync.apply, { ops: sent });
         } catch (e) {
+          setSending(false);
           if (isAuthError(e)) break;
           if (batch.length > 1) { limit = 1; continue; }
           const tries = attempts.current.get(first.id) ?? 0;
@@ -519,6 +518,11 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         }
         limit = BATCH;
         for (const b of batch) attempts.current.delete(b.id);
+        // from the moment the copy holds what an op wrote, it is not replayed on top of it as well (replay.ts)
+        const applied = results.filter((r) => r.status === "applied" && batch.some((b) => b.id === r.id));
+        if (applied.length) setLandedTo(new Map([...landedRef.current, ...applied.map((r) => [r.id, { rev: "rev" in r ? r.rev : Infinity, idMap: r.status === "applied" ? r.idMap : {} }] as const)]));
+        // in the same render as `landed`: what arrived meanwhile goes in now, without these ops on top
+        setSending(false);
         // what the batch wrote comes back through `changes`: once it is in the copy, the ops can leave the queue without a flicker
         await arrived(Math.max(0, ...results.map((r) => ("rev" in r ? r.rev : 0))));
         const idMap: Record<string, string> = {};
@@ -547,9 +551,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       pumping.current = false;
+      setSending(false);
       setSyncing(false);
     }
-  }, [convex, mergeIdMap, setQueue, settle, arrived]);
+  }, [convex, mergeIdMap, setQueue, setLandedTo, settle, arrived]);
   const pumpRef = useRef(pump);
   pumpRef.current = pump;
   useEffect(() => () => {
