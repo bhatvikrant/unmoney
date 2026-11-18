@@ -23,6 +23,18 @@ test("finds a receipt on a table, past its printed lines and the table's glare",
   expect(box.w).toBeLessThan(80);
 });
 
+test("glare on the table touching the receipt doesn't hide it (as Safari renders the Noida bill)", () => {
+  // the glare reaches the paper's corner, so at a lower cut-off the two are one blob, too ragged to be a sheet
+  const lum = grid(150, 200, [[0, 0, 60, 60, 200], [60, 0, 150, 20, 195], ...receipt(40, 40, 95, 195)]);
+  const box = paperBox(lum, 150, 200)!;
+  // the crop leaves the glare out (it starts at 0,0) and keeps the whole receipt
+  expect(box.x).toBeGreaterThan(20);
+  expect(box.y).toBeGreaterThan(20);
+  expect(box.w).toBeLessThan(80);
+  expect(box.x + box.w).toBeGreaterThanOrEqual(95);
+  expect(box.y + box.h).toBeGreaterThanOrEqual(195);
+});
+
 test("nothing to crop when the paper fills the photo", () => {
   expect(paperBox(grid(100, 100, receipt(0, 0, 100, 100)), 100, 100)).toBeNull();
 });
