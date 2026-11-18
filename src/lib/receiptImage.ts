@@ -32,13 +32,19 @@ function otsu(lum: ArrayLike<number>, from = 0): number {
  * isn't solid like paper (a dark-mode screenshot's text).
  */
 export function paperBox(lum: ArrayLike<number>, w: number, h: number): Box | null {
-  // Paper is the brightest thing in the frame, but a shiny table has bright patches of its own: split the
-  // bright half again, and take the brightest group when there's enough of it to be a receipt.
+  // Paper is the brightest thing in the frame, but a shiny table has bright patches of its own, and where
+  // its glare touches the paper the two make one blob that isn't solid like a sheet. So the cut-off starts
+  // where the bright half splits again and is raised step by step: the glare drops out before the paper does.
   const t1 = otsu(lum);
   const t2 = otsu(lum, t1);
-  let above = 0;
-  for (let i = 0; i < lum.length; i++) if (lum[i] > t2) above++;
-  return findPaper(lum, w, h, above >= w * h * 0.03 ? t2 : t1) ?? (above >= w * h * 0.03 ? findPaper(lum, w, h, t1) : null);
+  for (let t = t2; t < 250; t += 6) {
+    let above = 0;
+    for (let i = 0; i < lum.length; i++) if (lum[i] > t) above++;
+    if (above < w * h * 0.03) break; // too little left to be a receipt
+    const box = findPaper(lum, w, h, t);
+    if (box) return box;
+  }
+  return findPaper(lum, w, h, t1);
 }
 
 function findPaper(lum: ArrayLike<number>, w: number, h: number, t: number): Box | null {
