@@ -111,7 +111,7 @@ export default defineConfig({
         // React and Convex only change when they are upgraded: in chunks of their own they stay in the
         // service worker's cache across deploys, so an update downloads the app's code and little else.
         manualChunks(id) {
-          if (/[\\/]src[\\/]lib[\\/](ocr|receiptAmount)\.ts$/.test(id) || /[\\/]node_modules[\\/](tesseract\.js|idb-keyval|wasm-feature-detect|is-url|regenerator-runtime|bmp-js|zlibjs)[\\/]/.test(id)) return "ocr";
+          if (/[\\/]src[\\/]lib[\\/](ocr|receiptAmount|receiptImage)\.ts$/.test(id) || /[\\/]node_modules[\\/](tesseract\.js|idb-keyval|wasm-feature-detect|is-url|regenerator-runtime|bmp-js|zlibjs)[\\/]/.test(id)) return "ocr";
           if (!id.includes("node_modules")) return;
           if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/.test(id)) return "react";
           if (/[\\/]node_modules[\\/](convex|@convex-dev|@auth)[\\/]/.test(id)) return "convex";

@@ -13,7 +13,7 @@ describe("parseAmount", () => {
     ["12,5", 12.5], ["Rs.500", 500], ["500/-", 500], ["$9.99", 9.99], ["1,234", 1234],
   ])("%s → %s", (word, n) => expect(parseAmount(word)).toBe(n));
 
-  test.each(["abc", "12:30", "1,234,56", "1.234.5,6,7", "0", "0.00", "9876543210", "1,2345", "12/11/2026", "450.", "000086"])("%s is not an amount", (word) => {
+  test.each(["abc", "12:30", "1,234,56", "1.234.5,6,7", "0", "0.00", "9876543210", "1,2345", "12/11/2026", "450.", "000086", "5.000", "2.000"])("%s is not an amount", (word) => {
     expect(parseAmount(word)).toBeNull();
   });
 });
@@ -98,6 +98,16 @@ describe("pickAmount", () => {
     expect(pickAmount([line("Tea 1 450.00"), mid("PAYTM 500.00")])).toBeNull();
     // too unsure to count at all
     expect(pickAmount([line("SUB_TOT 500.00"), { height: 20, words: [{ text: "PAYTM", confidence: 90 }, { text: "500.00", confidence: 40 }] }])).toBeNull();
+  });
+
+  test("a quantity misread as money on a receipt is not a payment screenshot's amount (the Noida bill tilted 3°)", () => {
+    const qty: OcrLine = { height: 40, words: [{ text: "m=", confidence: 62 }, { text: "4", confidence: 67 }, { text: "50.00", confidence: 94, money: true }] };
+    expect(pickAmount([
+      line("HAZAL.NUT.L 130.00", 40), line("PEACH.TEAL 180.00", 40), line("SUB_TOT 19.00?", 40), qty, line("TOTAL 6ST 23.82", 40),
+    ])).toBeNull();
+    // even when the misread is the largest number on the page, prices the same size mean it is not a screenshot
+    const big = { ...qty, words: [{ text: "§", confidence: 62 }, { text: "5000.00", confidence: 94, money: true }] };
+    expect(pickAmount([line("HAZAL.NUT.L 130.00", 40), line("PEACH.TEAL 180.00", 40), big])).toBeNull();
   });
 
   test("cash handed over is not the amount paid", () => {
