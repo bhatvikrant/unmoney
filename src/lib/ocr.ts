@@ -5,6 +5,7 @@
  * engine can't load (offline on first use) or the amount isn't clear, the answer is null.
  */
 import type { Bbox, Worker, Word } from "tesseract.js";
+import { prepareForOcr } from "./receiptImage";
 import { MIN_WORD_CONFIDENCE, parseAmount, pickAmount, type OcrLine, type OcrWord } from "./receiptAmount";
 
 let worker: Promise<Worker> | null = null;
@@ -12,7 +13,7 @@ let worker: Promise<Worker> | null = null;
 const IDLE_MS = 60_000;
 let idle: ReturnType<typeof setTimeout> | undefined;
 /** Second reads are a fraction of a second each; a long receipt doesn't get more than this many. */
-const MAX_REREADS = 8;
+const MAX_REREADS = 10;
 
 function getWorker(): Promise<Worker> {
   worker ??= import("tesseract.js").then(({ createWorker }) => createWorker("eng")).catch((e) => {
@@ -23,6 +24,12 @@ function getWorker(): Promise<Worker> {
 }
 
 const width = (b: Bbox) => b.x1 - b.x0;
+/**
+ * A number as it may have been meant: without the sign in front that OCR made something else of, and with a
+ * decimal point that thermal print turned into a dash ("500-00"). Only good for picking what to read again:
+ * the second read, digits only, has to come out the same.
+ */
+const loosely = (text: string) => text.replace(/^\D+/, "").replace(/(\d)[-~](\d{2})$/, "$1.$2");
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
 /**
@@ -42,11 +49,11 @@ function digitsStart(w: Word): { left: number; sign: boolean } | null {
 
 /**
  * A number OCR was unsure of is read a second time, digits only, from just its digits. Only when both reads
- * agree, and the second is confident, does it count as confident: two independent readings of the same pixels.
+ * agree does the number count, at the better of the two confidences; pickAmount decides whether that's enough.
  */
 async function reread(w: Worker, image: Blob, word: Word): Promise<OcrWord | null> {
   const start = digitsStart(word);
-  const firstRead = parseAmount(word.text.replace(/^\D+/, ""));
+  const firstRead = parseAmount(loosely(word.text));
   if (!start || firstRead === null) return null;
   const pad = Math.round((word.bbox.y1 - word.bbox.y0) * 0.25);
   const { PSM } = await import("tesseract.js");
@@ -56,8 +63,9 @@ async function reread(w: Worker, image: Blob, word: Word): Promise<OcrWord | nul
       rectangle: { left: Math.max(0, start.left - 2), top: Math.max(0, word.bbox.y0 - pad), width: word.bbox.x1 - start.left + pad, height: word.bbox.y1 - word.bbox.y0 + 2 * pad },
     });
     const text = data.text.trim();
-    if (data.confidence < MIN_WORD_CONFIDENCE || parseAmount(text) !== firstRead) return null;
-    return { text, confidence: data.confidence, money: start.sign };
+    if (parseAmount(text) !== firstRead) return null;
+    // two reads that agree are worth the better of the two
+    return { text, confidence: Math.max(word.confidence, data.confidence), money: start.sign };
   } finally {
     await w.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: PSM.AUTO });
   }
@@ -74,14 +82,14 @@ export function readAmount(image: Blob): Promise<number | null> {
   return run;
 }
 
-async function readOne(image: Blob): Promise<number | null> {
+async function readOne(photo: Blob): Promise<number | null> {
   clearTimeout(idle);
   try {
-    const w = await getWorker();
+    const [w, image] = await Promise.all([getWorker(), prepareForOcr(photo).catch(() => photo)]);
     const { data } = await w.recognize(image, {}, { blocks: true, text: false });
     const read = (data.blocks ?? []).flatMap((b) => b.paragraphs.flatMap((p) => p.lines));
     // the tallest unsure numbers first: on a payment screenshot the amount is the biggest text
-    const unsure = read.flatMap((l) => l.words).filter((x) => x.confidence < MIN_WORD_CONFIDENCE && /\d/.test(x.text))
+    const unsure = read.flatMap((l) => l.words).filter((x) => x.confidence < MIN_WORD_CONFIDENCE && parseAmount(loosely(x.text)) !== null)
       .sort((a, b) => (b.bbox.y1 - b.bbox.y0) - (a.bbox.y1 - a.bbox.y0)).slice(0, MAX_REREADS);
     const fixed = new Map<Word, OcrWord>();
     for (const x of unsure) {
