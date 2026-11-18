@@ -66,6 +66,11 @@ export default function PrivacyPage() {
             settings. A passcode, if you set one, is kept only as a salted hash. A copy of your ledger is also kept in your
             browser so the app works offline; signing out clears it.
           </Sub>
+          <Sub title="Reading the amount off a photo">
+            When you attach a photo to an entry with no amount yet, UnMoney reads the total off it on your device, with the
+            open-source Tesseract engine. The photo is not sent anywhere to be read. The first time, your browser downloads the
+            engine and its English model (about 5 MB) from the jsDelivr CDN, which sees only that request, like any other download.
+          </Sub>
           <Sub title="If you connect Gmail">
             Gmail is connected from More › Gmail, through a second Google consent screen that asks for read-only access to your
             mail (the <code className="rounded bg-muted px-1 py-0.5 text-[12px]">gmail.readonly</code> scope). See the next section.

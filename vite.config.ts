@@ -40,9 +40,11 @@ export default defineConfig({
       strategies: "injectManifest",
       srcDir: "src",
       filename: "sw.ts",
+      // The receipt reader (src/lib/ocr.ts) is fetched the first time a photo is attached, and needs its engine
+      // from jsDelivr then anyway, so precaching it would only cost every device a download it may never use.
       // The superadmin dashboard (src/pages/admin, lazy in App.tsx) is fetched when it is opened, never precached onto
       // everyone's device. What only it uses lands in its own chunk, named after the page.
-      injectManifest: { globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"], globIgnores: ["**/AdminPage-*.js"] },
+      injectManifest: { globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"], globIgnores: ["**/AdminPage-*.js", "**/ocr-*.js"] },
       includeAssets: ["icon.svg", "favicon.ico", "apple-touch-icon-180x180.png"],
       manifest: {
         id: "/",
@@ -109,6 +111,7 @@ export default defineConfig({
         // React and Convex only change when they are upgraded: in chunks of their own they stay in the
         // service worker's cache across deploys, so an update downloads the app's code and little else.
         manualChunks(id) {
+          if (/[\\/]src[\\/]lib[\\/](ocr|receiptAmount)\.ts$/.test(id) || /[\\/]node_modules[\\/](tesseract\.js|idb-keyval|wasm-feature-detect|is-url|regenerator-runtime|bmp-js|zlibjs)[\\/]/.test(id)) return "ocr";
           if (!id.includes("node_modules")) return;
           if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/.test(id)) return "react";
           if (/[\\/]node_modules[\\/](convex|@convex-dev|@auth)[\\/]/.test(id)) return "convex";

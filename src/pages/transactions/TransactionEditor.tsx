@@ -337,6 +337,21 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainMajor, sub]);
 
+  /**
+   * An amount read off an attached photo goes in only where none has been typed: with a second currency the
+   * receipt is taken to be in it, so it fills that amount. Whether one was typed is checked when the reading finishes.
+   */
+  const latest = useRef(f);
+  latest.current = f;
+  function fillReadAmount(major: number) {
+    const p = latest.current;
+    const key = p.subCurrency ? "subAmount" : "amount";
+    if (evaluateExpression(p[key], LOCALE_DECIMAL)) return;
+    const decimals = p.subCurrency ? currencies.find((c) => c.code === p.subCurrency)?.decimals ?? 2 : settings.decimals;
+    set(key, localNumber(Math.round(major * 10 ** decimals) / 10 ** decimals));
+    toast.success("Amount filled in from the photo", { description: "Check it before you save" });
+  }
+
   const isEdit = !!id;
   const inSeries = !!existing?.repeatId;
 
@@ -646,7 +661,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             <Textarea aria-label="Description" value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="Description" className="min-h-16 resize-none" />
           </div>
           <div className="px-4 py-2"><TagInput tags={f.tags} onChange={(t) => set("tags", t)} suggestions={tagList.map((t) => t.tag)} /></div>
-          <div className="px-4 py-3"><PhotoField photoIds={f.photoIds} onChange={(ids) => set("photoIds", ids)} /></div>
+          <div className="px-4 py-3"><PhotoField photoIds={f.photoIds} onChange={(ids) => set("photoIds", ids)} onAmountRead={fillReadAmount} /></div>
         </div>
 
         {saved?.merged ? <MergedFrom tx={saved} /> : null}
