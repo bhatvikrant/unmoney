@@ -7,11 +7,20 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { compressImage } from "@/lib/image";
+import { readAmount } from "@/lib/ocr";
 import { isTmpId } from "../../../shared/ops";
 import { PhotoViewer } from "@/components/PhotoViewer";
 
-/** Photos are queued locally and uploaded when online; the entry keeps a temporary id until then. */
-export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[]; onChange: (ids: Id<"_storage">[]) => void }) {
+/**
+ * Photos are queued locally and uploaded when online; the entry keeps a temporary id until then.
+ * With onAmountRead, newly attached photos are read on the device for the amount paid, and it is
+ * handed over only when the reading is clear (see src/lib/receiptAmount.ts).
+ */
+export function PhotoField({ photoIds, onChange, onAmountRead }: {
+  photoIds: Id<"_storage">[];
+  onChange: (ids: Id<"_storage">[]) => void;
+  onAmountRead?: (major: number) => void;
+}) {
   const { enqueueUpload, photoUrl, rememberPhotoUrls, resolveId, status } = useStore();
   const realIds = useMemo(() => photoIds.map((id) => resolveId(id)).filter((id) => !isTmpId(id)), [photoIds, resolveId]);
   const fetched = useQuery(api.files.urls, realIds.length && status.connected ? { ids: realIds } : "skip");
@@ -19,6 +28,7 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
   const urlOf = (id: string) => photoUrl(id) ?? fetched?.[resolveId(id)] ?? undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState(false);
   /** Which photo is open full screen. */
   const [viewing, setViewing] = useState<number | null>(null);
   async function upload(files: FileList | null) {
@@ -29,17 +39,32 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
     setBusy(true);
     try {
       const ids: Id<"_storage">[] = [];
+      const added: File[] = [];
       for (const f of list) {
         const small = await compressImage(f);
         if (small.size > 5 * 1024 * 1024) { toast.error(`${f.name} is over 5 MB`); continue; }
         ids.push(await enqueueUpload(small));
+        added.push(small);
       }
       onChange([...photoIds, ...ids]);
+      if (onAmountRead && added.length) void readFirst(added, onAmountRead);
     } catch {
       toast.error("Could not attach the photo");
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+  /** The first photo with a clear amount wins; the rest aren't read. */
+  async function readFirst(files: File[], done: (major: number) => void) {
+    setReading(true);
+    try {
+      for (const f of files) {
+        const n = await readAmount(f);
+        if (n !== null) return done(n);
+      }
+    } finally {
+      setReading(false);
     }
   }
   return (
@@ -57,6 +82,7 @@ export function PhotoField({ photoIds, onChange }: { photoIds: Id<"_storage">[];
           <Camera className="size-5" />
         </button>
       ) : null}
+      {reading ? <span className="text-xs text-muted-foreground animate-pulse">Reading the amount…</span> : null}
       <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
       <PhotoViewer
         urls={photoIds.map(urlOf)}
