@@ -54,6 +54,8 @@ export function parseAmount(word: string): number | null {
   const seps = new Set(whole.match(/[.,]/g) ?? []);
   if (seps.size > 1) return null;
   if (seps.size === 1 && !/^\d{1,3}([.,]\d{2,3})+$/.test(whole)) return null;
+  // "5.000" is five thousand in Europe but a quantity of 5 on an Indian bill ("Q=5.000"): too ambiguous to use
+  if (!frac && /^\d{1,3}\.\d{3}$/.test(whole)) return null;
   // a decimal mark that is also the grouping mark ("1,234,56") is ambiguous
   if (frac && seps.size === 1 && s[s.length - frac.length - 1] === [...seps][0]) return null;
   const n = Number(whole.replace(/[.,]/g, "") + (frac ? "." + frac : ""));
@@ -128,12 +130,15 @@ export function pickAmount(lines: OcrLine[]): number | null {
   }));
   if (paid !== undefined) return paid;
 
-  const money = lines.filter((l) => !NOT_COMPARED.test(lineText(l))).flatMap((line) => amountsOn(line).filter((f) => f.money).map((f) => ({ ...f, height: line.height })));
+  const compared = lines.filter((l) => !NOT_COMPARED.test(lineText(l)));
+  const all = compared.flatMap((line) => amountsOn(line).filter((f) => f.priced || f.money).map((f) => ({ ...f, height: line.height })));
+  const money = all.filter((f) => f.money);
   if (!money.length) return null;
   const tallest = Math.max(...money.map((m) => m.height));
   const top = money.filter((m) => m.height >= tallest * 0.9);
-  const rest = money.filter((m) => m.height < tallest * 0.9);
-  // the big number has to stand out from the other money on the page, or it is just one price of many
-  if (rest.length && Math.max(...rest.map((m) => m.height)) > tallest / 1.4) return null;
+  // The big number has to stand out from every other price on the page, or it is one price of many: a
+  // receipt, where something misread as money (Q=5.000 as §=5.000) is no bigger than the lines around it.
+  const others = all.filter((f) => !top.includes(f));
+  if (others.length && Math.max(...others.map((f) => f.height)) > tallest / 1.4) return null;
   return settle(top) ?? null;
 }
