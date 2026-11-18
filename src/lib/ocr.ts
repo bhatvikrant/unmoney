@@ -63,7 +63,18 @@ async function reread(w: Worker, image: Blob, word: Word): Promise<OcrWord | nul
   }
 }
 
-export async function readAmount(image: Blob): Promise<number | null> {
+/**
+ * One photo at a time: the second reads change the worker's settings (digits only), which would leak into
+ * another photo's first read if two ran together. Tesseract would queue them on its one worker anyway.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+export function readAmount(image: Blob): Promise<number | null> {
+  const run = queue.then(() => readOne(image));
+  queue = run;
+  return run;
+}
+
+async function readOne(image: Blob): Promise<number | null> {
   clearTimeout(idle);
   try {
     const w = await getWorker();

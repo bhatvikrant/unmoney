@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { compressImage } from "@/lib/image";
-import { readAmount } from "@/lib/ocr";
 import { isTmpId } from "../../../shared/ops";
 import { PhotoViewer } from "@/components/PhotoViewer";
 
@@ -59,10 +58,14 @@ export function PhotoField({ photoIds, onChange, onAmountRead }: {
   async function readFirst(files: File[], done: (major: number) => void) {
     setReading(true);
     try {
+      // loaded only once a photo is attached: the editor itself carries none of the OCR code
+      const { readAmount } = await import("@/lib/ocr");
       for (const f of files) {
         const n = await readAmount(f);
         if (n !== null) return done(n);
       }
+    } catch {
+      // the chunk couldn't load (offline): no amount, as with an unclear photo
     } finally {
       setReading(false);
     }
