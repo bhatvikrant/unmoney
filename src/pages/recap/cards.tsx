@@ -23,7 +23,7 @@ import type { Tx } from "../../../shared/views";
 import { useDrill, useHints } from "./drill";
 import { MARK, posterImage, posterRows, type Poster, type PosterRow } from "./poster";
 import { Logo } from "@/components/shell/Logo";
-import { useOverText } from "@/lib/budgetText";
+import { useOverText, useShortMoney } from "@/lib/budgetText";
 
 /** The chart hue each card is tinted with, in the order the cards run. */
 const TINT: Record<RecapCard["kind"], string> = {
@@ -575,6 +575,7 @@ function BudgetRow({ row, hint, unit = "month" }: { row: RecapBudgetRow; hint?: 
 /** Twelve squares for one budget's year: held in the income colour, over in the expense colour, faint before it existed. */
 function BudgetYearRowView({ row }: { row: RecapBudgetYearRow }) {
   const { fmt } = useApp();
+  const short = useShortMoney();
   const months = row.held + row.over;
   const body = (
     <>
@@ -586,8 +587,8 @@ function BudgetYearRowView({ row }: { row: RecapBudgetYearRow }) {
         {row.months.map((o, i) => <i key={i} title={MONTH_SHORT[i]} className={cn("block h-3 rounded-[3px]", o === "over" ? "bg-expense" : o === "held" ? "bg-budget-left" : "bg-foreground/10")} />)}
       </div>
       {row.change ? (
-        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-          {fmt(row.change.from)} → {fmt(row.change.to)} from {MONTH_SHORT[row.change.month]} · spent {fmt(row.change.avgBefore)} a month before, {fmt(row.change.avgAfter)} after
+        <div className="mt-0.5 text-[11px] text-muted-foreground">
+          {short(row.change.from)} → {short(row.change.to)} from {MONTH_SHORT[row.change.month]} · spent {short(row.change.avgBefore)} a month before, {short(row.change.avgAfter)} after
         </div>
       ) : null}
     </>
