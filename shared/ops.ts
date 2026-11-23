@@ -17,6 +17,7 @@ import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
 import { normName, normNote } from "./categoryLint";
 import { describeOp, HISTORY_COALESCE_MS, HISTORY_KINDS, HISTORY_MAX, type HistoryLine } from "./history";
+import { addBudgetAmounts, budgetAmountAt, earlierAfterChange, scaleEarlier } from "./budgetAmounts";
 import { aroundDates, fromGmail, sipFor, sipKey, sipsOf, type Rhythm, type Sip } from "./sips";
 
 export const TABLES = [
@@ -58,6 +59,9 @@ export function tmpIdsIn(value: unknown, out: Set<string> = new Set()): Set<stri
 }
 
 /** Drop keys whose value is undefined, so documents stay schema-clean and comparable. */
+/** A budget period key: a year, a month or a week's first day. */
+const PERIOD_KEY = /^\d{4}(-\d{2}(-\d{2})?)?$/;
+
 export function clean<T extends object>(o: T): T {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(o)) if (v !== undefined) out[k] = v;
@@ -311,7 +315,8 @@ export interface Ops {
   "bookmarks.remove": { args: { id: Id<"bookmarks"> }; result: void };
   "bookmarks.reorder": { args: { ids: Id<"bookmarks">[] }; result: void };
 
-  "budgets.upsert": { args: { id?: Id<"budgets">; categoryId?: Id<"categories">; period: Doc<"budgets">["period"]; amount: number }; result: Id<"budgets"> };
+  /** Sets a budget's default amount. With `from` (a period key) it applies from that period on and earlier periods keep what they had; without it, as older app versions send it, the current amount is replaced. */
+  "budgets.upsert": { args: { id?: Id<"budgets">; categoryId?: Id<"categories">; period: Doc<"budgets">["period"]; amount: number; from?: string }; result: Id<"budgets"> };
   "budgets.setOverride": { args: { id: Id<"budgets">; key: string; amount: number | null }; result: void };
   "budgets.remove": { args: { id: Id<"budgets"> }; result: void };
   /** Carry each period's leftover (or overspend) into the next one, from the period `from` on; null turns it off. */
@@ -947,7 +952,7 @@ function applyCleanup(w: Work, steps: CleanupStep[]): CleanupResult {
     w.patch("categories", id, patch);
   };
   const rememberBudget = (b: Doc<"budgets">) => {
-    if (!budgetsBefore.has(b._id)) budgetsBefore.set(b._id, clean({ id: b._id, categoryId: b.categoryId, period: b.period, amount: b.amount, overrides: b.overrides }));
+    if (!budgetsBefore.has(b._id)) budgetsBefore.set(b._id, clean({ id: b._id, categoryId: b.categoryId, period: b.period, amount: b.amount, overrides: b.overrides, earlier: b.earlier, since: b.since }));
   };
   /** Re-file every entry (and, unless told otherwise, every repeat and bookmark) of `type` that `fn` maps somewhere new. */
   const remap = (type: CatType, fn: (p: Pair, note: string) => Pair | null, templates = true) => {
@@ -980,9 +985,9 @@ function applyCleanup(w: Work, steps: CleanupStep[]): CleanupResult {
       if (twin) {
         rememberBudget(twin);
         const overrides = { ...twin.overrides };
-        for (const [k, v] of Object.entries(b.overrides)) overrides[k] = (overrides[k] ?? twin.amount) + v;
-        for (const k of Object.keys(twin.overrides)) if (!(k in b.overrides)) overrides[k] = twin.overrides[k] + b.amount;
-        w.patch("budgets", twin._id, { amount: twin.amount + b.amount, overrides });
+        for (const [k, v] of Object.entries(b.overrides)) overrides[k] = (overrides[k] ?? budgetAmountAt(twin, k)) + v;
+        for (const k of Object.keys(twin.overrides)) if (!(k in b.overrides)) overrides[k] = twin.overrides[k] + budgetAmountAt(b, k);
+        w.patch("budgets", twin._id, { ...addBudgetAmounts(twin, b), overrides });
         w.delete("budgets", b._id);
       } else if (w.snap.budgets.some((x) => x.categoryId === toId)) {
         w.delete("budgets", b._id);
@@ -1149,7 +1154,7 @@ function undoCleanup(w: Work, id: Id<"categoryCleanups">): { restoredEntries: nu
     w.patch(t.table, d._id as never, { template: clean({ ...d.template, categoryId, subcategoryId }) } as never);
   }
   for (const { id: budgetId, ...fields } of r.budgetsBefore) {
-    if (w.get("budgets", budgetId)) w.patch("budgets", budgetId, { categoryId: undefined, ...fields });
+    if (w.get("budgets", budgetId)) w.patch("budgets", budgetId, { categoryId: undefined, earlier: undefined, since: undefined, ...fields });
     else w.insert("budgets", fields);
   }
   for (const cid of r.createdCategoryIds) {
@@ -1212,7 +1217,7 @@ function rescaleOtherAmounts(w: Work, factor: number) {
   for (const b of [...w.snap.budgets]) {
     const overrides: Record<string, number> = {};
     for (const [k, val] of Object.entries(b.overrides)) overrides[k] = scale(val);
-    w.patch("budgets", b._id, { amount: scale(b.amount), overrides });
+    w.patch("budgets", b._id, { amount: scale(b.amount), overrides, earlier: scaleEarlier(b.earlier, scale) });
   }
   const template = (t: Template): Template => ({ ...t, amount: scale(t.amount), feeAmount: t.feeAmount === undefined ? undefined : scale(t.feeAmount) });
   for (const r of [...w.snap.repeats]) w.patch("repeats", r._id, { template: template(r.template) });
@@ -1222,7 +1227,7 @@ function rescaleOtherAmounts(w: Work, factor: number) {
   // a tidy-up undone later puts these budgets back, so they change scale too
   for (const c of [...w.snap.categoryCleanups]) {
     w.patch("categoryCleanups", c._id, {
-      budgetsBefore: c.budgetsBefore.map((b) => ({ ...b, amount: scale(b.amount), overrides: Object.fromEntries(Object.entries(b.overrides).map(([k, v]) => [k, scale(v)])) })),
+      budgetsBefore: c.budgetsBefore.map((b) => clean({ ...b, amount: scale(b.amount), earlier: scaleEarlier(b.earlier, scale), overrides: Object.fromEntries(Object.entries(b.overrides).map(([k, v]) => [k, scale(v)])) })),
     });
   }
 }
@@ -2309,23 +2314,26 @@ const handlers: Handlers = {
     ids.forEach((id, i) => { w.must("bookmarks", id); w.patch("bookmarks", id, { order: i }); });
   },
 
-  "budgets.upsert": (w, { id, categoryId, period, amount }) => {
+  "budgets.upsert": (w, { id, categoryId, period, amount, from }) => {
     if (!Number.isInteger(amount) || amount < 0) throw new Error("Amount must be positive");
+    if (from !== undefined && !PERIOD_KEY.test(from)) throw new Error("Bad period");
     if (categoryId) {
       const c = w.must("categories", categoryId, "Pick a category");
       if (c.type !== "expense") throw new Error("Budgets are for expense categories");
     }
+    // the amount applies from `from` on: what earlier periods had is kept. Keys of another kind of period mean nothing to a budget that changes period.
+    const dated = (b: Doc<"budgets">) => (b.period !== period ? { earlier: undefined, since: from } : from !== undefined ? { earlier: earlierAfterChange(b, from, amount) } : {});
     if (id) {
-      w.must("budgets", id);
-      w.patch("budgets", id, { categoryId, period, amount });
+      const b = w.must("budgets", id);
+      w.patch("budgets", id, { categoryId, period, amount, ...dated(b) });
       return id;
     }
     const dup = w.snap.budgets.find((b) => b.period === period && (b.categoryId ?? null) === (categoryId ?? null));
     if (dup) {
-      w.patch("budgets", dup._id, { amount });
+      w.patch("budgets", dup._id, { amount, ...dated(dup) });
       return dup._id;
     }
-    return w.insert("budgets", { categoryId, period, amount, overrides: {} });
+    return w.insert("budgets", clean({ categoryId, period, amount, overrides: {}, since: from }));
   },
   "budgets.setOverride": (w, { id, key, amount }) => {
     const b = w.must("budgets", id);
@@ -2341,7 +2349,7 @@ const handlers: Handlers = {
 
   "budgets.setRollover": (w, { id, from }) => {
     w.must("budgets", id, "That budget is gone");
-    if (from !== null && !/^\d{4}(-\d{2}(-\d{2})?)?$/.test(from)) throw new Error("Bad period");
+    if (from !== null && !PERIOD_KEY.test(from)) throw new Error("Bad period");
     w.patch("budgets", id, { rolloverFrom: from ?? undefined });
   },
 

@@ -1,5 +1,6 @@
 import { useApp } from "@/lib/app";
 import { formatMoney } from "../../shared/money";
+import { monthLabel } from "@/lib/format";
 
 type BudgetState = { limit: number; spent: number };
 
@@ -14,4 +15,9 @@ export function useShortMoney() {
 export function useOverText() {
   const short = useShortMoney();
   return (b: BudgetState) => `${short(b.spent)} / ${short(b.limit)}`;
+}
+
+/** A budget period key as words: "Nov 2026", "week of 2026-11-23", "2026". */
+export function periodKeyLabel(period: "weekly" | "monthly" | "yearly", key: string): string {
+  return period === "monthly" ? monthLabel(key) : period === "weekly" ? `week of ${key}` : key;
 }

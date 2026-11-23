@@ -277,3 +277,24 @@ describe("bills and subscriptions", () => {
     expect((await all()).filter((x) => x.note === "Spotify").map((x) => x.date).sort()).toEqual(["2026-09-05", "2026-10-21"]);
   });
 });
+
+describe("a budget's amounts over time", () => {
+  test("the server stores a change of amount with what came before, and clears it when it is undone", async () => {
+    const { t, apply, food } = await setup();
+    const budget = () => t.run(async (ctx) => (await ctx.db.query("budgets").collect())[0]);
+    // as an older app version sends it: no period
+    expect((await apply("budgets.upsert", { period: "monthly", categoryId: food._id, amount: 2000000 })).status).toBe("applied");
+    const id = (await budget())._id;
+    expect((await apply("budgets.upsert", { id, period: "monthly", categoryId: food._id, amount: 1500000, from: "2026-11" })).status).toBe("applied");
+    expect(await budget()).toMatchObject({ amount: 1500000, earlier: [{ until: "2026-11", amount: 2000000 }] });
+    // changed back in the same month: the field is removed from the stored document
+    expect((await apply("budgets.upsert", { id, period: "monthly", categoryId: food._id, amount: 2000000, from: "2026-11" })).status).toBe("applied");
+    const back = await budget();
+    expect(back.amount).toBe(2000000);
+    expect("earlier" in back).toBe(false);
+    // a new budget records the period it starts in; a bad period is refused
+    expect((await apply("budgets.upsert", { period: "monthly", amount: 6000000, from: "2026-11" })).status).toBe("applied");
+    expect((await t.run((ctx) => ctx.db.query("budgets").collect())).find((b) => !b.categoryId)).toMatchObject({ since: "2026-11" });
+    expect((await apply("budgets.upsert", { id, period: "monthly", categoryId: food._id, amount: 1, from: "November" })).status).toBe("rejected");
+  });
+});

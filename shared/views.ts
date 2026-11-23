@@ -9,6 +9,7 @@ import {
 } from "./ledger";
 import type { AccountKind } from "./defaults";
 import { addDays, addMonths, daysInMonth, diffDays, make, parts, todayISO } from "./dates";
+import { budgetAmountAt, budgetSteps } from "./budgetAmounts";
 import { elapsedFraction, monthKeyForDate, monthRange, parseMonthKey, periodKey, periodRange, shiftMonthKey, type Range } from "./period";
 import { laterMatches } from "./gmail/dedup";
 
@@ -589,7 +590,7 @@ export function budgetStatus(snap: Snapshot, period: Doc<"budgets">["period"], k
   const items = budgets
     .map((b) => {
       const carry = carried.get(b._id) ?? 0;
-      const limit = (b.overrides[key] ?? b.amount) + carry;
+      const limit = (b.overrides[key] ?? budgetAmountAt(b, key)) + carry;
       const spent = b.categoryId ? spentByCat.get(b.categoryId) ?? 0 : spentAll;
       return { budget: b, limit, spent, remaining: limit - spent, isOverride: b.overrides[key] !== undefined, carry };
     });
@@ -686,12 +687,47 @@ function carryOver(snap: Snapshot, budgets: Doc<"budgets">[], period: Doc<"budge
     let carry = 0;
     let k = b.rolloverFrom!;
     for (let guard = 0; k < key && guard < 2000; guard++) {
-      carry += (b.overrides[k] ?? b.amount) - (spent.get(k)?.get(b.categoryId ?? "") ?? 0);
+      carry += (b.overrides[k] ?? budgetAmountAt(b, k)) - (spent.get(k)?.get(b.categoryId ?? "") ?? 0);
       k = nextPeriodKey(period, k, msd, wsd);
     }
     out.set(b._id, carry);
   }
   return out;
+}
+
+/** One stretch of a budget's default amount: from which period, and what went out per finished period while it applied. */
+export type BudgetHistoryStep = { from?: string; amount: number; avgSpent?: number; periods: number };
+
+/**
+ * A budget's default amounts over time, oldest first, each with the average spent per period in the
+ * finished periods it covered (from the ledger's first entry on, counted the way budgetStatus counts
+ * it). The last step is the amount that applies now.
+ */
+export function budgetHistory(snap: Snapshot, b: Doc<"budgets">, today = todayISO()): BudgetHistoryStep[] {
+  const steps = budgetSteps(b);
+  const settings = settingsOf(snap);
+  if (!settings) return steps.map((s) => ({ ...s, periods: 0 }));
+  const { monthStartDay: msd, weekStartDay: wsd } = settings;
+  const ledger = ledgerOf(snap);
+  const parentOf = new Map(snap.categories.filter((c) => c.type === "expense").map((c) => [c._id as string, (c.parentId ?? c._id) as string]));
+  const spent = new Map<string, number>();
+  let first: string | undefined;
+  for (const t of snap.transactions) {
+    if (!first || t.date < first) first = t.date;
+    const e = kindsOf(t, ledger).expense;
+    if (!e || (b.categoryId && (!t.categoryId || (parentOf.get(t.categoryId) ?? t.categoryId) !== b.categoryId))) continue;
+    const k = periodKey(b.period, t.date, msd, wsd);
+    spent.set(k, (spent.get(k) ?? 0) + e);
+  }
+  const current = periodKey(b.period, today, msd, wsd);
+  const firstKey = first ? periodKey(b.period, first, msd, wsd) : current;
+  return steps.map((s, i) => {
+    const until = steps[i + 1]?.from ?? current;
+    let k = s.from !== undefined && s.from > firstKey ? s.from : firstKey;
+    let sum = 0, periods = 0;
+    for (; k < until && periods < 2000; k = nextPeriodKey(b.period, k, msd, wsd)) { sum += spent.get(k) ?? 0; periods++; }
+    return { ...s, periods, ...(periods ? { avgSpent: Math.round(sum / periods) } : {}) };
+  });
 }
 
 /** How far a budget is through its limit: 0 under 80%, 1 from 80%, 2 at or past it. */
