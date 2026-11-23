@@ -6,6 +6,7 @@
  */
 import type { Snapshot } from "./ops";
 import { addDays, diffDays, make, MONTH_LONG, weekday, type ISODate } from "./dates";
+import { budgetAmountAt } from "./budgetAmounts";
 import { monthKey, monthKeyForDate, monthRange, parseMonthKey, shiftMonthKey, yearRange, type MonthKey, type Range } from "./period";
 import { budgetStatus, ledgerOf, settingsOf, statsByCategory, statsEntries, type Tx } from "./views";
 import { kindsOf } from "./ledger";
@@ -96,9 +97,17 @@ export type RecapBudgetRow = {
   overOn?: ISODate;
   /** Months in a row, this one included, the budget ended the same way: held, or over. */
   streak: number;
+  /** What the default amount was until this period, when it changed in it (and the period has no amount of its own). */
+  was?: number;
 };
+/** A budget's amount changing in a year: from which month (0 to 11), and what went out a month on average on each side of it. */
+export type RecapBudgetChange = { month: number; from: number; to: number; avgBefore: number; avgAfter: number };
 /** One budget across a year's recap: how each of the twelve months ended for it (null: it didn't exist yet). */
-export type RecapBudgetYearRow = { id: string; name: string; months: ("held" | "over" | null)[]; held: number; over: number; overBy: number; run: number };
+export type RecapBudgetYearRow = {
+  id: string; name: string; months: ("held" | "over" | null)[]; held: number; over: number; overBy: number; run: number;
+  /** The year's last change of its default amount, when there was one. */
+  change?: RecapBudgetChange;
+};
 
 /** The month's colour signature: the top three categories by share, in Stats order; everything else is the grey rest. */
 export type RecapStrip = { id: string; name: string; pct: number }[];
@@ -191,14 +200,15 @@ const prevPeriod = (period: BudgetPeriod, key: string) => (period === "monthly" 
 
 /**
  * The monthly (or annual) budgets that already existed in the period `key` (made by its end, or with
- * that period's own limit or carry-over set: a restored budget is new, but its overrides show it was
- * there), each with its name. Undefined when there were none.
+ * that period's own limit, carry-over or an earlier amount set: a restored budget is new, but those
+ * show it was there), each with its name. Undefined when there were none.
  */
 function periodBudgets(snap: Snapshot, period: BudgetPeriod, key: string) {
   const status = budgetStatus(snap, period, key);
   if (!status) return undefined;
   const existed = (b: (typeof status.perCategory)[number]["budget"]) =>
-    localDate(b._creationTime) <= status.range.to || b.overrides[key] !== undefined || (!!b.rolloverFrom && b.rolloverFrom <= key);
+    localDate(b._creationTime) <= status.range.to || b.overrides[key] !== undefined || (!!b.rolloverFrom && b.rolloverFrom <= key)
+    || (b.since !== undefined && b.since <= key) || !!b.earlier?.some((e) => e.until > key);
   const catName = new Map(snap.categories.map((c) => [c._id as string, c.name]));
   const items = [...(status.total ? [status.total] : []), ...status.perCategory].filter((i) => existed(i.budget))
     .map((i) => ({ ...i, id: (i.budget.categoryId ?? "total") as string, name: i.budget.categoryId ? catName.get(i.budget.categoryId) ?? "Uncategorised" : TOTAL_NAME[period] }));
@@ -241,10 +251,14 @@ function overDay(snap: Snapshot, range: Range, categoryId: string | undefined, l
 function budgetRows(snap: Snapshot, key: string, period: BudgetPeriod = "monthly"): RecapBudgetRow[] | undefined {
   const m = periodBudgets(snap, period, key);
   if (!m) return undefined;
-  const rows = m.items.map((i): RecapBudgetRow => ({
-    id: i.id, name: i.name, limit: i.limit, spent: i.spent, carry: i.carry, streak: 1,
-    overOn: i.remaining < 0 ? overDay(snap, m.range, i.budget.categoryId, i.limit) : undefined,
-  }));
+  const rows = m.items.map((i): RecapBudgetRow => {
+    const was = i.isOverride ? undefined : i.budget.earlier?.find((e) => e.until === key)?.amount;
+    return {
+      id: i.id, name: i.name, limit: i.limit, spent: i.spent, carry: i.carry, streak: 1,
+      overOn: i.remaining < 0 ? overDay(snap, m.range, i.budget.categoryId, i.limit) : undefined,
+      ...(was !== undefined ? { was } : {}),
+    };
+  });
   // walk back a period at a time while any budget is still on a run, not into periods before the first entry
   const open = new Set(rows.map((r) => r.id));
   const first = trackedFrom(snap, { from: "0000-01-01", to: m.range.to });
@@ -264,18 +278,35 @@ function budgetRows(snap: Snapshot, key: string, period: BudgetPeriod = "monthly
 /** The year's budgets month by month: which months each held or went over, by how much in all, and its longest run of held months. */
 function budgetYearRows(snap: Snapshot, months: MonthKey[]): RecapBudgetYearRow[] {
   const rows = new Map<string, RecapBudgetYearRow>();
+  // each budget's default amount and spending per month, to set a change of amount against what went out around it
+  const track = new Map<string, { amount: (number | null)[]; spent: number[] }>();
   months.forEach((k, i) => {
     for (const it of monthBudgets(snap, k)?.items ?? []) {
       let r = rows.get(it.id);
-      if (!r) rows.set(it.id, (r = { id: it.id, name: it.name, months: months.map(() => null), held: 0, over: 0, overBy: 0, run: 0 }));
+      if (!r) {
+        rows.set(it.id, (r = { id: it.id, name: it.name, months: months.map(() => null), held: 0, over: 0, overBy: 0, run: 0 }));
+        track.set(it.id, { amount: months.map(() => null), spent: months.map(() => 0) });
+      }
       const over = it.remaining < 0;
       r.months[i] = over ? "over" : "held";
       if (over) { r.over += 1; r.overBy -= it.remaining; } else r.held += 1;
+      const t = track.get(it.id)!;
+      t.amount[i] = budgetAmountAt(it.budget, k);
+      t.spent[i] = it.spent;
     }
   });
+  const avg = (ns: number[]) => Math.round(ns.reduce((s, n) => s + n, 0) / Math.max(1, ns.length));
   for (const r of rows.values()) {
     let run = 0;
     for (const o of r.months) { run = o === "held" ? run + 1 : 0; r.run = Math.max(r.run, run); }
+    const { amount, spent } = track.get(r.id)!;
+    const changes = amount.flatMap((a, i) => (i > 0 && a !== null && amount[i - 1] !== null && a !== amount[i - 1] ? [i] : []));
+    const at = changes[changes.length - 1];
+    if (at !== undefined) {
+      // before: back to the change before this one, or to the budget's first month of the year
+      const start = Math.max(changes[changes.length - 2] ?? 0, amount.findIndex((a) => a !== null));
+      r.change = { month: at, from: amount[at - 1]!, to: amount[at]!, avgBefore: avg(spent.slice(start, at)), avgAfter: avg(spent.slice(at).filter((_, j) => amount[at + j] !== null)) };
+    }
   }
   return [...rows.values()].sort((a, b) => b.over - a.over || b.overBy - a.overBy || a.name.localeCompare(b.name));
 }

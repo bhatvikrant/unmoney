@@ -56,6 +56,7 @@ export const sip = v.object({
   stoppedAt: v.optional(v.number()),
 });
 export const budgetPeriod = v.union(v.literal("weekly"), v.literal("monthly"), v.literal("yearly"));
+const earlierAmounts = v.array(v.object({ until: v.string(), amount: v.number() }));
 
 /** [categoryId, subcategoryId] of an entry or template, null where unset. */
 const catPair = v.array(v.union(v.id("categories"), v.null()));
@@ -282,6 +283,10 @@ export default defineSchema({
     period: budgetPeriod,
     amount: v.number(),
     overrides: v.record(v.string(), v.number()),
+    /** What the default amount was before, oldest first: each ran up to, not including, the period `until` (shared/budgetAmounts.ts). */
+    earlier: v.optional(earlierAmounts),
+    /** The period the budget was first set in; missing on budgets older than this record. */
+    since: v.optional(v.string()),
     /** Carrying over is on from this period key: each period's leftover (or overspend) adds to the next one. */
     rolloverFrom: v.optional(v.string()),
   }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
@@ -348,6 +353,8 @@ export default defineSchema({
       period: budgetPeriod,
       amount: v.number(),
       overrides: v.record(v.string(), v.number()),
+      earlier: v.optional(earlierAmounts),
+      since: v.optional(v.string()),
     })),
     entries: v.array(v.object({ id: v.id("transactions"), from: catPair, to: catPair })),
     templates: v.array(v.object({ table: v.union(v.literal("repeats"), v.literal("bookmarks")), id: v.string(), from: catPair, to: catPair })),
