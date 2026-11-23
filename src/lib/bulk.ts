@@ -61,7 +61,7 @@ export function useBulkOps() {
     try {
       for (const t of view.transactions) for (const n of [t.amount, t.feeAmount, t.installmentTotal]) if (n !== undefined) scaleAmount(n, factor);
       for (const a of view.accounts) scaleAmount(a.initialBalance, factor);
-      for (const b of view.budgets) scaleAmount(b.amount, factor);
+      for (const b of view.budgets) for (const n of [b.amount, ...(b.earlier ?? []).map((e) => e.amount)]) scaleAmount(n, factor);
     } catch (e) {
       toast.error("Some amounts would be too large with that many decimal places.");
       throw e;

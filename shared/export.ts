@@ -98,9 +98,10 @@ export function completeSheets(snap: Snapshot): { sheet: string; data: SheetRows
   const categories: SheetRows = [["Type", "Category", "Parent category", "Archived", "Deleted"]];
   for (const c of snap.categories) categories.push([c.type === "income" ? "Income" : "Expense", c.name, name(cat, c.parentId), !!c.archivedAt, !!c.deletedAt]);
 
-  const budgets: SheetRows = [["Category", "Period", "Amount", "Overrides (period start = amount)"]];
+  const budgets: SheetRows = [["Category", "Period", "Amount", "Overrides (period start = amount)", "Earlier amounts (until period = amount)"]];
   for (const b of snap.budgets) {
-    budgets.push([b.categoryId ? name(cat, b.categoryId) : "Total", b.period, major(b.amount), Object.entries(b.overrides).map(([k, v]) => `${k}=${toMajor(v, decimals)}`).join("; ") || null]);
+    budgets.push([b.categoryId ? name(cat, b.categoryId) : "Total", b.period, major(b.amount), Object.entries(b.overrides).map(([k, v]) => `${k}=${toMajor(v, decimals)}`).join("; ") || null,
+      b.earlier?.map((x) => `${x.until}=${toMajor(x.amount, decimals)}`).join("; ") || null]);
   }
 
   const repeats: SheetRows = [["Kind", "Frequency", "Start", "End", "Next", "Installments", "Active", "Type", "Payment method", "Category / To payment method", "Subcategory", "Note", "Amount"]];

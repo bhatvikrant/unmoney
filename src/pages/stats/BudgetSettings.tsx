@@ -18,7 +18,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toMinor } from "../../../shared/money";
-import { amountInput, monthLabel, LOCALE_DECIMAL } from "@/lib/format";
+import { amountInput, LOCALE_DECIMAL } from "@/lib/format";
+import { periodKeyLabel } from "@/lib/budgetText";
+import { budgetSteps } from "../../../shared/budgetAmounts";
 import { periodKey } from "../../../shared/period";
 import { todayISO } from "../../../shared/dates";
 
@@ -47,7 +49,7 @@ export default function BudgetSettings() {
   // the period the user came from (overrides apply to it), else the current one
   const fromPage = sp.get("period") === period ? sp.get("key") ?? sp.get("month") : null;
   const key = fromPage ?? currentKey;
-  const keyLabel = period === "monthly" ? monthLabel(key) : period === "weekly" ? `week of ${key}` : key;
+  const keyLabel = periodKeyLabel(period, key);
   const nextWord = period === "weekly" ? "week" : period === "yearly" ? "year" : "month";
   const mains = categories.filter((c) => c.type === "expense" && !c.parentId && !c.deletedAt && !c.archivedAt);
   const available = mains.filter((c) => !list.some((b) => b.categoryId === c._id));
@@ -56,11 +58,17 @@ export default function BudgetSettings() {
   const avgCat = dialog?.categoryId;
   const avg = useMemo(() => (avgCat ? budgetAverage(view, avgCat === "total" ? undefined : avgCat, period) : null), [view, avgCat, period]);
 
+  // the budget being edited: a new default amount starts with the current period, and what came before stays
+  const editing = dialog?.id ? budgets.find((x) => x._id === dialog.id) : undefined;
+  const steps = editing ? budgetSteps(editing) : [];
+  const typed = (() => { try { return dialog?.amount.trim() ? toMinor(dialog.amount, settings.decimals, LOCALE_DECIMAL) : null; } catch { return null; } })();
+  const startsNow = !!editing && typed !== null && typed !== editing.amount && !(editing.since !== undefined && editing.since >= currentKey);
+
   async function save() {
     if (!dialog) return;
     try {
       const amount = toMinor(dialog.amount, settings.decimals, LOCALE_DECIMAL);
-      const id = await upsert({ id: dialog.id, categoryId: dialog.categoryId === "total" ? undefined : (dialog.categoryId as Id<"categories">), period, amount });
+      const id = await upsert({ id: dialog.id, categoryId: dialog.categoryId === "total" ? undefined : (dialog.categoryId as Id<"categories">), period, amount, from: currentKey });
       if (dialog.id || dialog.override) {
         await setOverride({ id, key, amount: dialog.override.trim() ? toMinor(dialog.override, settings.decimals, LOCALE_DECIMAL) : null });
       }
@@ -82,13 +90,13 @@ export default function BudgetSettings() {
             const ov = b.overrides[key];
             return (
               <SwipeToDelete key={b._id} className="border-b last:border-b-0" {...swipe.row(b._id)} onDelete={() => void del(b._id)}>
-                <Row label={b.categoryId ? categoryById.get(b.categoryId)?.name ?? "(deleted)" : "Total budget"} hint={<>{ov !== undefined ? <>{keyLabel}: <Money amount={ov} /></> : "default"}{b.rolloverFrom ? " · carries over" : ""}</>} value={<Money amount={b.amount} />}
+                <Row label={b.categoryId ? categoryById.get(b.categoryId)?.name ?? "(deleted)" : "Total budget"} hint={<>{ov !== undefined ? <>{keyLabel}: <Money amount={ov} /></> : "default"}{b.earlier?.length ? <> · <Money amount={b.earlier[b.earlier.length - 1].amount} muted /> before {periodKeyLabel(period, b.earlier[b.earlier.length - 1].until)}</> : null}{b.rolloverFrom ? " · carries over" : ""}</>} value={<Money amount={b.amount} />}
                   onClick={() => setDialog({ id: b._id, categoryId: b.categoryId ?? "total", amount: amountInput(b.amount, settings.decimals), override: ov !== undefined ? amountInput(ov, settings.decimals) : "", rollover: !!b.rolloverFrom })} />
               </SwipeToDelete>
             );
           })}
         </div>
-        <p className="px-4 py-3 text-xs text-muted-foreground">The default amount applies to every period. Set an amount for just {keyLabel} inside a budget to override it for that period only.</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground">A new default amount applies from this {nextWord} on; earlier {nextWord}s keep the amount they had. Set an amount for just {keyLabel} inside a budget to override it for that period only.</p>
       </Page>
       <Dialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent>
@@ -105,6 +113,15 @@ export default function BudgetSettings() {
               ) : null}
               <div className="space-y-1.5"><Label>Default amount</Label><Input inputMode="decimal" value={dialog.amount} onChange={(e) => setDialog({ ...dialog, amount: e.target.value })} />
                 {avg ? <p className="text-xs text-muted-foreground">You spent <Money amount={avg.amount} /> a {nextWord} on average over the last {avg.months === 1 ? "month" : `${avg.months} months`}.</p> : null}
+                {startsNow ? <p className="text-xs text-muted-foreground">Applies from {periodKeyLabel(period, currentKey)} on. Earlier {nextWord}s keep <Money amount={editing!.amount} muted />.</p> : null}
+                {steps.length > 1 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Before: {steps.slice(0, -1).reverse().slice(0, 3).map((s, i, all) => {
+                      const until = steps[steps.indexOf(s) + 1].from!;
+                      return <span key={until}><Money amount={s.amount} muted /> before {periodKeyLabel(period, until)}{i < all.length - 1 ? ", " : ""}</span>;
+                    })}
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-1.5"><Label>Only for {keyLabel} (optional)</Label><Input inputMode="decimal" value={dialog.override} placeholder="Leave blank to use the default" onChange={(e) => setDialog({ ...dialog, override: e.target.value })} /></div>
               <label className="flex items-start justify-between gap-3 pt-1">

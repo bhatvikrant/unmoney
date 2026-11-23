@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useView } from "@/lib/store";
-import { budgetEntries, budgetStatus, statsTrend } from "../../../shared/views";
+import { budgetEntries, budgetHistory, budgetStatus, statsTrend } from "../../../shared/views";
+import { periodKeyLabel } from "@/lib/budgetText";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { StatsHeaderBar } from "./PeriodBar";
@@ -40,6 +41,7 @@ export default function BudgetPage() {
   }, [status, openId, categoryById]);
   const patch = (next: Record<string, string | null>) => { const n = new URLSearchParams(sp); for (const [k, v] of Object.entries(next)) { if (v === null) n.delete(k); else n.set(k, v); } setSp(n, { replace: true }); };
   const setDetail = (d: { item: BudgetItem; label: string } | null) => patch({ budget: d ? d.item.budget._id : null, bar: null });
+  const today = useToday();
   const ranges = p.trailing();
   const rangeKey = ranges.map((r) => r.key).join(",");
   // the bar being looked at: the one tapped, else this period's
@@ -58,8 +60,12 @@ export default function BudgetPage() {
     return ranges.map((r) => { const st = budgetStatus(view, period, r.key); return (st?.total?.budget._id === id ? st.total : st?.perCategory.find((it) => it.budget._id === id))?.limit ?? detail.item.limit; });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, detail, period, rangeKey]);
+  // the amounts this budget had before, newest first, with what went out a period while each applied
+  const openBudgetId = detail?.item.budget._id;
+  const openBudget = useMemo(() => view.budgets.find((x) => x._id === openBudgetId), [view.budgets, openBudgetId]);
+  const past = useMemo(() => (openBudget ? budgetHistory(view, openBudget, today) : []), [view, openBudget, today]);
+  const unit = period === "weekly" ? "week" : period === "yearly" ? "year" : "month";
   // In the current period: what can still go out each day, and where spending at this rate ends up.
-  const today = useToday();
   // in the period running today: the bills scheduled before it ends, per budget
   const due = useMemo(() => {
     const m = new Map<string, number>();
@@ -103,7 +109,17 @@ export default function BudgetPage() {
           <DialogHeader><DialogTitle>{detail?.label}</DialogTitle></DialogHeader>
           {trend && detail ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} limit={detail.item.limit} limits={limits}
             selected={picked} onPick={(i) => patch({ bar: ranges[i]?.key ?? null })} /> : <div className="h-48" />}
-          {detail ? <div className="text-xs text-muted-foreground">Budget <Money amount={limits?.[picked] ?? detail.item.limit} /> · tap a bar to see its entries.</div> : null}
+          {detail ? (
+            <div className="space-y-0.5 text-xs text-muted-foreground">
+              <div>Budget <Money amount={limits?.[picked] ?? detail.item.limit} /> · tap a bar to see its entries.</div>
+              {past.length > 1 ? past.map((s, i) => ({ s, next: past[i + 1] })).reverse().slice(0, 3).map(({ s, next }) => (
+                <div key={s.from ?? "start"}>
+                  <Money amount={s.amount} /> {next ? `before ${periodKeyLabel(period, next.from!)}` : `from ${periodKeyLabel(period, s.from!)}`}
+                  {s.avgSpent !== undefined ? <> · spent <Money amount={s.avgSpent} /> a {unit} on average</> : null}
+                </div>
+              )) : null}
+            </div>
+          ) : null}
           {detail && bar ? (
             <div className="-mx-4 -mb-4 flex min-h-0 flex-col border-t">
               <div className="flex items-baseline justify-between px-4 py-2 text-xs text-muted-foreground">
