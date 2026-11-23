@@ -551,6 +551,7 @@ function BudgetRow({ row, hint, unit = "month" }: { row: RecapBudgetRow; hint?: 
   const line = over ? row.limit / row.spent : undefined;
   const notes = [
     over ? `${Math.round(used * 100)}%` : `${Math.round(used * 100)}% of ${fmt(row.limit)}`,
+    row.was !== undefined ? `${row.was > row.limit - row.carry ? "cut" : "raised"} from ${fmt(row.was)}` : null,
     row.overOn ? `over on ${shortDay(row.overOn)}` : null,
     row.streak >= 2 ? `${over ? "over" : "held"} ${row.streak} ${unit}s running` : null,
   ].filter(Boolean).join(" · ");
@@ -584,6 +585,11 @@ function BudgetYearRowView({ row }: { row: RecapBudgetYearRow }) {
       <div className="mt-1 grid grid-cols-12 gap-[3px]">
         {row.months.map((o, i) => <i key={i} title={MONTH_SHORT[i]} className={cn("block h-3 rounded-[3px]", o === "over" ? "bg-expense" : o === "held" ? "bg-budget-left" : "bg-foreground/10")} />)}
       </div>
+      {row.change ? (
+        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+          {fmt(row.change.from)} → {fmt(row.change.to)} from {MONTH_SHORT[row.change.month]} · spent {fmt(row.change.avgBefore)} a month before, {fmt(row.change.avgAfter)} after
+        </div>
+      ) : null}
     </>
   );
   return row.id === "total" ? <div>{body}</div> : <Tap drill={{ kind: "category", id: row.id }} className="-mx-1.5 block w-[calc(100%+12px)] rounded px-1.5 py-0.5">{body}</Tap>;
