@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import { useOpenEntry } from "@/lib/nav";
 import { ArrowRight, Camera, Mail, Merge, Repeat, Star, Users } from "lucide-react";
@@ -87,10 +87,10 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
 }
 
 /** `totals: false` for a day with nothing saved yet (only drafts or upcoming rows): there is nothing to add up. */
-export function DayHeader({ date, income, expense, totals = true }: { date: string; income: number; expense: number; totals?: boolean }) {
+export function DayHeader({ date, income, expense, totals = true, style }: { date: string; income: number; expense: number; totals?: boolean; style?: CSSProperties }) {
   const { d, y, m } = parts(date);
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/40 border-b text-sm">
+    <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/40 border-b text-sm" style={style}>
       <span className="text-xl font-semibold tabular w-8">{d}</span>
       <span className="text-[11px] text-muted-foreground">{String(m).padStart(2, "0")}/{y}</span>
       <span className="text-[10px] rounded bg-muted-foreground/70 text-background px-1.5 py-0.5">{WEEKDAY_SHORT[weekday(date)]}</span>
@@ -149,9 +149,12 @@ const rowKey = (t: Tx) => (t.source ? `g:${t.source.messageId}` : t._id);
 type Row = { kind: "tx"; t: Tx; at: number } | { kind: "draft"; d: Draft; at: number } | { kind: "upcoming"; o: Occurrence; at: number };
 
 /** Faded while the row is a draft, solid once saved; a 300 ms CSS fade between the two (none under reduced motion), so a month of rows carries no animation objects. */
-function Fade({ faded, children }: { faded: boolean; children: ReactNode }) {
-  return <div className={cn("transition-opacity duration-300 motion-reduce:transition-none", faded && "opacity-[0.55]")}>{children}</div>;
+function Fade({ faded, children, style }: { faded: boolean; children: ReactNode; style?: CSSProperties }) {
+  return <div className={cn("transition-opacity duration-300 motion-reduce:transition-none", faded && "opacity-[0.55]")} style={style}>{children}</div>;
 }
+
+/** A row's place in the list, for the staggered rise of `settle-in` (index.css). */
+const at = (i: number) => ({ "--i": i }) as CSSProperties;
 
 /**
  * Entries grouped by day, with any drafts from Gmail and coming dates of repeats (`upcoming`) at the
@@ -159,9 +162,11 @@ function Fade({ faded, children }: { faded: boolean; children: ReactNode }) {
  * slides left to uncover Delete (off while selecting), wherever the list is shown: the month, a
  * day, a search, a payment method, a category. Day totals count entries only.
  */
-export function TransactionList({ txs, drafts, upcoming, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className }: {
+export function TransactionList({ txs, drafts, upcoming, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className, settleKey }: {
   txs: Tx[]; drafts?: Draft[]; upcoming?: Occurrence[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void;
   emptyText?: string; className?: string;
+  /** The rows rise into place, a beat apart, each time this changes (the month on Transactions). */
+  settleKey?: string;
 }) {
   const undoable = useUndoableDelete();
   const confirm = useConfirm();
@@ -197,15 +202,16 @@ export function TransactionList({ txs, drafts, upcoming, selectable, selected, o
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
   }, [txs, drafts, upcoming]);
   if (!txs.length && !drafts?.length && !upcoming?.length) return <div className="py-12 text-center text-sm text-muted-foreground">{emptyText}</div>;
+  let order = 0;
   return (
-    <div className={className}>
+    <div key={settleKey} className={cn(settleKey !== undefined && "settle-in", className)}>
       {groups.map(([date, { txs: list, rows }]) => {
         const k = sumKinds(list, ledger);
         return (
           <Fragment key={date}>
-            <DayHeader date={date} income={k.income} expense={k.expense} totals={list.length > 0} />
+            <DayHeader date={date} income={k.income} expense={k.expense} totals={list.length > 0} style={at(order++)} />
             {rows.map((r) => r.kind === "tx" ? (
-              <Fade key={rowKey(r.t)} faded={false}>
+              <Fade key={rowKey(r.t)} faded={false} style={at(order++)}>
                 <SwipeToDelete className="border-b last:border-b-0" disabled={selectable} {...swipe.row(r.t._id)} onDelete={() => remove(r.t)}>
                   <TransactionRow
                     tx={r.t}
@@ -221,12 +227,12 @@ export function TransactionList({ txs, drafts, upcoming, selectable, selected, o
               </Fade>
             ) : r.kind === "draft" ? (
               // a ticked draft shows solid, so it reads as picked rather than greyed out
-              <Fade key={`g:${r.d.messageId}`} faded={!selected?.has(r.d._id)}>
+              <Fade key={`g:${r.d.messageId}`} faded={!selected?.has(r.d._id)} style={at(order++)}>
                 <DraftRow draft={r.d} onClick={selectable ? () => onToggle?.(r.d._id, !selected?.has(r.d._id)) : () => openEntry("new", { draft: r.d._id })}
                   selected={selected?.has(r.d._id)} onSelect={selectable ? (v) => onToggle?.(r.d._id, v) : undefined} />
               </Fade>
             ) : (
-              <Fade key={`r:${r.o.repeat._id}:${r.o.date}`} faded>
+              <Fade key={`r:${r.o.repeat._id}:${r.o.date}`} faded style={at(order++)}>
                 <UpcomingRow occ={r.o} onClick={selectable ? undefined : () => setOcc(r.o)} />
               </Fade>
             ))}

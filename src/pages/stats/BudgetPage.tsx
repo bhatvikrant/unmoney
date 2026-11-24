@@ -18,10 +18,12 @@ import { diffDays } from "../../../shared/dates";
 import { billsAgainstBudgets } from "../../../shared/upcoming";
 import { TransactionList } from "@/components/tx/TransactionList";
 import { dateLabel, monthLabel } from "@/lib/format";
+import { Bell } from "@/components/motion/Bell";
+import { RollingNumber } from "@/components/motion/RollingNumber";
 
 export default function BudgetPage() {
   const nav = useNavigate();
-  const { categoryById } = useApp();
+  const { categoryById, fmt } = useApp();
   const p = useStatPeriod();
   // a custom range has no budget of its own: show the month it starts in
   const period = p.period === "custom" ? "monthly" : p.period;
@@ -42,6 +44,9 @@ export default function BudgetPage() {
   const patch = (next: Record<string, string | null>) => { const n = new URLSearchParams(sp); for (const [k, v] of Object.entries(next)) { if (v === null) n.delete(k); else n.set(k, v); } setSp(n, { replace: true }); };
   const setDetail = (d: { item: BudgetItem; label: string } | null) => patch({ budget: d ? d.item.budget._id : null, bar: null });
   const today = useToday();
+  // a finished period with budgets, none of them overspent: the one budget moment worth a bell
+  const stayedUnder = !!status && status.range.to < today && (!!status.total || status.perCategory.length > 0)
+    && [status.total, ...status.perCategory].every((b) => !b || b.spent <= b.limit);
   const ranges = p.trailing();
   const rangeKey = ranges.map((r) => r.key).join(",");
   // the bar being looked at: the one tapped, else this period's
@@ -85,7 +90,7 @@ export default function BudgetPage() {
         <div className="flex items-center justify-between px-4 py-3 border-t">
           <div>
             <div className="text-xs text-muted-foreground">{status && !status.total ? `Spent (${label}, no total budget)` : `Remaining (${label})`}</div>
-            <div className="text-2xl font-semibold tabular">{status?.total ? <Money amount={status.total.remaining} kind={status.total.remaining < 0 ? "expense" : "plain"} /> : status ? <Money amount={status.spentAll} kind="expense" /> : "—"}</div>
+            <div className="text-2xl font-semibold tabular">{status?.total ? <RollingNumber value={fmt(status.total.remaining)} className={status.total.remaining < 0 ? "text-expense" : undefined} /> : status ? <RollingNumber value={fmt(status.spentAll)} className="text-expense" /> : "—"}</div>
             {pace ? (
               <div className="text-xs text-muted-foreground">
                 {pace.perDay !== null ? <><Money amount={pace.perDay} muted /> left per day · </> : null}
@@ -95,10 +100,15 @@ export default function BudgetPage() {
           </div>
           <Button variant="secondary" size="sm" onClick={() => nav(`/budget/settings?period=${period}&key=${key}`)}>Budget setting ›</Button>
         </div>
+        {stayedUnder ? (
+          <div className="flex items-center gap-2 px-4 pb-3 text-sm text-income">
+            <Bell once={`budget-bell:${period}:${key}`} className="text-base" /> Stayed under every budget this {period === "weekly" ? "week" : period === "yearly" ? "year" : "month"}.
+          </div>
+        ) : null}
         {status?.total ? <div className="bg-card border-y"><BudgetBar item={status.total} label={label} elapsed={status.elapsed} due={due.get(status.total.budget._id)} onClick={() => setDetail({ item: status.total!, label })} /></div> : null}
         {status?.perCategory.length ? (
           <div className="bg-card border-y mt-2">
-            {status.perCategory.map((it) => { const name = categoryById.get(it.budget.categoryId!)?.name ?? ""; return <BudgetBar key={it.budget._id} item={it} label={name} elapsed={status.elapsed} due={due.get(it.budget._id)} onClick={() => setDetail({ item: it, label: name })} />; })}
+            {status.perCategory.map((it, i) => { const name = categoryById.get(it.budget.categoryId!)?.name ?? ""; return <BudgetBar key={it.budget._id} index={i + 1} item={it} label={name} elapsed={status.elapsed} due={due.get(it.budget._id)} onClick={() => setDetail({ item: it, label: name })} />; })}
           </div>
         ) : null}
         {status && !status.total && !status.perCategory.length ? <EmptyState title={`No ${label.toLowerCase()} budgets`} hint="Set a total budget or one per category. The bar fills as you spend; the marker shows where today falls." action={<Button onClick={() => nav(`/budget/settings?period=${period}`)}>Set a budget</Button>} /> : null}

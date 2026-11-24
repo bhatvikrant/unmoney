@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { animate, motion, useMotionValue, useReducedMotion, type PanInfo } from "framer-motion";
 import { Trash2 } from "lucide-react";
+import { play } from "@/lib/sound";
 import { cn } from "@/lib/utils";
 
 /** Width of the Delete button a short swipe uncovers. */
@@ -32,6 +33,8 @@ export function SwipeToDelete({ children, open, onOpenChange, onDelete, disabled
   const reduce = useReducedMotion();
   const [dragging, setDragging] = useState(false);
   const moved = useRef(false);
+  // past FULL, where letting go deletes: a tick marks the moment it locks in
+  const armed = useRef(false);
 
   const settle = (to: number) => animate(x, to, reduce ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 40 });
 
@@ -49,6 +52,7 @@ export function SwipeToDelete({ children, open, onOpenChange, onDelete, disabled
     onOpenChange(next);
     // `open` may not change (still open, still shut), so settle here too
     settle(next ? -REVEAL : 0);
+    armed.current = false;
     if (full) onDelete();
   }
 
@@ -76,6 +80,10 @@ export function SwipeToDelete({ children, open, onOpenChange, onDelete, disabled
         dragMomentum={false}
         onPointerDownCapture={() => { moved.current = false; }}
         onDragStart={() => { moved.current = true; setDragging(true); }}
+        onDrag={() => {
+          const a = x.get() < -FULL;
+          if (a !== armed.current) { armed.current = a; if (a) play("tick"); }
+        }}
         onDragEnd={end}
         onClickCapture={onClickCapture}
         className="relative bg-card"

@@ -5,6 +5,7 @@ import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Switch } from "@/components/ui/switch";
+import { play, setSoundsEnabled, useSoundsEnabled } from "@/lib/sound";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const ordinal = (n: number) => `${n}${n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th"}`;
@@ -16,6 +17,7 @@ export default function PreferencesSettings() {
   const { pathname } = useLocation();
   const { settings: s } = useApp();
   const update = useOp("settings.update");
+  const sounds = useSoundsEnabled();
   return (
     <>
       <PageHeader back="/settings" title="Preferences" />
@@ -33,6 +35,7 @@ export default function PreferencesSettings() {
           <Row label="Subcategories" info="Lets categories have subcategories, for example Food › Groceries. When off, you only pick the main category." right={(id) => <Switch aria-labelledby={id} checked={s.subcategoryEnabled} onCheckedChange={(v) => update({ patch: { subcategoryEnabled: v } })} />} />
           <Row label="Autocomplete notes" info="While you type a note, suggests notes you have used before. Picking one also fills in the category and payment method you used with it." right={(id) => <Switch aria-labelledby={id} checked={s.autocompleteEnabled} onCheckedChange={(v) => update({ patch: { autocompleteEnabled: v } })} />} />
           <Row label="Time input" hint="Record the time of each entry" info="Adds a time field next to the date when you enter a transaction. Turn it off if you only care about the day." right={(id) => <Switch aria-labelledby={id} checked={s.timeInputEnabled} onCheckedChange={(v) => update({ patch: { timeInputEnabled: v } })} />} />
+          <Row label="Sounds" hint="Kept on this device" info="Quiet sounds when you make a transfer, pay a card, delete an entry, open a menu or drag across a chart. Nothing plays on its own. On iPhone the ringer switch silences them too." right={(id) => <Switch aria-labelledby={id} checked={sounds} onCheckedChange={(v) => { setSoundsEnabled(v); if (v) play("ding"); }} />} />
         </Section>
       </Page>
     </>

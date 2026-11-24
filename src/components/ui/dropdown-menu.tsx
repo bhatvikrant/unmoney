@@ -1,12 +1,23 @@
 import * as React from "react"
+import { play } from "@/lib/sound"
 import { cn } from "cn"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 import { CheckIcon, ChevronRightIcon } from "lucide-react"
 
 function DropdownMenu({
+  onOpenChange,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+  return (
+    <DropdownMenuPrimitive.Root
+      data-slot="dropdown-menu"
+      onOpenChange={(open) => {
+        if (open) play("tock")
+        onOpenChange?.(open)
+      }}
+      {...props}
+    />
+  )
 }
 
 function DropdownMenuPortal({
