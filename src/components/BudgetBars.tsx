@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useApp } from "@/lib/app";
 import { Money } from "@/components/shell/Money";
 import { cn } from "@/lib/utils";
@@ -6,8 +7,10 @@ import { useOverText, useShortMoney } from "@/lib/budgetText";
 
 export type BudgetItem = { budget: { _id: string; categoryId?: string; period: string }; limit: number; spent: number; remaining: number; isOverride?: boolean; carry?: number };
 
-export function BudgetBar({ item, label, elapsed, onClick, due = 0 }: {
+export function BudgetBar({ item, label, elapsed, onClick, due = 0, index = 0 }: {
   item: BudgetItem; label: string; elapsed: number; onClick?: () => void;
+  /** Position in a list of bars: they grow in a beat apart. */
+  index?: number;
   /** Bills scheduled before the period ends, not added yet: drawn lighter after what was spent. */
   due?: number;
 }) {
@@ -32,7 +35,7 @@ export function BudgetBar({ item, label, elapsed, onClick, due = 0 }: {
         aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(ratio * 100)}
         aria-valuetext={`${Math.round(ratio * 100)}% used, ${Math.round(elapsed * 100)}% of the period gone${over ? ", over budget" : warn ? ", ahead of pace" : ""}`}>
         <div className="flex h-full">
-          <div className={cn("h-full rounded transition-all", over ? "bg-expense" : warn ? "bg-expense/70" : "bg-income")} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
+          <div className={cn("bar-grow-x h-full rounded transition-all", over ? "bg-expense" : warn ? "bg-expense/70" : "bg-income")} style={{ width: `${Math.min(100, ratio * 100)}%`, "--i": index } as CSSProperties} />
           {due > 0 && ratio < 1 ? <div className={cn("h-full", item.spent + due > item.limit ? "bg-expense/35" : "bg-foreground/25")} style={{ width: `${Math.min(100 - ratio * 100, (due / Math.max(1, item.limit)) * 100)}%` }} title="Bills still due" /> : null}
         </div>
         <div className="absolute top-0 bottom-0 w-0.5 bg-foreground/70" style={{ left: `${Math.min(100, elapsed * 100)}%` }} title="Today" />
