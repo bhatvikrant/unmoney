@@ -87,10 +87,10 @@ export function TransactionRow({ tx, onClick, onLongPress, selected, onSelect, s
 }
 
 /** `totals: false` for a day with nothing saved yet (only drafts or upcoming rows): there is nothing to add up. */
-export function DayHeader({ date, income, expense, totals = true, style }: { date: string; income: number; expense: number; totals?: boolean; style?: CSSProperties }) {
+export function DayHeader({ date, income, expense, totals = true, style, className }: { date: string; income: number; expense: number; totals?: boolean; style?: CSSProperties; className?: string }) {
   const { d, y, m } = parts(date);
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/40 border-b text-sm" style={style}>
+    <div className={cn("flex items-center gap-2 px-4 py-1.5 bg-muted/40 border-b text-sm", className)} style={style}>
       <span className="text-xl font-semibold tabular w-8">{d}</span>
       <span className="text-[11px] text-muted-foreground">{String(m).padStart(2, "0")}/{y}</span>
       <span className="text-[10px] rounded bg-muted-foreground/70 text-background px-1.5 py-0.5">{WEEKDAY_SHORT[weekday(date)]}</span>
@@ -149,12 +149,12 @@ const rowKey = (t: Tx) => (t.source ? `g:${t.source.messageId}` : t._id);
 type Row = { kind: "tx"; t: Tx; at: number } | { kind: "draft"; d: Draft; at: number } | { kind: "upcoming"; o: Occurrence; at: number };
 
 /** Faded while the row is a draft, solid once saved; a 300 ms CSS fade between the two (none under reduced motion), so a month of rows carries no animation objects. */
-function Fade({ faded, children, style }: { faded: boolean; children: ReactNode; style?: CSSProperties }) {
-  return <div className={cn("transition-opacity duration-300 motion-reduce:transition-none", faded && "opacity-[0.55]")} style={style}>{children}</div>;
+function Fade({ faded, children, style, className }: { faded: boolean; children: ReactNode; style?: CSSProperties; className?: string }) {
+  return <div className={cn("transition-opacity duration-300 motion-reduce:transition-none", faded && "opacity-[0.55]", className)} style={style}>{children}</div>;
 }
 
-/** A row's place in the list, for the staggered rise of `settle-in` (index.css). */
-const at = (i: number) => ({ "--i": i }) as CSSProperties;
+/** The first 8 rows (about what a phone shows) rise in, a beat apart (`settle-in`, index.css); the rest just show. */
+const at = (i: number) => (i < 8 ? { style: { "--i": i } as CSSProperties, className: "settle-row" } : {});
 
 /**
  * Entries grouped by day, with any drafts from Gmail and coming dates of repeats (`upcoming`) at the
@@ -209,9 +209,9 @@ export function TransactionList({ txs, drafts, upcoming, selectable, selected, o
         const k = sumKinds(list, ledger);
         return (
           <Fragment key={date}>
-            <DayHeader date={date} income={k.income} expense={k.expense} totals={list.length > 0} style={at(order++)} />
+            <DayHeader date={date} income={k.income} expense={k.expense} totals={list.length > 0} {...at(order++)} />
             {rows.map((r) => r.kind === "tx" ? (
-              <Fade key={rowKey(r.t)} faded={false} style={at(order++)}>
+              <Fade key={rowKey(r.t)} faded={false} {...at(order++)}>
                 <SwipeToDelete className="border-b last:border-b-0" disabled={selectable} {...swipe.row(r.t._id)} onDelete={() => remove(r.t)}>
                   <TransactionRow
                     tx={r.t}
@@ -227,12 +227,12 @@ export function TransactionList({ txs, drafts, upcoming, selectable, selected, o
               </Fade>
             ) : r.kind === "draft" ? (
               // a ticked draft shows solid, so it reads as picked rather than greyed out
-              <Fade key={`g:${r.d.messageId}`} faded={!selected?.has(r.d._id)} style={at(order++)}>
+              <Fade key={`g:${r.d.messageId}`} faded={!selected?.has(r.d._id)} {...at(order++)}>
                 <DraftRow draft={r.d} onClick={selectable ? () => onToggle?.(r.d._id, !selected?.has(r.d._id)) : () => openEntry("new", { draft: r.d._id })}
                   selected={selected?.has(r.d._id)} onSelect={selectable ? (v) => onToggle?.(r.d._id, v) : undefined} />
               </Fade>
             ) : (
-              <Fade key={`r:${r.o.repeat._id}:${r.o.date}`} faded style={at(order++)}>
+              <Fade key={`r:${r.o.repeat._id}:${r.o.date}`} faded {...at(order++)}>
                 <UpcomingRow occ={r.o} onClick={selectable ? undefined : () => setOcc(r.o)} />
               </Fade>
             ))}
