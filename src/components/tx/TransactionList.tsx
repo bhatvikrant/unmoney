@@ -10,6 +10,7 @@ import { WEEKDAY_SHORT, parts, weekday } from "../../../shared/dates";
 import { EntryMoney, Money } from "@/components/shell/Money";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { useSettleIn } from "@/lib/useSettleIn";
 import { Badge } from "@/components/ui/badge";
 import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -153,8 +154,7 @@ function Fade({ faded, children, style, className }: { faded: boolean; children:
   return <div className={cn("transition-opacity duration-300 motion-reduce:transition-none", faded && "opacity-[0.55]", className)} style={style}>{children}</div>;
 }
 
-/** The first 8 rows (about what a phone shows) rise in, a beat apart (`settle-in`, index.css); the rest just show. */
-const at = (i: number) => (i < 8 ? { style: { "--i": i } as CSSProperties, className: "settle-row" } : {});
+
 
 /**
  * Entries grouped by day, with any drafts from Gmail and coming dates of repeats (`upcoming`) at the
@@ -165,7 +165,7 @@ const at = (i: number) => (i < 8 ? { style: { "--i": i } as CSSProperties, class
 export function TransactionList({ txs, drafts, upcoming, selectable, selected, onToggle, onLongPress, emptyText = "No transactions", className, settleKey }: {
   txs: Tx[]; drafts?: Draft[]; upcoming?: Occurrence[]; selectable?: boolean; selected?: Set<string>; onToggle?: (id: string, v: boolean) => void; onLongPress?: (id: string) => void;
   emptyText?: string; className?: string;
-  /** The rows rise into place, a beat apart, each time this changes (the month on Transactions). */
+  /** The rows on screen rise into place, a beat apart, each time this changes (the month on Transactions). */
   settleKey?: string;
 }) {
   const undoable = useUndoableDelete();
@@ -201,17 +201,18 @@ export function TransactionList({ txs, drafts, upcoming, selectable, selected, o
     for (const o of upcoming ?? []) day(o.date).rows.push({ kind: "upcoming", o, at: 0 });
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
   }, [txs, drafts, upcoming]);
+  const listRef = useRef<HTMLDivElement>(null);
+  useSettleIn(listRef, ":scope > *", settleKey);
   if (!txs.length && !drafts?.length && !upcoming?.length) return <div className="py-12 text-center text-sm text-muted-foreground">{emptyText}</div>;
-  let order = 0;
   return (
-    <div key={settleKey} className={cn(settleKey !== undefined && "settle-in", className)}>
+    <div ref={listRef} className={className}>
       {groups.map(([date, { txs: list, rows }]) => {
         const k = sumKinds(list, ledger);
         return (
           <Fragment key={date}>
-            <DayHeader date={date} income={k.income} expense={k.expense} totals={list.length > 0} {...at(order++)} />
+            <DayHeader date={date} income={k.income} expense={k.expense} totals={list.length > 0} />
             {rows.map((r) => r.kind === "tx" ? (
-              <Fade key={rowKey(r.t)} faded={false} {...at(order++)}>
+              <Fade key={rowKey(r.t)} faded={false}>
                 <SwipeToDelete className="border-b last:border-b-0" disabled={selectable} {...swipe.row(r.t._id)} onDelete={() => remove(r.t)}>
                   <TransactionRow
                     tx={r.t}
@@ -227,12 +228,12 @@ export function TransactionList({ txs, drafts, upcoming, selectable, selected, o
               </Fade>
             ) : r.kind === "draft" ? (
               // a ticked draft shows solid, so it reads as picked rather than greyed out
-              <Fade key={`g:${r.d.messageId}`} faded={!selected?.has(r.d._id)} {...at(order++)}>
+              <Fade key={`g:${r.d.messageId}`} faded={!selected?.has(r.d._id)}>
                 <DraftRow draft={r.d} onClick={selectable ? () => onToggle?.(r.d._id, !selected?.has(r.d._id)) : () => openEntry("new", { draft: r.d._id })}
                   selected={selected?.has(r.d._id)} onSelect={selectable ? (v) => onToggle?.(r.d._id, v) : undefined} />
               </Fade>
             ) : (
-              <Fade key={`r:${r.o.repeat._id}:${r.o.date}`} faded {...at(order++)}>
+              <Fade key={`r:${r.o.repeat._id}:${r.o.date}`} faded>
                 <UpcomingRow occ={r.o} onClick={selectable ? undefined : () => setOcc(r.o)} />
               </Fade>
             ))}
