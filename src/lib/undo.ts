@@ -5,6 +5,7 @@
  */
 import { toast } from "sonner";
 import { useStore } from "@/lib/store";
+import { play } from "@/lib/sound";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 
 /** A toast with Undo, which runs `undo` (and says so if it fails). */
@@ -32,6 +33,7 @@ export function useUndoableDelete() {
       const series = scope !== "one" && tx.repeatId;
       const gone = series ? view.transactions.filter((t) => t.repeatId === tx.repeatId && (scope === "all" || t.date >= tx.date)) : [tx];
       const schedule = series ? view.repeats.find((r) => r._id === tx.repeatId && r.active) : undefined;
+      play("thunk");
       await dispatch("transactions.remove", { id: id as Id<"transactions">, scope });
       offerUndo(gone.length === 1 ? "Entry deleted" : `${gone.length} entries deleted`, async () => {
         await restore(gone);
@@ -42,6 +44,7 @@ export function useUndoableDelete() {
     async entries(ids: string[]) {
       const set = new Set(ids);
       const gone = view.transactions.filter((t) => set.has(t._id));
+      play("thunk");
       await dispatch("transactions.bulkRemove", { ids: ids as Id<"transactions">[] });
       offerUndo(`Deleted ${gone.length} ${gone.length === 1 ? "entry" : "entries"}`, () => restore(gone));
     },

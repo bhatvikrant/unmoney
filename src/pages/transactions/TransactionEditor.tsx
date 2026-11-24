@@ -34,6 +34,8 @@ import { DeleteSeriesEntryDialog } from "@/components/tx/DeleteSeriesEntryDialog
 import { SplitDialog } from "@/components/tx/SplitDialog";
 import { expenseUrl } from "@/lib/unsplit";
 import { cn } from "@/lib/utils";
+import { flyMoney } from "@/lib/moneyFlight";
+import { play } from "@/lib/sound";
 import { fromTemplate, isEntryLink, linkEntry, parseEntryLink, templateUsable } from "../../../shared/quickAdd";
 import type { TxFields } from "../../../shared/ops";
 import { useQuickSave } from "@/components/tx/QuickAdd";
@@ -386,6 +388,9 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
 
   // Desktop: Enter saves (Ctrl/⌘+Enter even from the description), Esc goes back. A field that
   // uses Enter itself (tags) prevents it first; an open sheet or dialog keeps its own keys.
+  // the transfer rows, for the bills that fly between them on save
+  const fromRef = useRef<HTMLDivElement>(null);
+  const toRef = useRef<HTMLDivElement>(null);
   const saveRef = useRef(save);
   useLayoutEffect(() => { saveRef.current = save; });
   useEffect(() => {
@@ -450,11 +455,19 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
         if (mode === "next" && nextDraft) done(() => openEntry("new", { draft: nextDraft._id }));
         else done(closeEntry);
       } else {
-        await create({
-          ...args,
-          repeat: f.repeat.kind === "repeat" ? { frequency: f.repeat.frequency, endDate: f.repeat.endDate } : undefined,
-          installment: f.repeat.kind === "installment" ? { count: f.repeat.count } : undefined,
-        });
+        // a new transfer: bills drift from the From row to the To row while it saves
+        const moving = args.type === "transfer";
+        if (moving) play("flutter");
+        const flight = moving ? flyMoney(fromRef.current, toRef.current) : 0;
+        await Promise.all([
+          create({
+            ...args,
+            repeat: f.repeat.kind === "repeat" ? { frequency: f.repeat.frequency, endDate: f.repeat.endDate } : undefined,
+            installment: f.repeat.kind === "installment" ? { count: f.repeat.count } : undefined,
+          }),
+          new Promise((r) => window.setTimeout(r, flight)),
+        ]);
+        if (moving) play("ding");
         if (mode === "continue") {
           const next: Form = { ...f, amount: "", subAmount: "", note: "", description: "", tags: [], photoIds: [], fee: "", feeOn: false, repeat: { kind: "none" }, refund: false };
           setF(next);
@@ -548,10 +561,10 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
 
           {f.type === "transfer" ? (
             <>
-              <Field label="From" onClick={() => setSheet("account")} value={f.accountId ? accountName(f.accountId) : "Select"} />
-              <Field label="To" onClick={() => setSheet("to")} value={f.toAccountId ? accountName(f.toAccountId) : "Select"} right={
+              <div ref={fromRef}><Field label="From" onClick={() => setSheet("account")} value={f.accountId ? accountName(f.accountId) : "Select"} /></div>
+              <div ref={toRef}><Field label="To" onClick={() => setSheet("to")} value={f.toAccountId ? accountName(f.toAccountId) : "Select"} right={
                 <Button variant="ghost" size="icon" className="size-7" aria-label="Swap payment methods" onClick={(e) => { e.stopPropagation(); setF((p) => ({ ...p, accountId: p.toAccountId, toAccountId: p.accountId })); }}><ArrowLeftRight className="size-4" /></Button>
-              } />
+              } /></div>
             </>
           ) : (
             <>
