@@ -157,7 +157,7 @@ export default function TransactionsPage() {
         <GmailNudge from={range.from} to={range.to} />
         <SipNudge from={range.from} to={range.to} />
         {raw === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div> : null}
-        {raw && view === "daily" ? <TransactionList txs={txs} drafts={drafts} upcoming={upcoming} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No transactions this month. Tap + to add one." /> : null}
+        {raw && view === "daily" ? <TransactionList txs={txs} drafts={drafts} upcoming={upcoming} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} settleKey={month} emptyText="No transactions this month. Tap + to add one." /> : null}
         {raw && view === "calendar" ? <CalendarView txs={txs} range={range} /> : null}
         {raw && view === "weekly" ? <WeeklyView txs={txs} range={range} /> : null}
         {view === "monthly" ? <MonthlyView month={month} reachable={reachable} onPick={(m) => { setMonth(m); setView("daily"); }} /> : null}
@@ -358,7 +358,7 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
       {status?.total ? <div className="border-y bg-card"><BudgetBar item={status.total} label="Monthly" elapsed={status.elapsed} onClick={() => nav("/budget")} /></div> : null}
       {status?.perCategory.length ? (
         <div className="border-y bg-card mt-2">
-          {status.perCategory.map((it) => <BudgetBar key={it.budget._id} item={it} label={categoryById.get(it.budget.categoryId!)?.name ?? ""} elapsed={status.elapsed} onClick={() => nav("/budget")} />)}
+          {status.perCategory.map((it, i) => <BudgetBar key={it.budget._id} index={i + 1} item={it} label={categoryById.get(it.budget.categoryId!)?.name ?? ""} elapsed={status.elapsed} onClick={() => nav("/budget")} />)}
         </div>
       ) : !status?.total ? <div className="px-4 text-xs text-muted-foreground">No budgets yet.</div> : null}
 

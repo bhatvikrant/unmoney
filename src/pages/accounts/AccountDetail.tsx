@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Archive, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useOp, useStore, useView } from "@/lib/store";
 import { accountGet, cardStatements, creditAvailable, txSearch } from "../../../shared/views";
 import { cn } from "@/lib/utils";
+import { flyMoney } from "@/lib/moneyFlight";
+import { play } from "@/lib/sound";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
@@ -54,6 +56,8 @@ export default function AccountDetail() {
     await setArchived({ ids: [id], archived: false }).catch((e) => toast.error(e instanceof Error ? e.message : "Failed"));
   };
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
+  const payFromRef = useRef<HTMLDivElement>(null);
+  const payToRef = useRef<HTMLSpanElement>(null);
   // a statement picked below: the entry list shows that cycle instead of the month
   const [cycle, setCycle] = useState<{ from: string; to: string } | null>(null);
   // quiet cycles (nothing charged or paid) are left out, except the open one
@@ -176,17 +180,28 @@ export default function AccountDetail() {
       <AdjustBalanceDialog open={adjusting} onOpenChange={setAdjusting} account={a} kind={data.kind} balance={data.balance} today={today} />
       <Dialog open={!!pay} onOpenChange={(o) => !o && setPay(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Pay {a.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle><span ref={payToRef}>Pay {a.name}</span></DialogTitle></DialogHeader>
           {pay ? (
             <div className="space-y-3">
               <div className="space-y-1.5"><Label>Amount ({settings.mainCurrency})</Label><Input inputMode="decimal" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} /></div>
               <div className="space-y-1.5"><Label>Date</Label><Input type="date" value={pay.date} onChange={(e) => setPay({ ...pay, date: e.target.value })} /></div>
-              <div className="space-y-1.5"><Label>Pay from</Label>
+              <div ref={payFromRef} className="space-y-1.5"><Label>Pay from</Label>
                 <Select value={pay.from} onValueChange={(v) => setPay({ ...pay, from: v })}><SelectTrigger className="w-full"><SelectValue placeholder="Pick" /></SelectTrigger><SelectContent>{accounts.filter((x) => x._id !== a._id && x.kind !== "card" && (!x.archivedAt || x._id === pay.from)).map((x) => <SelectItem key={x._id} value={x._id}>{x.name} · {fmt(x.balance)}</SelectItem>)}</SelectContent></Select>
               </div>
             </div>
           ) : null}
-          <DialogFooter><Button disabled={!pay?.from || !pay?.amount} onClick={async () => { try { await payCard({ id: a._id, amount: toMinor(pay!.amount, settings.decimals, LOCALE_DECIMAL), date: pay!.date, fromAccountId: pay!.from as Id<"accounts"> }); setPay(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Record payment</Button></DialogFooter>
+          <DialogFooter><Button disabled={!pay?.from || !pay?.amount} onClick={async () => {
+            const amount = toMinor(pay!.amount, settings.decimals, LOCALE_DECIMAL);
+            const payable = data.card?.payable ?? 0;
+            // bills drift from the paying account to the card; paying the whole bill rings the bell
+            play("flutter");
+            const flight = flyMoney(payFromRef.current, payToRef.current);
+            try {
+              await Promise.all([payCard({ id: a._id, amount, date: pay!.date, fromAccountId: pay!.from as Id<"accounts"> }), new Promise((r) => window.setTimeout(r, flight))]);
+              play(payable > 0 && amount >= payable ? "bell" : "ding");
+              setPay(null);
+            } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
+          }}>Record payment</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>

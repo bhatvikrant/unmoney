@@ -214,3 +214,91 @@ nav { user-select: none; }
   from { transform: translateX(-100%); }
   to { transform: translateX(300%); }
 }
+
+/*
+  Motion kit. Everything is a CSS keyframe inside no-preference, so with reduced motion none of it
+  runs. Bills drawn by lib/moneyFlight.ts sit outside: that module skips the flight itself.
+*/
+.money-bill {
+  position: absolute;
+  left: -12px;
+  top: -7px;
+  width: 24px;
+  height: 14px;
+  border-radius: 2.5px;
+  background: linear-gradient(135deg, #8fd3a8, #4f9e6f);
+  box-shadow: inset 0 0 0 1px #2f7d50, 0 1px 3px rgb(0 0 0 / 0.18);
+  will-change: transform, opacity;
+}
+.money-bill::after {
+  content: "";
+  position: absolute;
+  inset: 3px 8px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px #2f7d50;
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* Menus and popovers (.menu-grow) grow out of the button that opened them, then a menu's rows
+     (.menu-row) follow a beat apart. Every selector here ends in a class: one ending in * or a
+     bare :nth-child is tested against every element on every style pass. */
+  .menu-grow[data-state="open"] {
+    animation: menu-grow 300ms cubic-bezier(0.3, 1.3, 0.5, 1) backwards;
+  }
+  .menu-grow[data-state="open"] > .menu-row {
+    animation: menu-row 240ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+    animation-delay: var(--row-delay, 160ms);
+  }
+  .menu-row:nth-child(1) { --row-delay: 40ms; }
+  .menu-row:nth-child(2) { --row-delay: 60ms; }
+  .menu-row:nth-child(3) { --row-delay: 80ms; }
+  .menu-row:nth-child(4) { --row-delay: 100ms; }
+  .menu-row:nth-child(5) { --row-delay: 120ms; }
+  .menu-row:nth-child(6) { --row-delay: 140ms; }
+
+  /* A list's first 8 rows (about what a phone shows: the ones given .settle-row) rise into place,
+     30ms apart. Only transform and opacity move, which the compositor handles without a repaint. */
+  .settle-in > .settle-row {
+    animation: row-in 340ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
+    animation-delay: calc(var(--i, 0) * 30ms);
+  }
+
+  /* Bars grow from their baseline with a small overshoot, staggered by --i. */
+  .bar-grow-x {
+    transform-origin: left center;
+    animation: bar-grow-x 700ms cubic-bezier(0.2, 1.15, 0.4, 1) backwards;
+    animation-delay: calc(min(var(--i, 0), 12) * 35ms);
+  }
+  .bar-grow-y {
+    transform-origin: center bottom;
+    animation: bar-grow-y 700ms cubic-bezier(0.2, 1.15, 0.4, 1) backwards;
+    animation-delay: calc(min(var(--i, 0), 12) * 35ms);
+  }
+
+  /* A face joining a split lands with a springy pop. */
+  .pop-in {
+    animation: pop-in 420ms cubic-bezier(0.3, 1.6, 0.5, 1) backwards;
+  }
+
+  /* One wobble of a bell hanging from its top. */
+  .bell-ring {
+    transform-origin: 50% 12%;
+    animation: bell-ring 900ms cubic-bezier(0.3, 1.4, 0.5, 1);
+  }
+}
+@keyframes menu-grow {
+  from { opacity: 0; transform: scale(0.6); filter: blur(6px); }
+  55% { opacity: 1; filter: blur(0); }
+  to { opacity: 1; transform: scale(1); filter: none; }
+}
+@keyframes menu-row { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes row-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes bar-grow-x { from { transform: scaleX(0); } }
+@keyframes bar-grow-y { from { transform: scaleY(0); } }
+@keyframes pop-in { from { transform: scale(0.3); opacity: 0; } }
+@keyframes bell-ring {
+  15% { transform: rotate(16deg); }
+  30% { transform: rotate(-12deg); }
+  45% { transform: rotate(8deg); }
+  60% { transform: rotate(-4deg); }
+  75% { transform: rotate(2deg); }
+}

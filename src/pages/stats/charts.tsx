@@ -1,10 +1,14 @@
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Label, Pie, PieChart, ReferenceLine, Sector, XAxis, YAxis } from "recharts";
+import { useState } from "react";
+import { useReducedMotion } from "framer-motion";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Label, Pie, PieChart, ReferenceLine, Sector, XAxis, YAxis, type MouseHandlerDataParam } from "recharts";
 import type { PieSectorDataItem } from "recharts/types/polar/Pie";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
 import { useApp } from "@/lib/app";
 import { toMajor } from "../../../shared/money";
 import { colorAt, colouredCount } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { play } from "@/lib/sound";
+import { RollingNumber } from "@/components/motion/RollingNumber";
 
 export { colorAt, colouredCount, SERIES_SLOTS } from "@/lib/theme";
 
@@ -78,25 +82,50 @@ function pickColumn(e: React.MouseEvent<HTMLElement>, n: number, onPick: (index:
 /** `onPick`: tapping a bar (anywhere in its column, so a tiny bar is still easy to hit) opens that period. */
 /** `limit` draws the dashed line; `limits` (one per bar, else `limit`) decides which bars are over. */
 /** `selected`: the bar being looked at; the others are dimmed. */
-export function TrendBars({ data, color = "var(--expense)", limit, limits, onPick, selected }: { data: { label: string; amount: number }[]; color?: string; limit?: number; limits?: number[]; onPick?: (index: number) => void; selected?: number }) {
+/**
+ * `readout`: a figure above the chart that follows your finger or pointer across the bars, rolling
+ * to each bar's amount with a quiet tick, and dims the other bars; it rests on the latest bar. It
+ * takes the tooltip's place.
+ */
+export function TrendBars({ data, color = "var(--expense)", limit, limits, onPick, selected, readout }: { data: { label: string; amount: number }[]; color?: string; limit?: number; limits?: number[]; onPick?: (index: number) => void; selected?: number; readout?: boolean }) {
   const { fmt, settings } = useApp();
+  const reduce = useReducedMotion();
+  const [hover, setHover] = useState<number | null>(null);
   const rows = data.map((d, i) => ({ ...d, major: toMajor(d.amount, settings.decimals), limit: limits?.[i] ?? limit }));
   const fillFor = (d: { amount: number; limit?: number }) => (d.limit === undefined ? color : d.amount > d.limit ? "var(--expense)" : "var(--income)");
+  const track = (state: MouseHandlerDataParam) => {
+    const i = state.activeTooltipIndex == null ? NaN : Number(state.activeTooltipIndex);
+    if (Number.isNaN(i) || i === hover) return;
+    setHover(i);
+    play("tick");
+  };
+  const focus = readout && hover !== null && hover < rows.length ? hover : selected;
+  const shown = rows[focus ?? rows.length - 1];
   return (
-    <ChartContainer config={barConfig} className={cn("h-48 w-full", onPick && "cursor-pointer")} onClick={onPick ? (e) => pickColumn(e, rows.length, onPick) : undefined}>
-      <BarChart accessibilityLayer data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%">
-        <CartesianGrid vertical={false} />
-        <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={16} />
-        <YAxis tickLine={false} axisLine={false} width={40} tickFormatter={axisTick} />
-        <ChartTooltip cursor={{ fillOpacity: 0.5 }} content={<ChartTooltipContent formatter={(_v, _n, item) => <Row color={fillFor({ amount: item.payload?.amount ?? 0, limit: item.payload?.limit })} name={limit !== undefined ? "Spent" : "Amount"} value={fmt(item.payload?.amount ?? 0)} />} />} />
-        {limit !== undefined ? (
-          <ReferenceLine y={toMajor(limit, settings.decimals)} stroke="var(--muted-foreground)" strokeDasharray="4 4" ifOverflow="extendDomain" />
-        ) : null}
-        <Bar dataKey="major" fill={color} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false}>
-          {limit !== undefined || selected !== undefined ? rows.map((d, i) => <Cell key={i} fill={limit !== undefined ? fillFor(d) : color} fillOpacity={selected === undefined || selected === i ? 1 : 0.35} />) : null}
-        </Bar>
-      </BarChart>
-    </ChartContainer>
+    <div>
+      {readout && shown ? (
+        <div className="flex items-baseline justify-between px-2 pb-1">
+          <span className="text-xs text-muted-foreground">{shown.label}</span>
+          <RollingNumber value={fmt(shown.amount)} className="text-xl font-semibold tracking-tight" />
+        </div>
+      ) : null}
+      <ChartContainer config={barConfig} className={cn("h-48 w-full", onPick && "cursor-pointer", readout && "touch-pan-y")} onClick={onPick ? (e) => pickColumn(e, rows.length, onPick) : undefined}>
+        <BarChart accessibilityLayer data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%"
+          {...(readout ? { onMouseMove: track, onTouchStart: track, onTouchMove: track, onMouseLeave: () => setHover(null) } : {})}>
+          <CartesianGrid vertical={false} />
+          <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={16} />
+          <YAxis tickLine={false} axisLine={false} width={40} tickFormatter={axisTick} />
+          <ChartTooltip cursor={{ fillOpacity: 0.5 }} content={readout ? () => null : <ChartTooltipContent formatter={(_v, _n, item) => <Row color={fillFor({ amount: item.payload?.amount ?? 0, limit: item.payload?.limit })} name={limit !== undefined ? "Spent" : "Amount"} value={fmt(item.payload?.amount ?? 0)} />} />} />
+          {limit !== undefined ? (
+            <ReferenceLine y={toMajor(limit, settings.decimals)} stroke="var(--muted-foreground)" strokeDasharray="4 4" ifOverflow="extendDomain" />
+          ) : null}
+          {/* bars rise from the baseline on first view */}
+          <Bar dataKey="major" fill={color} radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={!reduce} animationDuration={700} animationEasing="ease-out">
+            {limit !== undefined || focus !== undefined ? rows.map((d, i) => <Cell key={i} fill={limit !== undefined ? fillFor(d) : color} fillOpacity={focus === undefined || focus === i ? 1 : 0.35} />) : null}
+          </Bar>
+        </BarChart>
+      </ChartContainer>
+    </div>
   );
 }
 
