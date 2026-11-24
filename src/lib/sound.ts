@@ -11,7 +11,8 @@ import { useSyncExternalStore } from "react";
  * vibration (Android; iOS Safari has no vibration API).
  */
 
-export type SoundName = "tick" | "pop" | "tock" | "thunk" | "flutter" | "ding" | "bell";
+export type SoundName =
+  "tick" | "pop" | "tock" | "thunk" | "flutter" | "ding" | "bell";
 
 const KEY = "sounds";
 const listeners = new Set<() => void>();
@@ -54,7 +55,10 @@ let lastTick = 0;
 
 function audio(): { c: AudioContext; out: GainNode } | null {
   if (typeof window === "undefined") return null;
-  const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  const AC =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
   if (!AC) return null;
   if (!ctx) {
     try {
@@ -71,13 +75,26 @@ function audio(): { c: AudioContext; out: GainNode } | null {
   return { c: ctx, out: master! };
 }
 
-function envelope(g: GainNode, t: number, attack: number, peak: number, decay: number) {
+function envelope(
+  g: GainNode,
+  t: number,
+  attack: number,
+  peak: number,
+  decay: number,
+) {
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(peak, t + attack);
   g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
 }
 
-function tone(f0: number, f1: number, dur: number, peak: number, type: OscillatorType = "sine", at = 0) {
+function tone(
+  f0: number,
+  f1: number,
+  dur: number,
+  peak: number,
+  type: OscillatorType = "sine",
+  at = 0,
+) {
   const a = audio();
   if (!a) return;
   const t = a.c.currentTime + at;
@@ -93,7 +110,14 @@ function tone(f0: number, f1: number, dur: number, peak: number, type: Oscillato
 }
 
 let noiseBuffer: AudioBuffer | null = null;
-function noise(dur: number, peak: number, freq: number, q = 1, type: BiquadFilterType = "bandpass", at = 0) {
+function noise(
+  dur: number,
+  peak: number,
+  freq: number,
+  q = 1,
+  type: BiquadFilterType = "bandpass",
+  at = 0,
+) {
   const a = audio();
   if (!a) return;
   if (!noiseBuffer || noiseBuffer.sampleRate !== a.c.sampleRate) {
@@ -137,7 +161,15 @@ const SOUNDS: Record<SoundName, (at: number) => void> = {
   },
   // paper bills, then a soft landing. The caller follows it with "ding" or "bell".
   flutter: (at) => {
-    for (let i = 0; i < 7; i++) noise(0.03, 0.28, 2600 + Math.random() * 1800, 3, "bandpass", at + i * 0.05 + Math.random() * 0.015);
+    for (let i = 0; i < 7; i++)
+      noise(
+        0.03,
+        0.28,
+        2600 + Math.random() * 1800,
+        3,
+        "bandpass",
+        at + i * 0.05 + Math.random() * 0.015,
+      );
     tone(160, 70, 0.16, 0.8, "sine", at + 0.38);
   },
   ding: (at) => {
@@ -153,7 +185,13 @@ const SOUNDS: Record<SoundName, (at: number) => void> = {
   },
 };
 
-const HAPTIC: Partial<Record<SoundName, number>> = { tick: 4, pop: 6, thunk: 15, flutter: 8, bell: 12 };
+const HAPTIC: Partial<Record<SoundName, number>> = {
+  tick: 4,
+  pop: 6,
+  thunk: 15,
+  flutter: 8,
+  bell: 12,
+};
 
 /**
  * Plays a UI sound, `delay` seconds from now. Ticks closer together than 35ms are dropped.
@@ -171,8 +209,22 @@ export function play(name: SoundName, delay = 0) {
   } catch {
     // an audio graph error must never break the action that triggered it
   }
+  sleepSoon(delay);
   const ms = HAPTIC[name];
   if (ms && delay === 0) vibrate(ms);
+}
+
+// A running AudioContext keeps the device's audio thread busy (CPU and battery) even in silence.
+// Suspend it once the last sound has had time to finish; play() resumes it.
+let idleTimer = 0;
+function sleepSoon(delay: number) {
+  window.clearTimeout(idleTimer);
+  idleTimer = window.setTimeout(
+    () => {
+      if (ctx?.state === "running") void ctx.suspend().catch(() => {});
+    },
+    (delay + 2.5) * 1000,
+  );
 }
 
 /** A run of quiet ticks, one per changed digit, as a rolling number settles. */
@@ -180,14 +232,17 @@ export function playTicks(count: number, start = 0.06, gap = 0.045) {
   for (let i = 0; i < Math.min(count, 6); i++) play("tick", start + i * gap);
 }
 
-// iOS starts (and resumes) audio only inside a tap. Make sure the context exists and is running on
-// every tap, so a sound that plays after an awaited step (a confirmation, a save) can still be heard.
+// iOS lets audio start only inside a tap. Create the context on the first one, so a sound that
+// plays after an awaited step (a confirmation, a save) can still be heard; once started inside a
+// tap it can be resumed later without one. It is suspended again when idle (sleepSoon).
 if (typeof window !== "undefined") {
-  window.addEventListener(
-    "pointerdown",
-    () => {
-      if (enabled && (!ctx || ctx.state === "suspended")) audio();
-    },
-    { capture: true, passive: true },
-  );
+  const unlock = () => {
+    if (!enabled || ctx) return;
+    audio();
+    sleepSoon(0);
+  };
+  window.addEventListener("pointerdown", unlock, {
+    capture: true,
+    passive: true,
+  });
 }
