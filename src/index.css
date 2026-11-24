@@ -255,11 +255,12 @@ nav { user-select: none; }
   .menu-row:nth-child(5) { --row-delay: 120ms; }
   .menu-row:nth-child(6) { --row-delay: 140ms; }
 
-  /* A list's first 8 rows (about what a phone shows: the ones given .settle-row) rise into place,
-     30ms apart. Only transform and opacity move, which the compositor handles without a repaint. */
-  .settle-in > .settle-row {
+  /* The rows of a list that are on screen when it shows rise into place, a beat apart
+     (lib/useSettleIn.ts sets the class and the delay, then takes them off). Only transform and
+     opacity move, which the compositor handles without a repaint. */
+  .settle-row {
     animation: row-in 340ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
-    animation-delay: calc(var(--i, 0) * 30ms);
+    animation-delay: var(--settle-delay, 0ms);
   }
 
   /* Bars grow from their baseline with a small overshoot, staggered by --i. */
