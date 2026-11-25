@@ -66,7 +66,7 @@ const KINDS: Record<string, string> = {
 const GMAIL_STATUS: Record<string, string> = { ok: "Working", reauth: "Needs reconnecting", paused: "Paused" };
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-const AI_FEATURES = [{ key: "gmail", label: "Gmail reading" }, { key: "receipt", label: "Photo reading" }, { key: "tidy", label: "Category tidy-up" }] as const;
+const AI_FEATURES = [{ key: "gmail", label: "Gmail reading" }, { key: "receipt", label: "Photo reading" }, { key: "split", label: "Bill splitting" }, { key: "tidy", label: "Category tidy-up" }] as const;
 
 const SOURCES: { key: "manual" | "gmail" | "imported" | "repeat"; label: string }[] = [
   { key: "manual", label: "Typed in" }, { key: "gmail", label: "From Gmail" }, { key: "imported", label: "Imported" }, { key: "repeat", label: "Repeats" },

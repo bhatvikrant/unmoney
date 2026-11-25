@@ -5,7 +5,7 @@
  */
 
 /** Which part of UnMoney made the call. */
-export type AiFeature = "tidy" | "gmail" | "receipt";
+export type AiFeature = "tidy" | "gmail" | "receipt" | "split";
 
 export type AiTokens = { input: number; output: number; cacheWrite: number; cacheRead: number };
 

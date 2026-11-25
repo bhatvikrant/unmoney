@@ -22,6 +22,7 @@ import {
 import {
   RECEIPT_MAX_BYTES, RECEIPT_MEDIA_TYPES, RECEIPT_MONTHLY_CAP, RECEIPT_RECENT_ENTRIES, buildReceiptInput, receiptRequest, validateReceipt, type ReceiptRead,
 } from "../shared/receiptAi";
+import { SPLIT_MONTHLY_CAP, splitRequest, validateBill, type BillRead } from "../shared/billSplit";
 
 type Usage = Doc<"aiUsage">;
 export type SuggestResult = { suggestions: AiSuggestion[]; lastRunAt: number; cached: boolean };
@@ -183,6 +184,52 @@ export const readReceipt = action({
       console.error("receipt-ai failed", e instanceof Error ? e.message : e);
       await reportServerError("ai.readReceipt", e, { userId });
       throw new ConvexError("Couldn't read the photo with AI. Fill it in yourself this time.");
+    }
+  },
+});
+
+// ---- splitting a bill by line item from its photo (shared/billSplit.ts) ----
+
+/** Whether the person turned photo reading on and may use AI, and the currency their amounts are in. */
+export const prepareBill = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const settings = (await loadTable(ctx, userId, "settings"))[0];
+    return { enabled: !!settings?.receiptAiEnabled && (await aiAllowed(ctx, userId)), currency: settings?.mainCurrency ?? "", decimals: settings?.decimals ?? 2 };
+  },
+});
+
+/**
+ * Ask Claude to list what is on the bill in an entry's photo, so the entry can be split by who had
+ * what. The same switch as photo reading, and at most SPLIT_MONTHLY_CAP bills a month. The app sends
+ * the photo it shows the person (fetched by a link files.urls gives only its owner, then shrunk), so
+ * nothing is read from storage here and nothing is kept. `amount` is the entry's: a bill whose total
+ * is anything else is refused, like one whose lines do not add up. Nothing is saved.
+ */
+export const readBill = action({
+  args: { image: v.bytes(), mediaType: v.union(...RECEIPT_MEDIA_TYPES.map((t) => v.literal(t))), amount: v.number() },
+  handler: async (ctx, { image, mediaType, amount }): Promise<BillRead> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new ConvexError("Sign in first");
+    if (!image.byteLength || image.byteLength > RECEIPT_MAX_BYTES || !Number.isSafeInteger(amount) || amount <= 0) throw new ConvexError("That photo can't be read");
+    const prep = await ctx.runQuery(internal.ai.prepareBill, { userId });
+    if (!prep.enabled) throw new ConvexError("Reading photos with AI is turned off");
+    if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("Reading photos with AI isn't set up yet");
+    if (!(await ctx.runMutation(internal.usage.claimAi, { userId, feature: "split", cap: SPLIT_MONTHLY_CAP }))) {
+      throw new ConvexError(`AI has read ${SPLIT_MONTHLY_CAP} bills this month, the most it reads. It starts again next month.`);
+    }
+    const client = new Anthropic({ timeout: 60_000, maxRetries: 1 });
+    try {
+      const res = await client.messages.create(splitRequest(prep.currency, mediaType, toB64(new Uint8Array(image))));
+      console.log("split-ai", { userId, stop: res.stop_reason, input: res.usage.input_tokens, output: res.usage.output_tokens });
+      await recordSpend(ctx, userId, "split", res, true);
+      if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`stopped: ${res.stop_reason}`);
+      const text = res.content.find((b) => b.type === "text");
+      return validateBill(JSON.parse(text && text.type === "text" ? text.text : "{}"), prep.decimals, amount);
+    } catch (e) {
+      console.error("split-ai failed", e instanceof Error ? e.message : e);
+      await reportServerError("ai.readBill", e, { userId });
+      throw new ConvexError("Couldn't read the bill from the photo.");
     }
   },
 });
