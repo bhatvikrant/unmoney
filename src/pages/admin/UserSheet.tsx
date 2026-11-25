@@ -4,6 +4,7 @@ import { formatDistanceToNowStrict } from "date-fns";
 import { TriangleAlert } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { AI_FEATURES, AI_FEATURE_KEYS } from "../../../shared/aiCost";
 import { Avatar } from "@/components/shell/Avatar";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,8 +16,6 @@ const FEATURE_LABELS: Record<string, string> = {
   photos: "Photos", imports: "Imports", unsplit: "UnSplit", gmail: "Gmail", gmailBackfill: "Gmail read-back", sips: "SIPs", aiTidy: "AI tidy-up",
   tidyUp: "Tidy-up", iphoneShortcut: "iPhone shortcut", passcode: "Passcode", subcategories: "Subcategories", carryOver: "Carry-over", timeInput: "Time input",
 };
-
-const AI_LABELS = { gmail: "Gmail reading", receipt: "Photo reading", search: "Search questions",tidy: "Category tidy-up" } as const;
 
 export function UserSheet({ userId, onClose, data, today, days }: { userId: string | null; onClose: () => void; data: Overview; today: string; days: number }) {
   const user = data.users.find((u) => u.id === userId);
@@ -100,12 +99,12 @@ function Body({ user, data, today, days }: { user: Overview["users"][number]; da
         <section>
           <h3 className="mb-2 text-sm font-medium">AI cost{spent.calls ? ` · ${fmtUsd(spent.costUsd)}` : ""}</h3>
           <ul className="divide-y rounded-md border text-sm">
-            {(Object.keys(AI_LABELS) as (keyof typeof AI_LABELS)[]).map((k) => {
+            {AI_FEATURE_KEYS.map((k) => {
               const t = aiTotals(ai.filter((r) => r.feature === k));
               return t.calls ? (
                 <li key={k} className="flex items-center gap-2 px-3 py-2">
                   <div className="min-w-0 flex-1">
-                    <div>{AI_LABELS[k]}</div>
+                    <div>{AI_FEATURES[k]}</div>
                     <div className="text-xs text-muted-foreground">{fmtNum(t.calls)} {t.calls === 1 ? "call" : "calls"} · {fmtNum(t.inputTokens)} tokens in · {fmtNum(t.outputTokens)} out</div>
                   </div>
                   <span className="tabular-nums">{fmtUsd(t.costUsd)}</span>
