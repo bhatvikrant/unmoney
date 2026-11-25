@@ -4,7 +4,8 @@ import { expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { SUPERADMIN_EMAIL } from "../shared/admin";
+import { SUPERADMIN_EMAIL, dayAt } from "../shared/admin";
+import { QUICK_MAX_SENTENCE, QUICK_MONTHLY_CAP } from "../shared/quickAi";
 import { SEARCH_MAX_QUESTION, SEARCH_MODEL, SEARCH_MONTHLY_CAP, SYSTEM_PROMPT } from "../shared/searchAi";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -129,6 +130,44 @@ test("a question that wants a figure: the same one call, still only names sent, 
   const rows = await t.run((ctx) => ctx.db.query("aiDaily").collect());
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ feature: "search", calls: 3, inputTokens: 600, outputTokens: 180 });
+});
+
+test("an entry from a sentence: only with AI turned on, names only, and stopped at the month's limit before Claude is asked", async () => {
+  const t = convexTest({ schema, modules });
+  const userId = await t.run(async (ctx) => {
+    const userId = await ctx.db.insert("users", { email: "a@example.com" });
+    const food = await ctx.db.insert("categories", { userId, type: "expense", name: "Food", order: 1 });
+    const hdfc = await ctx.db.insert("accounts", { userId, kind: "card", name: "HDFC Card", bankName: "HDFC", last4: "4321", initialBalance: 987654, includeInTotals: true, hidden: false, order: 1, transferAsExpense: false });
+    await ctx.db.insert("transactions", { userId, type: "expense", date: "2026-11-20", accountId: hdfc, categoryId: food, amount: 123456, note: "Swiggy", description: "Dinner for two", tags: [], photoIds: [] });
+    return userId;
+  });
+  const asUser = t.withIdentity({ subject: `${userId}|session` });
+  const fill = (sentence = "450 swiggy dinner hdfc yesterday") => asUser.action(api.ai.quickEntry, { sentence, today: "2026-11-25" });
+  // not turned on by the superadmin: refused before anything is counted or sent
+  await expect(fill()).rejects.toThrow("turned on for your account");
+  expect(await t.run((ctx) => ctx.db.query("aiDaily").collect())).toEqual([]);
+
+  // what would go to Claude: the person's names and the note, and no amount, balance, date or description from the ledger
+  const prep = await t.query(internal.ai.prepareQuick, { userId });
+  expect(JSON.parse(prep.names)).toEqual({
+    currency: "", currencies: [], expense: [{ id: "c1", name: "Food" }], income: [],
+    methods: [{ id: "m1", name: "HDFC Card", kind: "card", bank: "HDFC", last4: "4321" }], notes: [["Swiggy", "c1"]],
+  });
+  for (const secret of ["123456", "987654", "2026-11-20", "Dinner for two"]) expect(prep.names).not.toContain(secret);
+
+  await t.run((ctx) => ctx.db.patch(userId, { aiEnabled: true }));
+  // a sentence too long to be one entry is refused, and no key means no call
+  await expect(fill("x".repeat(QUICK_MAX_SENTENCE + 1))).rejects.toThrow("one short sentence");
+  await expect(fill()).rejects.toThrow("set up");
+  // the month used up: refused before Claude is asked (the key is made up, so a call would fail differently)
+  await t.run((ctx) => ctx.db.insert("aiDaily", { userId, day: dayAt(Date.now(), 330), feature: "quick", calls: QUICK_MONTHLY_CAP, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, costUsd: 0 }));
+  vi.stubEnv("ANTHROPIC_API_KEY", "test");
+  try {
+    await expect(fill()).rejects.toThrow("starts again next month");
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  expect((await t.run((ctx) => ctx.db.query("aiDaily").collect())).map((r) => r.calls)).toEqual([QUICK_MONTHLY_CAP]);
 });
 
 test("a tidy-up run is counted before Claude is asked: three a day, and none within a month of one that worked", async () => {
