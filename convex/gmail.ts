@@ -34,7 +34,7 @@ import { aiShortfall, BACKFILL_AI_RESERVE, COUNT_MAX, estimateMs, isYearStart, M
 import { applyMerchantMemory, learnMerchants, mergeMerchants, type MerchantMemory } from "../shared/gmail/learn";
 import { PAIRED_NOTE } from "../shared/gmail/dedup";
 import { senderAddress } from "../shared/gmail/mail";
-import { AI_BATCH, AI_MODEL, AI_MONTHLY_CAP, buildAiInput, lowerConfidence, OUTPUT_SCHEMA, SYSTEM_PROMPT, validateAiResults, type AiRead } from "../shared/gmail/ai";
+import { AI_BATCH, AI_EFFORT, AI_MODEL, AI_MONTHLY_CAP, aiContent, buildAiInput, CLUTTER_LABEL, lowerConfidence, OUTPUT_SCHEMA, SYSTEM_PROMPT, validateAiResults, type AiRead, type Clutter } from "../shared/gmail/ai";
 
 type Connection = Doc<"gmailConnections">;
 /** Mails one check reads; the rest of the window waits for the next one. */
@@ -687,11 +687,12 @@ type Collected = {
 /** A backfill slice instead of the usual window: its bounds, the AI reads it may use, and since when saved drafts are looked at. */
 type Range = { token: string; afterMs: number; beforeMs: number; aiCap: number; savedSince: number };
 
-function candidateOf(mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai", merchant?: string): DraftCandidate {
+function candidateOf(mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai", merchant?: string, summary?: string): DraftCandidate {
   return {
     source: "gmail",
     messageId: mail.id,
     ...(merchant ? { merchant: merchant.slice(0, 120) } : {}),
+    ...(summary ? { summary } : {}),
     extraMessageIds: [],
     threadId: mail.threadId,
     receivedAt: mail.receivedAt,
@@ -717,17 +718,18 @@ function learnAccounts(prep: Prep, read: Read): Record<string, Id<"accounts">> {
   return learned;
 }
 
-async function askClaude(ctx: ActionCtx, userId: Id<"users">, mails: Mail[], read: Read): Promise<{ reads: AiRead[]; dropped: number }> {
+/** One batch of mail no rule could read. `reuse`: more batches for this person follow within minutes, so the part they share is cached. */
+async function askClaude(ctx: ActionCtx, userId: Id<"users">, mails: Mail[], read: Read, reuse: boolean): Promise<ReturnType<typeof validateAiResults>> {
   const { input, ids } = buildAiInput(mails, { categories: read.categories, accounts: read.accounts, mainCurrency: read.settings.mainCurrency });
   const client = new Anthropic({ timeout: 90_000, maxRetries: 1 });
   const res = await client.messages.create({
     model: AI_MODEL,
     max_tokens: 4000,
-    output_config: { effort: "low", format: { type: "json_schema", schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> } },
+    output_config: { effort: AI_EFFORT, format: { type: "json_schema", schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> } },
     system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: JSON.stringify(input) }],
+    messages: [{ role: "user", content: aiContent(input, reuse) }],
   });
-  console.log("gmail-ai", { mails: mails.length, stop: res.stop_reason, input: res.usage.input_tokens, output: res.usage.output_tokens });
+  console.log("gmail-ai", { mails: mails.length, stop: res.stop_reason, input: res.usage.input_tokens, output: res.usage.output_tokens, cacheWrite: res.usage.cache_creation_input_tokens, cacheRead: res.usage.cache_read_input_tokens });
   await recordSpend(ctx, userId, "gmail", res);
   if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`model stopped: ${res.stop_reason}`);
   const text = res.content.find((b) => b.type === "text");
@@ -790,6 +792,9 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
   }
 
   let aiCalls = 0, aiSkipped = 0, aiDropped = 0, aiCapped = false;
+  /** Mail the model set aside as not a payment, by kind, for the log; and pairs of mails it read as one payment ("idA|idB", both ways round). */
+  const setAside: Partial<Record<Clutter, number>> = {};
+  const same = new Set<string>();
   if (forAi.length && (!prep.ai || !process.env.ANTHROPIC_API_KEY)) {
     aiSkipped = forAi.length;
     // say how many, so a mail no rule knows does not just vanish
@@ -801,13 +806,17 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
       if (used + aiCalls >= aiCap) { aiSkipped += batch.length; retry.push(...batch); aiCapped = true; continue; }
       aiCalls++;
       try {
-        const { reads: answers, dropped } = await askClaude(ctx, c.userId, batch, read);
+        const { reads: answers, dropped, clutter } = await askClaude(ctx, c.userId, batch, read, !!range || forAi.length > AI_BATCH);
         aiDropped += dropped;
+        for (const [kind, n] of Object.entries(clutter) as [Clutter, number][]) setAside[kind] = (setAside[kind] ?? 0) + n;
         const byId = new Map(batch.map((m) => [m.id, m]));
         // not a payment, or an answer that failed validation: asking again next hour would say the same
         const answered = new Set(answers.map((r) => r.mailId));
         for (const m of batch) if (!answered.has(m.id)) processed.push({ id: m.id, receivedAt: m.receivedAt });
-        for (const r of answers) reads.push({ mail: byId.get(r.mailId)!, parsed: r.parsed, ai: r });
+        for (const r of answers) {
+          reads.push({ mail: byId.get(r.mailId)!, parsed: r.parsed, ai: r });
+          if (r.sameAs) { same.add(`${r.mailId}|${r.sameAs}`); same.add(`${r.sameAs}|${r.mailId}`); }
+        }
       } catch (e) {
         console.error("gmail-ai failed", e instanceof Error ? e.message : e);
         await reportServerError("gmail.ai", e, { userId: c.userId, context: { batch: batch.length } });
@@ -817,6 +826,9 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
       }
     }
     if (aiCapped) notes.push(`monthly AI limit reached, ${aiSkipped} mails waiting`);
+    // so mail that named an amount and made no draft does not just vanish
+    const aside = (Object.entries(setAside) as [Clutter, number][]).map(([kind, n]) => `${n} ${CLUTTER_LABEL[kind]}`);
+    if (aside.length) notes.push(`not payments: ${aside.join(", ")}`);
   }
 
   // The past entries resolving looks at: the merchant's own (its category last time, the purchase
@@ -829,8 +841,8 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
   const saved = new Set(read.currencies.filter((x) => x.rate > 0).map((x) => x.code.toUpperCase()));
   if (reads.some((r) => r.parsed.currency.toUpperCase() !== main && !saved.has(r.parsed.currency.toUpperCase()))) rctx.liveRates = (await latestRates(main)) ?? undefined;
   // what the user taught about a merchant wins over the rules' and the model's guesses; the merchant as read is kept to learn under
-  const remember = (mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai") =>
-    candidateOf(mail, { ...resolved, proposal: applyMerchantMemory(resolved.proposal, resolved.proposal.note, c.merchantMap, read.categories) }, how, resolved.proposal.note);
+  const remember = (mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai", summary?: string) =>
+    candidateOf(mail, { ...resolved, proposal: applyMerchantMemory(resolved.proposal, resolved.proposal.note, c.merchantMap, read.categories) }, how, resolved.proposal.note, summary);
   const candidates: DraftCandidate[] = [];
   for (const { mail, parsed, ai } of reads) {
     const resolved = resolveParsed(parsed, mail, rctx);
@@ -838,14 +850,14 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
     const p = resolved.proposal;
     if (!p.accountId && ai.accountId && p.type !== "transfer") p.accountId = ai.accountId;
     if (!p.categoryId && ai.categoryId && p.type !== "transfer") p.categoryId = ai.categoryId;
-    candidates.push(remember(mail, { proposal: p, confidence: lowerConfidence(resolved.confidence, ai.confidence) }, "ai"));
+    candidates.push(remember(mail, { proposal: p, confidence: lowerConfidence(resolved.confidence, ai.confidence) }, "ai", ai.summary));
   }
 
   // no amount means a currency no rate could be found for: no ₹0 draft; the mail stays unread, so the next check tries again
   const waitingRate = candidates.filter((d) => d.proposal.amount === 0);
   if (waitingRate.length) notes.push(`${waitingRate.length} ${waitingRate.length === 1 ? "mail waits" : "mails wait"} for an exchange rate`);
   if (waiting) notes.push(`${waiting} older ${waiting === 1 ? "mail" : "mails"} waiting`);
-  const { inserts: folded, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), read.openDrafts, read.accounts.filter((a) => !a.deletedAt));
+  const { inserts: folded, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), read.openDrafts, read.accounts.filter((a) => !a.deletedAt), same);
   // The other mail of a purchase whose first mail was already saved (the shop's receipt arriving after
   // the bank's alert was accepted): the entry exists, so this is nothing new. Remembered as read.
   const inserts = folded.filter((d) => {
@@ -1126,7 +1138,7 @@ const draftFields = schema.tables.drafts.validator.fields;
 const insertArg = v.object({
   source: draftFields.source, messageId: draftFields.messageId, extraMessageIds: draftFields.extraMessageIds, threadId: draftFields.threadId,
   receivedAt: draftFields.receivedAt, from: draftFields.from, subject: draftFields.subject, proposal: draftFields.proposal, merchant: draftFields.merchant,
-  confidence: draftFields.confidence, how: draftFields.how, matchedTransactionId: v.optional(v.id("transactions")),
+  confidence: draftFields.confidence, how: draftFields.how, summary: draftFields.summary, matchedTransactionId: v.optional(v.id("transactions")),
 });
 const matchArg = v.object({ id: v.id("drafts"), transactionId: v.id("transactions") });
 const updateArg = v.object({

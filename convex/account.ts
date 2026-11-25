@@ -29,6 +29,7 @@ const STEPS: { name: string; take: (ctx: MutationCtx, userId: Id<"users">) => Pr
   { name: "categories", take: (ctx, u) => ctx.db.query("categories").withIndex("by_user_type", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "syncOps", take: (ctx, u) => ctx.db.query("syncOps").withIndex("by_user_op", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "tombstones", take: (ctx, u) => ctx.db.query("tombstones").withIndex("by_user_rev", (q) => q.eq("userId", u)).take(BATCH) },
+  { name: "recapInsights", take: (ctx, u) => ctx.db.query("recapInsights").withIndex("by_user_key", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "gmailSeen", take: (ctx, u) => ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", u)).take(BATCH) },
   { name: "pendingImports", take: (ctx, u) => ctx.db.query("pendingImports").withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH),
     also: async (ctx, d) => { if (d.storageId) await deleteFile(ctx, d.storageId); } },

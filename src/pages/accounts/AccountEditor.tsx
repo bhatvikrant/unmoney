@@ -1,6 +1,6 @@
-import { useOp } from "@/lib/store";
+import { useOp, useView } from "@/lib/store";
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { Archive, ArchiveRestore } from "lucide-react";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -20,9 +20,13 @@ import { ACCOUNT_KINDS, cardColorOf, type AccountKind } from "../../../shared/de
 import { CardColorPicker, CardFace } from "@/components/CardFace";
 import { NO_GROUP, NO_GROUP_NAME } from "../../../shared/views";
 import { drawsFromLinked } from "../../../shared/ledger";
+import { suggestMethods, type MethodSuggestion } from "../../../shared/gmail/suggest";
 
 /** Select value for "no linked account" (a Select item cannot have an empty value). */
 const NONE = "none";
+
+/** The form fields a suggestion from Gmail fills in. */
+const fillOf = (s: MethodSuggestion) => ({ ...(s.kind ? { kind: s.kind as AccountKind } : {}), ...(s.bankName ? { bankName: s.bankName } : {}), ...(s.last4 ? { last4: s.last4 } : {}) });
 
 export default function AccountEditor() {
   const { id } = useParams();
@@ -50,7 +54,13 @@ export default function AccountEditor() {
     last4: existing?.last4 ?? "",
     color: existing?.color ?? "",
   }), [existing, settings.decimals]);
-  const [f, setF] = useState(initial);
+  // what the mail saved to this method says it is, where it has no type, bank or digits (shared/gmail/suggest.ts)
+  const view = useView();
+  const hint = useMemo(() => (id ? suggestMethods(view).find((s) => s.accountId === id) : undefined), [view, id]);
+  // "Fill in" on the Gmail page opens this form with the suggestion already in it; nothing is saved until Save
+  const fillOnOpen = (useLocation().state as { fill?: boolean } | null)?.fill;
+  const [f, setF] = useState(() => ({ ...initial, ...(hint && fillOnOpen ? fillOf(hint) : {}) }));
+  const filled = !!hint && Object.entries(fillOf(hint)).every(([k, v]) => f[k as keyof typeof f] === v);
   const [confirm, setConfirm] = useState(false);
   // why Save was refused, kept on the form until the next try (a toast is gone before the field is found)
   const [error, setError] = useState("");
@@ -104,6 +114,15 @@ export default function AccountEditor() {
       <PageHeader back title={id ? "Edit payment method" : "New payment method"} right={<Button size="sm" onClick={save} disabled={!f.name.trim()}>Save</Button>} />
       <Page className="p-4 space-y-4 pb-10">
         {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+        {hint ? (
+          <div className="flex items-center gap-3 rounded-lg border bg-muted/40 px-3 py-2 text-sm" role="status">
+            <span className="min-w-0 flex-1">
+              {filled ? "Filled in from your Gmail. Save to keep it." : `Looks like ${hint.looks}. Fill in?`}
+              <span className="block text-xs text-muted-foreground">From the mail you saved to this payment method.</span>
+            </span>
+            {filled ? null : <Button variant="outline" size="sm" onClick={() => setF((p) => ({ ...p, ...fillOf(hint) }))}>Fill in</Button>}
+          </div>
+        ) : null}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5"><Label>Type</Label>
             <Select value={f.kind} onValueChange={(v) => setF({ ...f, kind: v as AccountKind })}><SelectTrigger className="w-full" aria-label="Type"><SelectValue /></SelectTrigger><SelectContent>{ACCOUNT_KINDS.map((k) => <SelectItem key={k.kind} value={k.kind}>{k.label}</SelectItem>)}</SelectContent></Select>
