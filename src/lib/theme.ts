@@ -27,8 +27,39 @@ export function colorAt(i: number, count = SERIES_SLOTS) {
   return i < colouredCount(count) ? `var(--chart-${i + 1})` : "var(--chart-rest)";
 }
 
-export function applyTheme(theme: "system" | "light" | "dark", accent: string, colorSet: "A" | "B") {
+/** Page tints: a hue for the neutral surfaces (index.css, [data-tint]). No hue is the stock grey. */
+export const TINTS: Record<string, { label: string; hue?: number }> = {
+  plain: { label: "Plain" },
+  sand: { label: "Sand", hue: 80 },
+  sage: { label: "Sage", hue: 155 },
+  mist: { label: "Mist", hue: 245 },
+  rose: { label: "Rose", hue: 10 },
+};
+/** What is drawn behind the cards; each key is a [data-pattern] rule in index.css. */
+export const PATTERNS: Record<string, string> = { none: "None", dots: "Dots", grid: "Grid", waves: "Waves", plus: "Crosses", glow: "Glow" };
+/** Corner roundness; each key but "soft" (the stock radius) is a [data-corners] rule in index.css. */
+export const CORNERS: Record<string, string> = { sharp: "Sharp", soft: "Soft", round: "Round" };
+
+/** A CSS colour as #rrggbb, for the theme-color tag (browsers differ on what they parse there). */
+function hexOf(color: string, fallback: string) {
+  const c = document.createElement("canvas").getContext("2d");
+  if (!c) return fallback;
+  c.fillStyle = fallback;
+  c.fillStyle = color; // a colour the canvas cannot read leaves the fallback in place
+  c.fillRect(0, 0, 1, 1);
+  return "#" + [...c.getImageData(0, 0, 1, 1).data.slice(0, 3)].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+
+export function applyTheme(theme: "system" | "light" | "dark", accent: string, colorSet: "A" | "B", look: { tint?: string; pattern?: string; corners?: string } = {}) {
   const root = document.documentElement;
+  const hue = TINTS[look.tint ?? ""]?.hue;
+  if (hue === undefined) delete root.dataset.tint;
+  else {
+    root.dataset.tint = "";
+    root.style.setProperty("--tint-h", String(hue));
+  }
+  root.dataset.pattern = look.pattern ?? "none";
+  root.dataset.corners = look.corners ?? "soft";
   const dark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   root.classList.toggle("dark", dark);
   // for index.html's first paint, before the app has its settings
@@ -46,5 +77,8 @@ export function applyTheme(theme: "system" | "light" | "dark", accent: string, c
     root.style.setProperty("--ring", a.primary);
   }
   // every theme-color tag, including the light/dark ones in index.html, so a chosen theme wins over the system one
-  for (const m of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) m.content = dark ? "#0a0a0a" : "#ffffff";
+  const stock = dark ? "#0a0a0a" : "#ffffff";
+  // a tinted page: the browser's bar takes the page colour as painted, so no seam shows above the header
+  const bar = hue === undefined ? stock : hexOf(getComputedStyle(root).getPropertyValue("--background"), stock);
+  for (const m of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) m.content = bar;
 }
