@@ -559,6 +559,29 @@ export function txScope(op: Op): TxScope {
   }
 }
 
+/**
+ * The Gmail drafts an op reads or writes, by id, so the server loads those rather than every draft
+ * the user has (a mailbox read back a year holds thousands, and each save used to read them all).
+ * null: the op must see them all (a merge finds drafts by their entry, a restore rewrites every waiting one).
+ */
+export function draftScope(op: Op): string[] | null {
+  const a = op.args as Record<string, unknown>;
+  // args come from a device: anything that is not a list of ids names no drafts, and the reducer then refuses the op
+  const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((id): id is string => typeof id === "string") : []);
+  switch (op.kind) {
+    case "drafts.accept":
+    case "drafts.unmatch":
+    case "drafts.link": return ids([a.id]);
+    case "drafts.acceptMany": return ids(Array.isArray(a.items) ? a.items.map((i) => (i as { id?: unknown } | null)?.id) : []);
+    case "drafts.dismiss":
+    case "drafts.reopen": return ids(a.ids);
+    case "sips.create":
+    case "sips.mark":
+    case "sips.saveDrafts": return ids(a.draftIds);
+    default: return OP_TABLES[op.kind]?.includes("drafts") ? null : [];
+  }
+}
+
 /** One scope covering several ops. */
 export function mergeTxScopes(scopes: TxScope[]): TxScope {
   const out: TxScope = {};

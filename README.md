@@ -155,7 +155,7 @@ It appends every default missing from each connection's list and leaves the rest
 Where the numbers come from:
 
 - **Usage** (`src/lib/usage.ts` → `convex/usage.ts`): every signed-in app sends its session's running totals about once a minute while on screen (time on screen, screens visited, sync bytes measured as JSON, upload sizes, photos fetched from the network, device, OS, browser, installed or not, app version, time zone). The server adds what grew since the last ping into `usageDaily` (one row per device per local day), so a retry counts nothing twice. Sessions are kept 120 days; daily rows until the account is deleted.
-- **Storage** (`admin.refreshStats`, daily cron and the dashboard's refresh button): every user's documents counted and sized with Convex's `getDocumentSize`, files by their stored size, plus which features they use. Counts only: no amounts, notes or names.
+- **Storage** (`admin.refreshStats`, weekly cron and the dashboard's refresh button): every user's documents counted and sized with Convex's `getDocumentSize`, files by their stored size, plus which features they use. Counts only: no amounts, notes or names.
 
 Bandwidth is an estimate made on the devices, not Convex's bill; the Convex dashboard's Usage page has the real totals.
 

@@ -243,7 +243,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
       <Tile label="Avg session" value={m.tc.opens ? fmtDuration(m.tc.activeMs / m.tc.opens) : "–"} sub={`${fmtDuration(m.tc.activeMs)} in total`} delta={change(m.tc.opens ? m.tc.activeMs / m.tc.opens : 0, m.tp.opens ? m.tp.activeMs / m.tp.opens : 0)} info="Time the app was on screen, not just open in a background tab." />
       <Tile label="Entries added" value={fmtNum(m.entries)} sub={`${fmtNum(m.view.stats.reduce((n, s) => n + (s.tables.transactions?.count ?? 0), 0))} stored in all`} delta={change(m.entries, m.entriesPrev)} />
       <Tile label="Bandwidth" value={fmtBytes(m.bandwidth)} sub={`↓ ${fmtBytes(m.tc.bytesDown)} · ↑ ${fmtBytes(m.tc.bytesUp)}`} delta={change(m.bandwidth, m.bandwidthPrev)} info="Measured on each device: sync data as JSON, uploads by size, photo downloads estimated from each user's average photo. An estimate, not Convex's bill." />
-      <Tile label="Storage" value={fmtBytes(m.docsBytes + m.fileBytes)} sub={`Docs ${fmtBytes(m.docsBytes)} · files ${fmtBytes(m.fileBytes)}`} info="Exact sizes of every document and file the users keep, counted daily (or with the refresh button)." />
+      <Tile label="Storage" value={fmtBytes(m.docsBytes + m.fileBytes)} sub={`Docs ${fmtBytes(m.docsBytes)} · files ${fmtBytes(m.fileBytes)}`} info="Exact sizes of every document and file the users keep, counted weekly (or with the refresh button)." />
       {aiTiles}
     </div>
   );
@@ -268,7 +268,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
         <Health label="Gmail needing reconnect" value={fmtNum(m.gmail.filter((s) => s.gmail!.status === "reauth").length)} bad={m.gmail.some((s) => s.gmail!.status === "reauth")} />
         <Health label="Devices on an older build" value={fmtNum(m.behind)} bad={m.behind > 0} />
         <Health label="Never finished setup" value={fmtNum(m.view.stats.filter((s) => !s.features.onboarded).length)} />
-        <Health label="Storage last counted" value={Number.isFinite(m.staleStats) ? `${formatDistanceToNowStrict(m.staleStats)} ago` : "Never: tap refresh"} bad={!Number.isFinite(m.staleStats) || data.now - m.staleStats > 2 * 86_400_000} />
+        <Health label="Storage last counted" value={Number.isFinite(m.staleStats) ? `${formatDistanceToNowStrict(m.staleStats)} ago` : "Never: tap refresh"} bad={!Number.isFinite(m.staleStats) || data.now - m.staleStats > 8 * 86_400_000} />
       </ul>
     </Card>
   );

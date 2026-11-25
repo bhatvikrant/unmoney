@@ -71,7 +71,7 @@ export const refresh = mutation({
   },
 });
 
-// ---- counting what each user keeps (daily cron, or "Refresh now") ----
+// ---- counting what each user keeps (weekly cron, or "Refresh now") ----
 
 /**
  * The tables counted per user, each with an index that starts with userId. Auth tables are counted
