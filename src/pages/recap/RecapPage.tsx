@@ -66,7 +66,7 @@ export default function RecapPage() {
 
 function Recap({ month }: { month: string }) {
   const view = useView();
-  const { userId } = useStore();
+  const { userId, user } = useStore();
   const goBack = useGoBack();
   const wide = useMediaQuery(WIDE);
   const still = useReducedMotion();
@@ -221,7 +221,7 @@ function Recap({ month }: { month: string }) {
   );
   const closeButton = (
     <>
-      {stored !== undefined ? (
+      {stored !== undefined && user?.ai ? (
         <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" title="AI insights" onClick={() => setInsights(true)}><WandSparkles className="size-4" />Insights</Button>
       ) : null}
       {!last ? (
