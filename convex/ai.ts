@@ -22,6 +22,9 @@ import {
 import {
   RECEIPT_MAX_BYTES, RECEIPT_MEDIA_TYPES, RECEIPT_MONTHLY_CAP, RECEIPT_RECENT_ENTRIES, buildReceiptInput, receiptRequest, validateReceipt, type ReceiptRead,
 } from "../shared/receiptAi";
+import {
+  SEARCH_MAX_QUESTION, SEARCH_MONTHLY_CAP, SEARCH_RECENT_ENTRIES, buildSearchContext, isRealDate, searchRequest, validateSearch, type SearchFilters,
+} from "../shared/searchAi";
 
 type Usage = Doc<"aiUsage">;
 export type SuggestResult = { suggestions: AiSuggestion[]; lastRunAt: number; cached: boolean };
@@ -183,6 +186,58 @@ export const readReceipt = action({
       console.error("receipt-ai failed", e instanceof Error ? e.message : e);
       await reportServerError("ai.readReceipt", e, { userId });
       throw new ConvexError("Couldn't read the photo with AI. Fill it in yourself this time.");
+    }
+  },
+});
+
+// ---- search by asking a question (shared/searchAi.ts) ----
+
+/** The names that go with a question, built from the database so the prompt can't be inflated, and whether the person may use AI. No entry leaves here: only the tags on the newest ones. */
+export const prepareSearch = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const [settings, categories, accounts, transactions] = await Promise.all([
+      loadTable(ctx, userId, "settings"),
+      loadTable(ctx, userId, "categories"),
+      loadTable(ctx, userId, "accounts"),
+      ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).order("desc").take(SEARCH_RECENT_ENTRIES),
+    ]);
+    return { allowed: await aiAllowed(ctx, userId), ...buildSearchContext({ settings, categories, accounts, transactions }) };
+  },
+});
+
+/**
+ * Ask Claude which of the search page's filters a typed question means. Only when the person taps
+ * Ask AI, and at most SEARCH_MONTHLY_CAP times a month. Claude sees the question and the names of
+ * their categories, payment methods and tags, never an entry; the search then runs on the device.
+ * One quick call: someone is waiting, and the page falls back to its plain search if this is slow or fails.
+ */
+export const askSearch = action({
+  args: { question: v.string(), today: v.string() },
+  handler: async (ctx, args): Promise<SearchFilters> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new ConvexError("Sign in first");
+    const question = args.question.replace(/\s+/g, " ").trim();
+    if (!question || !isRealDate(args.today)) throw new ConvexError("That question can't be read");
+    if (question.length > SEARCH_MAX_QUESTION) throw new ConvexError(`That question is too long for AI: keep it under ${SEARCH_MAX_QUESTION} characters`);
+    if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("Asking AI isn't set up yet");
+    const prep = await ctx.runQuery(internal.ai.prepareSearch, { userId });
+    if (!prep.allowed) throw new ConvexError("Asking AI isn't turned on for your account");
+    if (!(await ctx.runMutation(internal.usage.claimAi, { userId, feature: "search", cap: SEARCH_MONTHLY_CAP }))) {
+      throw new ConvexError(`AI has answered ${SEARCH_MONTHLY_CAP} questions this month, the most it answers. It starts again next month.`);
+    }
+    const client = new Anthropic({ timeout: 10_000, maxRetries: 1 });
+    try {
+      const res = await client.messages.create(searchRequest(prep.context, question, args.today));
+      console.log("search-ai", { userId, stop: res.stop_reason, input: res.usage.input_tokens, output: res.usage.output_tokens, cacheRead: res.usage.cache_read_input_tokens ?? 0 });
+      await recordSpend(ctx, userId, "search", res, true);
+      if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`stopped: ${res.stop_reason}`);
+      const text = res.content.find((b) => b.type === "text");
+      return validateSearch(JSON.parse(text && text.type === "text" ? text.text : "{}"), prep.ids, prep.context.tags);
+    } catch (e) {
+      console.error("search-ai failed", e instanceof Error ? e.message : e);
+      await reportServerError("ai.askSearch", e, { userId });
+      throw new ConvexError("AI couldn't work that question out");
     }
   },
 });
