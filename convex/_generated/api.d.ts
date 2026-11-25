@@ -26,6 +26,7 @@ import type * as lib_gmailCrypto from "../lib/gmailCrypto.js";
 import type * as lib_snapshot from "../lib/snapshot.js";
 import type * as migrations from "../migrations.js";
 import type * as passcode from "../passcode.js";
+import type * as recapAi from "../recapAi.js";
 import type * as repeats from "../repeats.js";
 import type * as seed from "../seed.js";
 import type * as sync from "../sync.js";
@@ -56,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   "lib/snapshot": typeof lib_snapshot;
   migrations: typeof migrations;
   passcode: typeof passcode;
+  recapAi: typeof recapAi;
   repeats: typeof repeats;
   seed: typeof seed;
   sync: typeof sync;

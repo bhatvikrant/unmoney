@@ -100,7 +100,14 @@ function asTransfer<T extends Draftish>(d: T, t: NonNullable<Fold["transfer"]>, 
   return { ...d, proposal: { ...p, type: "transfer", accountId: t.accountId, toAccountId: t.toAccountId, categoryId: undefined, subcategoryId: undefined, note: p.note || other.proposal.note, description } };
 }
 
-export function foldDrafts(batch: DraftCandidate[], open: Doc<"drafts">[], accounts: Acc[] = []): FoldResult {
+/**
+ * `same` holds pairs of new mails ("idA|idB", both ways round) the model read as one payment and
+ * the checks agreed on (shared/gmail/ai.ts validateAiResults): a receipt from a shop no rule knows
+ * and the bank's alert for it, which samePayment has no way to tell.
+ */
+export function foldDrafts(batch: DraftCandidate[], open: Doc<"drafts">[], accounts: Acc[] = [], same: ReadonlySet<string> = new Set()): FoldResult {
+  const told = (d: DraftCandidate, c: DraftCandidate) => d.proposal.amount === c.proposal.amount && d.proposal.type === c.proposal.type
+    && [d.messageId, ...d.extraMessageIds].some((id) => same.has(`${id}|${c.messageId}`));
   const inserts: DraftCandidate[] = [];
   const updates = new Map<Id<"drafts">, { id: Id<"drafts"> } & Fold>();
   const openLive = open.filter((d) => d.status === "open");
@@ -113,7 +120,7 @@ export function foldDrafts(batch: DraftCandidate[], open: Doc<"drafts">[], accou
       updates.set(existing._id, u);
       continue;
     }
-    const i = inserts.findIndex((d) => samePayment(d, c));
+    const i = inserts.findIndex((d) => samePayment(d, c) || told(d, c));
     if (i < 0) {
       inserts.push(c);
       continue;
