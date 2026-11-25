@@ -12,6 +12,8 @@ import { useColumn } from "@/components/shell/SplitLayout";
 import { TransactionList } from "@/components/tx/TransactionList";
 import { Money } from "@/components/shell/Money";
 import { BudgetBar } from "@/components/BudgetBars";
+import { budgetPace } from "../../../shared/budgetPace";
+import { useToday } from "@/lib/today";
 
 export default function CategoryDetail() {
   const { id = "" } = useParams();
@@ -48,6 +50,8 @@ export default function CategoryDetail() {
     return limits.some((l) => l !== undefined) ? { now, status: p.period === "custom" ? undefined : budgetStatus(view, budgetPeriod, p.key), limits } : null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, type, parentId, isTransfer, id, budgetPeriod, p.period, p.key, rangeKey]);
+  const today = useToday();
+  const pace = useMemo(() => (budget?.now && budget.status ? budgetPace(view, budgetPeriod, budget.status, today).get(budget.now.budget._id) : undefined), [view, budget, budgetPeriod, today]);
   // a bar opens its period; from a custom range, that month
   const pick = (i: number) => { const k = ranges[i]?.key; if (!k) return; if (p.period === "custom") p.set({ period: "monthly", month: k }); else p.go(k); };
   return (
@@ -55,7 +59,7 @@ export default function CategoryDetail() {
       <PageHeader back title={name} sub={alone ? <StatsHeaderBar tabs={false} /> : undefined} />
       <Page className="pb-8">
         <div className="flex items-baseline justify-between px-4 pt-3"><span className="text-sm text-muted-foreground">{p.label}</span><Money amount={item?.amount ?? 0} kind={type} className="text-lg font-semibold" /></div>
-        {budget?.now && budget.status ? <div className="mt-2 bg-card border-y"><BudgetBar item={budget.now} label="Budget" elapsed={budget.status.elapsed} onClick={() => nav(`/budget?${new URLSearchParams(sp).toString()}`)} /></div> : null}
+        {budget?.now && budget.status ? <div className="mt-2 bg-card border-y"><BudgetBar item={budget.now} label="Budget" elapsed={budget.status.elapsed} pace={pace} onClick={() => nav(`/budget?${new URLSearchParams(sp).toString()}`)} /></div> : null}
         <div className="px-2 py-2">{trend ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} color={type === "income" ? "var(--income)" : "var(--expense)"} onPick={pick}
           limit={budget ? budget.limits[budget.limits.length - 1] ?? budget.limits.find((l) => l !== undefined) : undefined} limits={budget?.limits as number[] | undefined} /> : <div className="h-48" />}</div>
         {!parentId && main && main.children.length > 1 ? (

@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/shell/misc";
 import { useToday } from "@/lib/today";
 import { diffDays } from "../../../shared/dates";
 import { billsAgainstBudgets } from "../../../shared/upcoming";
+import { budgetPace } from "../../../shared/budgetPace";
 import { TransactionList } from "@/components/tx/TransactionList";
 import { dateLabel, monthLabel } from "@/lib/format";
 import { Bell } from "@/components/motion/Bell";
@@ -70,7 +71,7 @@ export default function BudgetPage() {
   const openBudget = useMemo(() => view.budgets.find((x) => x._id === openBudgetId), [view.budgets, openBudgetId]);
   const past = useMemo(() => (openBudget ? budgetHistory(view, openBudget, today) : []), [view, openBudget, today]);
   const unit = period === "weekly" ? "week" : period === "yearly" ? "year" : "month";
-  // In the current period: what can still go out each day, and where spending at this rate ends up.
+  // In the current period: what can still go out each day, and where spending is headed.
   // in the period running today: the bills scheduled before it ends, per budget
   const due = useMemo(() => {
     const m = new Map<string, number>();
@@ -78,10 +79,13 @@ export default function BudgetPage() {
     for (const o of billsAgainstBudgets(view, today)) if (o.item.range.from === status.range.from && o.item.period === period) m.set(o.item.budget._id, o.adds);
     return m;
   }, [view, status, today, period]);
-  const pace = status && status.spentAll && today >= status.range.from && today <= status.range.to && status.elapsed > 0 ? {
+  // where each budget of the period running today is headed, from how earlier periods went: one pass, kept until the ledger changes
+  const paces = useMemo(() => (status ? budgetPace(view, period, status, today) : null), [view, period, status, today]);
+  const all = paces?.get("");
+  const pace = status && status.spentAll && all ? {
     perDay: status.total && status.total.remaining > 0 ? Math.floor(status.total.remaining / (diffDays(today, status.range.to) + 1)) : null,
-    end: Math.round(status.spentAll / status.elapsed),
-    over: !!status.total && status.spentAll / status.elapsed > status.total.limit,
+    end: all.end,
+    over: !!status.total && all.end > status.total.limit,
   } : null;
   return (
     <>
@@ -105,13 +109,13 @@ export default function BudgetPage() {
             <Bell once={`budget-bell:${period}:${key}`} className="text-base" /> Stayed under every budget this {period === "weekly" ? "week" : period === "yearly" ? "year" : "month"}.
           </div>
         ) : null}
-        {status?.total ? <div className="bg-card border-y"><BudgetBar item={status.total} label={label} elapsed={status.elapsed} due={due.get(status.total.budget._id)} onClick={() => setDetail({ item: status.total!, label })} /></div> : null}
+        {status?.total ? <div className="bg-card border-y"><BudgetBar item={status.total} label={label} elapsed={status.elapsed} pace={paces?.get(status.total.budget._id)} due={due.get(status.total.budget._id)} onClick={() => setDetail({ item: status.total!, label })} /></div> : null}
         {status?.perCategory.length ? (
           <div className="bg-card border-y mt-2">
-            {status.perCategory.map((it, i) => { const name = categoryById.get(it.budget.categoryId!)?.name ?? ""; return <BudgetBar key={it.budget._id} index={i + 1} item={it} label={name} elapsed={status.elapsed} due={due.get(it.budget._id)} onClick={() => setDetail({ item: it, label: name })} />; })}
+            {status.perCategory.map((it, i) => { const name = categoryById.get(it.budget.categoryId!)?.name ?? ""; return <BudgetBar key={it.budget._id} index={i + 1} item={it} label={name} elapsed={status.elapsed} pace={paces?.get(it.budget._id)} due={due.get(it.budget._id)} onClick={() => setDetail({ item: it, label: name })} />; })}
           </div>
         ) : null}
-        {status && !status.total && !status.perCategory.length ? <EmptyState title={`No ${label.toLowerCase()} budgets`} hint="Set a total budget or one per category. The bar fills as you spend; the marker shows where today falls." action={<Button onClick={() => nav(`/budget/settings?period=${period}`)}>Set a budget</Button>} /> : null}
+        {status && !status.total && !status.perCategory.length ? <EmptyState title={`No ${label.toLowerCase()} budgets`} hint="Set a total budget or one per category. The bar fills as you spend; the marker shows where spending usually is by today." action={<Button onClick={() => nav(`/budget/settings?period=${period}`)}>Set a budget</Button>} /> : null}
       </Page>
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
         {/* not focusing the chart on open: that would pin a tooltip over its first bar */}
