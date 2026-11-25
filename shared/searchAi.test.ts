@@ -61,6 +61,29 @@ test("the request: the prompt and the names first and marked for the cache, the 
     thisWeek: { from: "2026-11-23", to: "2026-11-29" }, lastWeek: { from: "2026-11-16", to: "2026-11-22" },
     question: "food over 500 last month",
   });
+  // the prompt is in the cached part too: not a byte of it changes with the question or the day
+  expect(searchRequest(context, "who do I pay the most", "2027-01-02").system).toBe(req.system);
+  expect(req.max_tokens).toBeLessThanOrEqual(1500);
+});
+
+test("the answer's shape: every object closed, every field required, and how to work out a figure is fixed choices only", () => {
+  type Shape = { type?: string; additionalProperties?: boolean; required?: readonly string[]; properties?: Record<string, Shape>; anyOf?: readonly Shape[]; items?: Shape; enum?: readonly string[] };
+  const closed = (s: Shape) => {
+    if (s.type === "object") {
+      expect(s.additionalProperties).toBe(false);
+      expect([...s.required!].sort()).toEqual(Object.keys(s.properties!).sort());
+      Object.values(s.properties!).forEach(closed);
+    }
+    s.anyOf?.forEach(closed);
+    if (s.items) closed(s.items);
+  };
+  closed(OUTPUT_SCHEMA);
+  // no free text and no formula: a list to pick from, or a whole number of rows
+  const [answer] = OUTPUT_SCHEMA.properties.answer.anyOf as readonly Shape[];
+  for (const part of Object.values(answer.properties!)) {
+    const [choice] = part.anyOf ?? [part];
+    expect(choice.enum ? choice.enum.length > 0 : choice.type === "integer").toBe(true);
+  }
 });
 
 test("this month and last month are the person's own months", () => {
@@ -97,4 +120,33 @@ test("an answer sets only the filters that check out", () => {
   expect(check({ text: "   " })).toEqual({});
   expect(validateSearch(null, ids, [])).toEqual({});
   expect(validateSearch("food", ids, [])).toEqual({});
+});
+
+test("how to work out a figure is kept only when every choice is one the app knows; the filters are kept either way", () => {
+  const ids = { categories: { c1: "food" }, accounts: {} } as unknown as SearchIds;
+  const filters = { text: null, from: "2026-10-01", to: "2026-10-31", type: null, categories: ["c1"], accounts: [], tag: null, min: null, max: null };
+  const kept = { from: "2026-10-01", to: "2026-10-31", categoryIds: ["food"] };
+  const check = (answer: unknown) => validateSearch({ ...filters, answer }, ids, []);
+  const ok = { of: "spent", measure: "total", by: "category", order: "lowest", limit: 3 };
+  expect(check(ok)).toEqual({ ...kept, answer: ok });
+  // a question that only looks for entries: the filters, exactly as before
+  expect(check(null)).toEqual(kept);
+  // a choice the app does not have, a formula, free text, a part missing: no figure, and the filters stay
+  for (const bad of [{ ...ok, measure: "median" }, { ...ok, of: "amount * 1.18" }, { ...ok, by: "day" }, { ...ok, by: undefined }, { ...ok, measure: ["total"] }, "total spent on food", 5, []]) {
+    expect(check(bad)).toEqual(kept);
+  }
+  // pairs that mean nothing are refused whole: dropping one part would answer another question
+  for (const bad of [{ ...ok, measure: "largest" }, { ...ok, measure: "largest", by: "none", of: "net" }, { ...ok, measure: "average", of: "net" }, { ...ok, measure: "monthlyAverage", by: "month" }]) {
+    expect(check(bad)).toEqual(kept);
+  }
+  expect(check({ ...ok, measure: "largest", by: "none" }).answer).toEqual({ ...ok, measure: "largest", by: "none" });
+  expect(check({ ...ok, of: "net", measure: "monthlyAverage" }).answer).toEqual({ ...ok, of: "net", measure: "monthlyAverage" });
+  // the order and the number of rows only change how it is shown: a bad one is dropped and the rest kept
+  const { limit: _, ...unlimited } = ok;
+  for (const limit of [0, -1, 2.5, "3", 21, 1e9, null]) expect(check({ ...ok, limit }).answer).toEqual(unlimited);
+  for (const order of ["random", null, 1]) expect(check({ ...ok, order }).answer).toEqual({ ...ok, order: "highest" });
+  // nothing else rides along
+  expect(check({ ...ok, formula: "sum(amount)", text: "You spent 500" }).answer).toEqual(ok);
+  // a figure about everything, with no filter at all
+  expect(validateSearch({ answer: { ...ok, of: "net", by: "none", order: null, limit: null } }, ids, [])).toEqual({ answer: { of: "net", measure: "total", by: "none", order: "highest" } });
 });

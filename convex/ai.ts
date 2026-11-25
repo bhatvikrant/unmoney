@@ -23,7 +23,7 @@ import {
   RECEIPT_MAX_BYTES, RECEIPT_MEDIA_TYPES, RECEIPT_MONTHLY_CAP, RECEIPT_RECENT_ENTRIES, buildReceiptInput, receiptRequest, validateReceipt, type ReceiptRead,
 } from "../shared/receiptAi";
 import {
-  SEARCH_MAX_QUESTION, SEARCH_MONTHLY_CAP, SEARCH_RECENT_ENTRIES, buildSearchContext, isRealDate, searchRequest, validateSearch, type SearchFilters,
+  SEARCH_MAX_QUESTION, SEARCH_MONTHLY_CAP, SEARCH_RECENT_ENTRIES, buildSearchContext, isRealDate, searchRequest, validateSearch, type SearchResult,
 } from "../shared/searchAi";
 import { QUICK_MAX_SENTENCE, QUICK_MONTHLY_CAP, buildQuickNames, quickRequest, validateQuick, type QuickRead } from "../shared/quickAi";
 
@@ -211,11 +211,13 @@ export const prepareSearch = internalQuery({
  * Ask Claude which of the search page's filters a typed question means. Only when the person taps
  * Ask AI, and at most SEARCH_MONTHLY_CAP times a month. Claude sees the question and the names of
  * their categories, payment methods and tags, never an entry; the search then runs on the device.
+ * For a question that wants a figure the same answer also says how to work it out, as choices from
+ * fixed lists; the device does the sums over the entries it matched (shared/searchAnswer.ts).
  * One quick call: someone is waiting, and the page falls back to its plain search if this is slow or fails.
  */
 export const askSearch = action({
   args: { question: v.string(), today: v.string() },
-  handler: async (ctx, args): Promise<SearchFilters> => {
+  handler: async (ctx, args): Promise<SearchResult> => {
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new ConvexError("Sign in first");
     const question = args.question.replace(/\s+/g, " ").trim();
