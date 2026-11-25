@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Money } from "@/components/shell/Money";
+import { AiHow } from "@/components/shell/misc";
 import { sumKinds } from "../../../shared/ledger";
 import { cn } from "@/lib/utils";
 
@@ -144,7 +145,7 @@ export default function SearchPage() {
           </div>
           {user?.ai ? (
             <p role="status" className="text-xs text-muted-foreground">
-              {aiNote || "Ask AI turns a question into filters. It sends what you typed and the names of your categories, payment methods and tags to Anthropic's Claude."}
+              {aiNote || <>Ask AI turns a question into filters. It sends what you typed and the names of your categories, payment methods and tags to Anthropic's Claude. <AiHow feature="search" /></>}
             </p>
           ) : null}
           {showFilters ? (

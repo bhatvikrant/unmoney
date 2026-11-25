@@ -14,7 +14,7 @@ import { useOp, useStore, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { BottomSheet } from "@/components/shell/BottomSheet";
-import { EmptyState, SegmentedTabs } from "@/components/shell/misc";
+import { AiHow, EmptyState, SegmentedTabs } from "@/components/shell/misc";
 import { TransactionList, type Tx } from "@/components/tx/TransactionList";
 import { CategoryPicker } from "@/components/tx/pickers";
 import { Button } from "@/components/ui/button";
@@ -387,7 +387,7 @@ function AiPanel({ recentAt, found, onResult }: { recentAt?: number; found: numb
         {state.kind === "running" ? <Loader2 className="size-4 shrink-0 animate-spin text-primary" /> : <WandSparkles className="size-4 shrink-0 text-primary" />}
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium">AI suggestions</div>
-          <div className={cn("text-xs", state.kind === "error" ? "text-destructive" : "text-muted-foreground")}>{line}</div>
+          <div className={cn("text-xs", state.kind === "error" ? "text-destructive" : "text-muted-foreground")}>{line} <AiHow feature="tidy" className="text-muted-foreground" /></div>
         </div>
         {canRun ? <Button size="sm" className="h-8" onClick={start}>{state.kind === "error" ? "Try again" : "Get suggestions"}</Button> : null}
       </div>
@@ -396,7 +396,7 @@ function AiPanel({ recentAt, found, onResult }: { recentAt?: number; found: numb
           <p className="text-muted-foreground">
             To suggest changes, UnMoney sends Anthropic's Claude a summary of your expense and income categories: their names, how many entries each
             has, their totals, and the most common notes. It does not send dates, accounts, photos or individual entries. Nothing changes until you
-            approve it.
+            approve it. <AiHow feature="tidy" />
           </p>
           <label className="flex items-center gap-2">
             <Checkbox checked={notes} onCheckedChange={(v) => setNotes(!!v)} />
