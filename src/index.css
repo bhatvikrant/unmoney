@@ -313,3 +313,43 @@ nav { user-select: none; }
   60% { transform: rotate(-4deg); }
   75% { transform: rotate(2deg); }
 }
+
+/* ---- /features: the parts of a bento tile (src/pages/features/FeaturesPage.tsx) ----
+   A part waits out of sight and arrives --at seconds after its tile gets data-play. Everything here
+   moves by opacity and transform alone (the written text by clip-path), so the compositor can run it
+   and nothing is laid out again: no part changes size or pushes its neighbours. */
+.bento-tile { --settle: cubic-bezier(0.22, 1, 0.36, 1); }
+.bento-tile [data-part] {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0);
+  transition: opacity 0.5s var(--settle) calc(var(--at, 0) * 1s), transform 0.7s var(--settle) calc(var(--at, 0) * 1s);
+}
+.bento-tile [data-part="fade"] { transform: none; }
+.bento-tile [data-part="paper"] { transform: translate3d(0, 32px, 0); transition-duration: 0.6s, 0.9s; }
+.bento-tile [data-part="tick"] { transform: scale(0.6); transition-duration: 0.2s, 0.45s; transition-timing-function: ease-out, cubic-bezier(0.34, 1.4, 0.64, 1); }
+.bento-tile [data-part="lit"] { opacity: 0.3; transform: none; }
+.bento-tile [data-part="draw"] { opacity: 1; transform: scaleX(0); transform-origin: left; transition-duration: 0s, 0.5s; }
+/* the placeholder a part resolves from: it leaves as the part arrives over it */
+.bento-tile [data-part="ghost"] { opacity: 1; transform: none; transition-duration: 0.35s; }
+.bento-tile[data-play] [data-part] { opacity: 1; transform: none; }
+.bento-tile[data-play] [data-part="ghost"] { opacity: 0; }
+/* text written into a box: uncovered at a steady pace behind a caret that then goes */
+.bento-tile [data-typed] { clip-path: inset(0 100% 0 0); transition: clip-path calc(var(--chars) * 26ms) linear calc(var(--at) * 1s); }
+.bento-tile[data-play] [data-typed] { clip-path: inset(0 -2px 0 0); }
+.bento-tile [data-caret] { opacity: 0; }
+.bento-tile[data-play] [data-caret] { animation: features-caret calc(var(--chars) * 26ms / 0.8) linear calc(var(--at) * 1s) both; }
+@keyframes features-caret {
+  0% { opacity: 1; transform: translateX(0); }
+  80% { opacity: 1; transform: translateX(100%); }
+  100% { opacity: 0; transform: translateX(100%); }
+}
+.bento-tile[data-play] [data-press] { animation: features-press 0.4s var(--settle) calc(var(--at) * 1s) both; }
+@keyframes features-press { 35% { transform: scale(0.94); } }
+/* under a mouse: the finished parts lift in the story's order and settle; nothing is taken away */
+.bento-tile[data-wave] [data-part]:not([data-part="draw"], [data-part="ghost"]) { animation: features-lift 0.65s cubic-bezier(0.3, 0, 0.3, 1) calc(var(--at, 0) * 0.3s); }
+@keyframes features-lift { 40% { transform: translate3d(0, -3px, 0); } }
+@media (prefers-reduced-motion: reduce) {
+  .bento-tile [data-part], .bento-tile [data-typed] { opacity: 1; transform: none; clip-path: none; transition: none; }
+  .bento-tile [data-part="ghost"] { opacity: 0; }
+  .bento-tile [data-part], .bento-tile [data-caret], .bento-tile [data-press] { animation: none !important; }
+}
