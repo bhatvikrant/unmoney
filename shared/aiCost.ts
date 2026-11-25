@@ -4,8 +4,19 @@
  * the past; the superadmin dashboard sums them.
  */
 
-/** Which part of UnMoney made the call. */
-export type AiFeature = "tidy" | "gmail" | "receipt" | "split";
+/**
+ * Which part of UnMoney made the call, with the name the superadmin dashboard shows for it. A new
+ * feature is added here and nowhere else: the aiDaily table (convex/schema.ts) and the dashboard's
+ * totals, columns and charts (src/pages/admin) are all built from this list.
+ */
+export const AI_FEATURES = {
+  gmail: "Gmail reading",
+  receipt: "Photo reading",
+  split: "Bill splitting",
+  tidy: "Category tidy-up",
+} as const;
+export type AiFeature = keyof typeof AI_FEATURES;
+export const AI_FEATURE_KEYS = Object.keys(AI_FEATURES) as AiFeature[];
 
 export type AiTokens = { input: number; output: number; cacheWrite: number; cacheRead: number };
 

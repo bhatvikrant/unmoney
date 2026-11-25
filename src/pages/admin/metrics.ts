@@ -5,6 +5,7 @@
  */
 import type { FunctionReturnType } from "convex/server";
 import type { api } from "../../../convex/_generated/api";
+import { AI_FEATURE_KEYS, type AiFeature } from "../../../shared/aiCost";
 
 export type Overview = FunctionReturnType<typeof api.admin.overview>;
 export type User = Overview["users"][number];
@@ -128,9 +129,12 @@ export function totals(daily: Daily[]) {
   return { ...t, activeUsers: users.size, userDays: userDays.size };
 }
 
+/** A zero for every AI feature, under its name or its name with a suffix ("gmailCalls"). */
+const perFeature = <S extends string = "">(suffix = "" as S) => Object.fromEntries(AI_FEATURE_KEYS.map((k) => [k + suffix, 0])) as Record<`${AiFeature}${S}`, number>;
+
 /** What Claude cost over some rows of aiDaily: in all, per feature (dollars and calls), how many users it was for, and the last day it was asked. */
 export function aiTotals(rows: Ai[]) {
-  const t = { costUsd: 0, calls: 0, inputTokens: 0, outputTokens: 0, tidy: 0, gmail: 0, receipt: 0, split: 0, tidyCalls: 0, gmailCalls: 0, receiptCalls: 0, splitCalls: 0, lastDay: "" };
+  const t = { costUsd: 0, calls: 0, inputTokens: 0, outputTokens: 0, lastDay: "", ...perFeature(), ...perFeature("Calls") };
   const users = new Set<string>();
   for (const r of rows) {
     users.add(r.userId);
@@ -151,8 +155,8 @@ export function aiByUser<U extends { id: string }>(users: U[], rows: Ai[]) {
 }
 
 /** Claude's cost per day from `from` to `to`, split by feature; zeros where nothing was asked. */
-export function aiSeries(rows: Ai[], from: string, to: string): { day: string; tidy: number; gmail: number; receipt: number; split: number }[] {
-  const by = new Map(daysBetween(from, to).map((day) => [day, { day, tidy: 0, gmail: 0, receipt: 0, split: 0 }]));
+export function aiSeries(rows: Ai[], from: string, to: string): ({ day: string } & Record<AiFeature, number>)[] {
+  const by = new Map(daysBetween(from, to).map((day) => [day, { day, ...perFeature() }]));
   for (const r of rows) { const p = by.get(r.day); if (p) p[r.feature] += r.costUsd; }
   return [...by.values()];
 }
