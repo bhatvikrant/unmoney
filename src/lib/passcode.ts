@@ -1,12 +1,26 @@
+const hex = (bytes: ArrayBuffer | Uint8Array) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+/** Salts made since the hash became a slow one start with this; older ones are plain hex and mean one round of SHA-256. */
+const SLOW = "pbkdf2$";
+const ROUNDS = 310_000;
+
+/** A passcode set before the slow hash: Lock re-hashes it the next time it is typed in correctly. */
+export const isOldSalt = (salt: string) => !salt.startsWith(SLOW);
+
+/**
+ * The passcode's hash, as kept in settings (so on the server and every device). Four digits are 10,000
+ * guesses whatever the hash; a slow one makes each of them cost about a fifth of a second instead of
+ * nothing, which is what keeps the digits themselves (people reuse them) from falling out of a leaked hash.
+ */
 export async function hashPin(pin: string, salt: string): Promise<string> {
-  const data = new TextEncoder().encode(`${salt}:${pin}`);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const enc = new TextEncoder();
+  if (isOldSalt(salt)) return hex(await crypto.subtle.digest("SHA-256", enc.encode(`${salt}:${pin}`)));
+  const key = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveBits"]);
+  return hex(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: enc.encode(salt), iterations: ROUNDS }, key, 256));
 }
 
 export function newSalt(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return SLOW + hex(crypto.getRandomValues(new Uint8Array(16)));
 }
 
 const KEY = "unmoney:unlockedAt";

@@ -77,7 +77,7 @@ export function PhotoField({ photoIds, onChange, onAmountRead }: {
           {urlOf(id) ? (
             <button type="button" aria-label="View photo" className="size-full" onClick={() => setViewing(i)}><img src={urlOf(id)} alt="" decoding="async" className="size-full object-cover" /></button>
           ) : <div className="size-full flex items-center justify-center text-[10px] text-muted-foreground">{status.offline ? "offline" : "…"}</div>}
-          <button type="button" aria-label="Remove photo" onClick={() => onChange(photoIds.filter((x) => x !== id))} className="absolute top-1 right-1 rounded-full bg-black/60 text-white p-0.5"><X className="size-3" /></button>
+          <button type="button" aria-label="Remove photo" onClick={() => onChange(photoIds.filter((x) => x !== id))} className="absolute top-1 right-1 rounded-full bg-black/60 text-white p-0.5 after:absolute after:-inset-2 after:content-['']"><X className="size-3" /></button>
         </div>
       ))}
       {photoIds.length < 3 ? (
@@ -113,7 +113,7 @@ export function TagInput({ tags, onChange, suggestions }: { tags: string[]; onCh
     <div>
       <div className="flex flex-wrap gap-1 items-center">
         {tags.map((t) => (
-          <span key={t} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">#{t}<button type="button" aria-label={`Remove ${t}`} onClick={() => onChange(tags.filter((x) => x !== t))}><X className="size-3" /></button></span>
+          <span key={t} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">#{t}<button type="button" aria-label={`Remove ${t}`} className="relative after:absolute after:-inset-2 after:content-['']" onClick={() => onChange(tags.filter((x) => x !== t))}><X className="size-3" /></button></span>
         ))}
         <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} onBlur={() => draft && add(draft)} placeholder={tags.length ? "" : "Add tags"} aria-label="Tags" className="flex-1 min-w-24 rounded-sm bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring text-base md:text-sm py-1" />
       </div>

@@ -56,6 +56,9 @@ function defaultAccount(accounts: { _id: Id<"accounts">; hidden?: boolean; archi
 }
 
 const PICK_CATEGORY = "Pick a category";
+const PICK_METHOD = "Pick a payment method";
+const PICK_TO = "Pick a payment method to transfer to";
+const ENTER_AMOUNT = "Enter an amount";
 
 type Form = {
   type: TxType;
@@ -381,6 +384,8 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   // New entries start with the cursor in the amount, and go back there after "Continue". The tap
   // that opened this screen primed the iOS keyboard (primeKeyboard); take focus over before paint.
   const amountRef = useRef<HTMLInputElement>(null);
+  // what the amount field held when Save found no amount in it: marked invalid until it is changed
+  const [noAmount, setNoAmount] = useState<string | null>(null);
   // a draft already has its amount: no keyboard popping up over a review
   useLayoutEffect(() => {
     if (!isEdit && !draft) amountRef.current?.focus();
@@ -409,16 +414,16 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
 
   function buildArgs() {
     const amountMajor = evaluateExpression(f.amount, LOCALE_DECIMAL);
-    if (amountMajor === null) throw new Error("Enter an amount");
+    if (amountMajor === null) throw new Error(ENTER_AMOUNT);
     const typed = toMinor(amountMajor, settings.decimals);
-    if (typed === 0) throw new Error("Enter an amount");
+    if (typed === 0) throw new Error(ENTER_AMOUNT);
     // a refund is stored below zero, so every total nets it against the category
     const refund = f.type === "expense" && f.refund;
     const amount = refund ? -Math.abs(typed) : typed;
     const subTyped = sub ? toMinor(evaluateExpression(f.subAmount, LOCALE_DECIMAL) ?? 0, sub.decimals) : undefined;
-    if (!f.accountId) throw new Error("Pick a payment method");
+    if (!f.accountId) throw new Error(PICK_METHOD);
     if (f.type !== "transfer" && !f.categoryId) throw new Error(PICK_CATEGORY);
-    if (f.type === "transfer" && !f.toAccountId) throw new Error("Pick a payment method to transfer to");
+    if (f.type === "transfer" && !f.toAccountId) throw new Error(PICK_TO);
     const fee = f.type === "transfer" && f.feeOn ? toMinor(evaluateExpression(f.fee, LOCALE_DECIMAL) ?? 0, settings.decimals) : undefined;
     return {
       type: f.type,
@@ -477,9 +482,15 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
         }
       }
     } catch (e) {
-      // the one thing missing is the category: offer the picker rather than an error
-      if (e instanceof Error && e.message === PICK_CATEGORY) setSheet("category");
-      else toast.error(e instanceof Error ? e.message : "Could not save");
+      // something is missing: open its picker, or put the cursor in the amount and mark it, rather than only saying so
+      const msg = e instanceof Error ? e.message : "Could not save";
+      if (msg === PICK_CATEGORY) setSheet("category");
+      else if (msg === PICK_METHOD) setSheet("account");
+      else if (msg === PICK_TO) setSheet("to");
+      else {
+        if (msg === ENTER_AMOUNT) { setNoAmount(sub ? f.subAmount : f.amount); amountRef.current?.focus(); }
+        toast.error(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -593,11 +604,11 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             <div className="flex-1 flex items-center gap-2">
               {sub ? (
                 <>
-                  <PrefixedInput ref={amountRef} aria-label={`Amount in ${sub.code}`} prefix={sub.code} inputMode="decimal" value={f.subAmount} onChange={(e) => set("subAmount", e.target.value)} placeholder="0" />
+                  <PrefixedInput ref={amountRef} aria-label={`Amount in ${sub.code}`} aria-invalid={noAmount === f.subAmount || undefined} prefix={sub.code} inputMode="decimal" value={f.subAmount} onChange={(e) => set("subAmount", e.target.value)} placeholder="0" />
                 </>
               ) : (
                 <>
-                  <PrefixedInput ref={amountRef} aria-label="Amount" prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount, LOCALE_DECIMAL); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", localNumber(v)); }} />
+                  <PrefixedInput ref={amountRef} aria-label="Amount" aria-invalid={noAmount === f.amount || undefined} prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount, LOCALE_DECIMAL); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", localNumber(v)); }} />
                 </>
               )}
               <Button variant="ghost" size="icon" className="size-8" aria-label="Calculator" onClick={() => setSheet("keypad")}><Calculator className="size-4" /></Button>

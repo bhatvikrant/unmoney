@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { ChevronDown } from "lucide-react";
-import { toast } from "sonner";
 import { useOp, useView } from "@/lib/store";
 import { repeatsList } from "../../../shared/views";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
@@ -58,7 +57,10 @@ export default function RepeatSettings() {
     const t = r.template;
     setEdit({ r, frequency: r.frequency, endDate: r.endDate ?? "", nextDate: r.nextDate, amount: amountInput(t.amount, settings.decimals), note: t.note, active: r.active, accountId: t.accountId, toAccountId: t.toAccountId, categoryId: t.categoryId, subcategoryId: t.subcategoryId });
   };
+  // why a save was refused, shown in the dialog itself rather than in a toast behind it
+  const [error, setError] = useState("");
   const save = async (e: Edit) => {
+    setError("");
     const t = e.r.template;
     const template = {
       ...t,
@@ -74,7 +76,7 @@ export default function RepeatSettings() {
       // only a next date the user changed: the one copied when the dialog opened may have moved on since (the server's job)
       await update({ id: e.r._id, frequency: e.frequency, endDate: e.endDate || null, nextDate: e.nextDate !== e.r.nextDate ? e.nextDate : undefined, active: e.active, template });
       setEdit(null);
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not save"); }
   };
   // "Edit schedule" from an upcoming row opens that schedule straight away
   const [sp, setSp] = useSearchParams();
@@ -114,7 +116,7 @@ export default function RepeatSettings() {
         </div>
         <p className="px-4 py-3 text-xs text-muted-foreground">Changing or deleting a schedule never touches the entries it already created.</p>
       </Page>
-      <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
+      <Dialog open={!!edit} onOpenChange={(o) => { if (!o) { setEdit(null); setError(""); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{edit?.r.kind === "installment" ? "Installment plan" : "Repeat schedule"}</DialogTitle>
@@ -145,6 +147,7 @@ export default function RepeatSettings() {
               <label className="flex items-center justify-between text-sm"><span>Active</span><Switch checked={edit.active} onCheckedChange={(v) => setEdit({ ...edit, active: v })} /></label>
             </div>
           ) : edit ? <p className="text-sm text-muted-foreground">All {edit.r.installmentCount} entries were created when the plan was set. Edit or delete them from the ledger (use "This and future" to change the rest).</p> : null}
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
           <DialogFooter>
             <Button variant="destructive" onClick={async () => { if (await del(edit!.r._id)) setEdit(null); }}>Delete schedule</Button>
             {edit?.r.kind === "repeat" ? <Button onClick={() => void save(edit)}>Save</Button> : null}

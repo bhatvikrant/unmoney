@@ -64,7 +64,7 @@ export default function BackupSettings() {
       <PageHeader back="/settings" title="Backup & data" />
       <Page className="pb-10">
         <Section title="Backup">
-          <Row label="Download backup (JSON)" hint="Everything: accounts, categories, entries, budgets, schedules, settings" right={<Button size="sm" variant="outline" onClick={exportJSON}>Download</Button>} />
+          <Row label="Download backup (JSON)" hint="Accounts, categories, entries, budgets, schedules and settings. Receipt photos are not in the file: they stay with this account" right={<Button size="sm" variant="outline" onClick={exportJSON}>Download</Button>} />
           <Row label="Restore from backup" hint="Replaces all current data" right={<Button size="sm" variant="outline" disabled={busy} onClick={() => restoreRef.current?.click()}>Choose file</Button>} />
           <input ref={restoreRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => onRestoreFile(e.target.files?.[0])} />
         </Section>

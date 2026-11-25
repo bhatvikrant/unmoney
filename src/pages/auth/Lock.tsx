@@ -4,7 +4,8 @@ import { useMutation } from "convex/react";
 import { toast } from "sonner";
 import { resetAnalytics } from "@/lib/analytics";
 import { api } from "../../../convex/_generated/api";
-import { clearFailures, hashPin, lockoutRemaining, markUnlocked, recordFailure } from "@/lib/passcode";
+import { clearFailures, hashPin, isOldSalt, lockoutRemaining, markUnlocked, newSalt, recordFailure } from "@/lib/passcode";
+import { useOp } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Delete } from "lucide-react";
@@ -72,6 +73,7 @@ export default function Lock({ hash, salt, resetRequested, onUnlock }: { hash: s
   const { signOut } = useAuthActions();
   const requestReset = useMutation(api.passcode.requestReset);
   const cancelReset = useMutation(api.passcode.cancelReset);
+  const setPasscode = useOp("settings.setPasscode");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const [forgot, setForgot] = useState(false);
@@ -90,6 +92,11 @@ export default function Lock({ hash, salt, resetRequested, onUnlock }: { hash: s
             clearFailures();
             markUnlocked();
             if (resetRequested) void cancelReset().catch(() => {});
+            // set before the hash was a slow one: keep the same passcode under the new hash, now that it has been typed
+            if (isOldSalt(salt)) {
+              const fresh = newSalt();
+              void hashPin(pin, fresh).then((h) => setPasscode({ hash: h, salt: fresh })).catch(() => {});
+            }
             onUnlock();
           } else {
             recordFailure();

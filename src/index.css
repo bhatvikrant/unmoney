@@ -63,13 +63,15 @@
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
     --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
+    /* 5:1 on --muted, where secondary text also sits (0.556 was 4.3:1 there) */
+    --muted-foreground: oklch(0.52 0 0);
     --accent: oklch(0.97 0 0);
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
+    /* the focused control's border: 3:1 or more against the page (0.708 was 2.3:1); its halo is this at half strength */
+    --ring: oklch(0.5 0 0);
     /* categorical series, in fixed order; validated colorblind-safe on the light surface */
     --chart-1: #2a78d6;
     --chart-2: #eb6834;
@@ -174,7 +176,7 @@
   --color-expense: var(--expense);
   --color-transfer: var(--transfer);
   /* what a budget still has left: green in both colour sets (over stays the expense colour) */
-  --color-budget-left: var(--chart-3); /* the poster image draws it from --chart-3 too */
+  --color-budget-left: var(--budget-left); /* the poster image draws it from --chart-3 */
   --shadow-card: var(--shadow-card);
   --shadow-pop: var(--shadow-pop);
 }
@@ -182,6 +184,8 @@
   /* dark enough to read as text on white (4.5:1); the dark theme keeps the brighter pair */
   --money-blue: oklch(0.55 0.19 255);
   --money-red: oklch(0.58 0.2 28);
+  /* --chart-3's green, dark enough to be read as text on white; the dark theme uses --chart-3 itself */
+  --budget-left: oklch(0.52 0.13 160);
   --income: var(--money-blue);
   --expense: var(--money-red);
   --transfer: oklch(0.55 0 0);
@@ -194,6 +198,7 @@
   --expense: var(--money-blue);
 }
 .dark {
+  --budget-left: var(--chart-3);
   --money-blue: oklch(0.62 0.19 255);
   --money-red: oklch(0.66 0.2 28);
   --transfer: oklch(0.7 0 0);

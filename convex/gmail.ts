@@ -474,19 +474,23 @@ export const revokeForUser = internalAction({
  * whose chain broke starts again, and one waiting for AI reads carries on once a new month gives some.
  */
 export const syncAll = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const all = await ctx.db.query("gmailConnections").collect();
+  args: { cursor: v.optional(v.union(v.string(), v.null())), started: v.optional(v.number()) },
+  handler: async (ctx, { cursor = null, started = 0 }) => {
+    // A page at a time, like repeats.materialiseAll: one mutation reading every connection (each carries its
+    // log and what it has learned) stops fitting in a transaction long before there are thousands of them.
+    const res = await ctx.db.query("gmailConnections").paginate({ numItems: 100, cursor });
     const now = Date.now();
-    let i = 0;
-    for (const c of all) {
+    let i = started;
+    for (const c of res.page) {
       if (c.status !== "ok") continue;
-      const delay = i++ * 3000;
+      // three seconds apart, starting over after 45 minutes' worth so the last ones still run inside the hour
+      const delay = (i++ % 900) * 3000;
       await ctx.scheduler.runAfter(delay, internal.gmail.syncUser, { userId: c.userId });
       const b = c.backfill;
       const used = c.aiMonth === monthOf(now) ? c.aiCalls : 0;
       if (b && ((b.state === "running" && now - (b.lastStepAt ?? b.startedAt) > STALL_MS) || (b.state === "waiting-ai" && used < BACKFILL_AI_CAP))) await kickBackfill(ctx, c, delay + 60_000);
     }
+    if (!res.isDone) await ctx.scheduler.runAfter(0, internal.gmail.syncAll, { cursor: res.continueCursor, started: i });
   },
 });
 
