@@ -13,7 +13,7 @@ import { DEFAULT_SPAN_DAYS, LOOKBACKS, normaliseSender, SENDER_PRESETS, windowSt
 import { yearStart } from "../../../shared/gmail/backfill";
 import { BackfillEstimate, BackfillPreview, BackfillProgress, longDay, validYear, YearField } from "./GmailBackfill";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
-import { Row, Section } from "@/components/shell/misc";
+import { AiHow, Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -46,7 +46,7 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message.replace(/^.*Un
 export default function GmailSettings() {
   const nav = useNavigate();
   const s = useQuery(api.gmail.status);
-  const { status: { offline }, view } = useStore();
+  const { status: { offline }, view, user } = useStore();
   const toReview = waitingDrafts(view);
   const connectUrl = useAction(api.gmail.connectUrl);
   const disconnect = useAction(api.gmail.disconnect);
@@ -270,7 +270,7 @@ export default function GmailSettings() {
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"><Mail className="size-4" /></span>
                   <div className="text-sm">
                     <div className="font-medium">Turn money mail into entries</div>
-                    <div className="mt-0.5 text-muted-foreground">Let UnMoney read the mail your bank, cards and shops send about payments. Each one becomes a faded entry on its day in the ledger, for you to check and save.</div>
+                    <div className="mt-0.5 text-muted-foreground">Let UnMoney read the mail your bank, cards and shops send about payments. Each one becomes a faded entry on its day in the ledger, for you to check and save.{user?.ai ? <> <AiHow feature="gmail" /></> : null}</div>
                   </div>
                 </div>
                 <ul className="ml-12 list-disc space-y-1 text-xs text-muted-foreground">
@@ -387,6 +387,7 @@ export default function GmailSettings() {
             </Section>
 
             <Section title="What is read">
+              {s.ai ? <Row label="Mail no rule can read" hint={<>Read by Anthropic's Claude. <AiHow feature="gmail" /></>} /> : null}
               <Row label="Mail Gmail files under Purchases" hint="Receipts from shops the sender list doesn't name" right={<Switch aria-label="Read mail Gmail files under Purchases" checked={s.scanPurchases} onCheckedChange={(v) => void patch({ scanPurchases: v })} />} />
               <Collapsible label="Senders" hint={s.senders.length ? `${s.senders.length} addresses and domains always read` : "None: only mail with a payment in its subject"} count={s.senders.length}>
                 <div className="text-xs text-muted-foreground">Mail from these is always read. Mail from anyone else only when its subject mentions a payment.</div>
@@ -445,7 +446,7 @@ export default function GmailSettings() {
                     </div>
                   ))}
                 </div>
-                {s.ai ? <div className="mt-2 text-xs text-muted-foreground">Mail no rule can read is read by AI: {s.aiCalls} of {s.aiCap} AI reads used this month.</div> : null}
+                {s.ai ? <div className="mt-2 text-xs text-muted-foreground">Mail no rule can read is read by AI: {s.aiCalls} of {s.aiCap} AI reads used this month. <AiHow feature="gmail" /></div> : null}
               </Collapsible>
             </Section>
 

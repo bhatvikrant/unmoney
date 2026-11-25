@@ -28,6 +28,7 @@ import { RepeatSheet, repeatLabel, type RepeatChoice } from "@/components/tx/Rep
 import { SipToggle } from "@/components/tx/SipToggle";
 import { PhotoField, TagInput } from "@/components/tx/fields";
 import { BottomSheet } from "@/components/shell/BottomSheet";
+import { AiHow } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Input } from "@/components/ui/input";
@@ -652,7 +653,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void fillFromSentence(); } }} />
               <Button variant="outline" className="h-9 shrink-0" disabled={filling || !sentence.trim()} onClick={() => void fillFromSentence()}>{filling ? "Filling in…" : "Fill in"}</Button>
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">Type or dictate the entry. "Fill in" sends this sentence to Anthropic's Claude, with the names of your categories and payment methods and the notes you use most. You check the entry before saving.</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">Type or dictate the entry. "Fill in" sends this sentence to Anthropic's Claude, with the names of your categories and payment methods and the notes you use most. You check the entry before saving. <AiHow feature="quick" /></p>
           </div>
         ) : null}
         <div className="grid grid-cols-3 gap-2 p-4">
