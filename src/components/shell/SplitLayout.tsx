@@ -33,7 +33,7 @@ export function SplitLayout({ list, label, width = 480, keyParams = [] }: { list
       {item ? (
         <ColumnContext.Provider value="detail">
           {/* a fresh panel (and scroll) for each item */}
-          <aside key={key} className="sticky top-0 h-dvh overflow-y-auto border-l bg-background" aria-label={label}>{item}</aside>
+          <aside key={key} className="sticky top-0 h-dvh overflow-y-auto border-l bg-background page-pattern" aria-label={label}>{item}</aside>
         </ColumnContext.Provider>
       ) : null}
     </div>
