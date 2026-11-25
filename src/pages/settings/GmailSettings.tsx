@@ -124,7 +124,7 @@ export default function GmailSettings() {
     if (firstCheck.error) toast.error(`The first check failed: ${firstCheck.error}`);
     // the check's own count: it arrives with the log, before its drafts reach this device's copy
     else if (firstCheck.found) nav("/gmail");
-    else toast(`No money mail found in the last ${s.lookbackDays} days. New mail is checked every hour.`);
+    else toast(`No money mail found in the last ${s.lookbackDays} days. New mail is checked every hour while you use the app.`);
   }, [waitingSince, firstCheck, s, nav]);
 
   async function connect() {
@@ -290,7 +290,7 @@ export default function GmailSettings() {
                     <BackfillPreview year={year} />
                   </div>
                 ) : (
-                  <div className="mt-2 text-xs text-muted-foreground">{lookback === 0 ? "Only mail that arrives after you connect. Nothing already in your inbox is read." : `Every hourly check reads money mail from the last ${lookback} days. You can change this later.`}</div>
+                  <div className="mt-2 text-xs text-muted-foreground">{lookback === 0 ? "Only mail that arrives after you connect. Nothing already in your inbox is read." : `Money mail from the last ${lookback} days is read when you connect, then new mail at every check. You can change this later.`}</div>
                 )}
               </div>
             </Section>
@@ -334,7 +334,7 @@ export default function GmailSettings() {
                   <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
                     <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", s.status === "ok" ? "bg-income" : s.status === "paused" ? "bg-muted-foreground" : "bg-amber-500")} />
                     <span>
-                      {s.status === "ok" ? "Checks every hour" : s.status === "paused" ? "Paused" : "Needs reconnecting"}
+                      {s.status === "ok" ? "Checks every hour, once a day while you're away" : s.status === "paused" ? "Paused" : "Needs reconnecting"}
                       {" · "}{s.syncing && !backfilling ? "checking now…" : s.lastSyncAt ? `last checked ${ago(s.lastSyncAt)}` : "not checked yet"}
                     </span>
                   </div>
@@ -372,7 +372,7 @@ export default function GmailSettings() {
                 ) : s.backfill ? (
                   <div className="mt-2 text-xs text-muted-foreground">
                     {s.backfill.state === "done"
-                      ? <>Read all money mail back to <span className="text-foreground">{longDay(s.backfill.from)}</span>{s.backfill.finishedAt ? <> (finished {day(s.backfill.finishedAt)}, {s.backfill.found} found)</> : null}. Hourly checks now read new mail.</>
+                      ? <>Read all money mail back to <span className="text-foreground">{longDay(s.backfill.from)}</span>{s.backfill.finishedAt ? <> (finished {day(s.backfill.finishedAt)}, {s.backfill.found} found)</> : null}. Checks now read new mail.</>
                       : <>Reading back to <span className="text-foreground">{longDay(s.backfill.from)}</span>; progress is at the top. Hourly checks keep reading new mail meanwhile.</>}
                     {" "}<button type="button" className="text-foreground underline underline-offset-2" onClick={() => setChoosingYear(true)}>Pick another year</button>
                   </div>
@@ -380,7 +380,7 @@ export default function GmailSettings() {
                   <div className="mt-2 text-xs text-muted-foreground">
                     {s.lookbackDays === 0
                       ? <>Only mail that arrives from {day(s.readsFrom ?? Date.now())} on is read. Nothing older in your inbox.</>
-                      : <>Every hourly check reads money mail from the last {s.lookbackDays} days, now back to <span className="text-foreground">{day(windowStart({ lookbackDays: s.lookbackDays, readsFrom: s.readsFrom ?? undefined, syncedUpTo: s.syncedUpTo ?? undefined }, Date.now()))}</span>. Mail that already became a draft is skipped.</>}
+                      : <>Each check reads new money mail. Once a day the last {s.lookbackDays} days are searched again, in case something was missed, now back to <span className="text-foreground">{day(windowStart({ lookbackDays: s.lookbackDays, readsFrom: s.readsFrom ?? undefined, syncedUpTo: s.syncedUpTo ?? undefined }, Date.now()))}</span>. Mail that already became a draft is skipped.</>}
                   </div>
                 )}
               </div>
@@ -463,7 +463,7 @@ export default function GmailSettings() {
   );
 }
 
-/** A look-back in days, or "since a year" (read back to 1 January of it, then the usual 30 days each hour). */
+/** A look-back in days, or "since a year" (read back to 1 January of it, then new mail as usual). */
 type Choice = Lookback | "year";
 const CHOICES: Choice[] = [...LOOKBACKS, "year"];
 
