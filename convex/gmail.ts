@@ -61,6 +61,8 @@ const FETCH_AT_ONCE = 3;
 const FETCH_BATCH_MS = 300;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+/** What a check searches when it does not search the whole look-back: this long before the last check's end (wholeWindow). */
+const RECENT_MS = DAY_MS;
 /** The cron checks a user who was in the app within this long every hour, and one who is away once a day: the app checks when it opens (src/pages/transactions/GmailNudge.tsx). */
 const AWAY_AFTER_MS = DAY_MS;
 /** Between one backfill slice and the next; longer after a failure or while the AI could not read some mail. */
@@ -279,7 +281,7 @@ async function saveConnectionFor(ctx: MutationCtx, { userId, email, refreshToken
     await ctx.db.patch(old._id, {
       // the same mailbox again (its grant had died): never later than before, or the mail from the days it was down is skipped
       email, refreshTokenEnc, iv, lookbackDays, readsFrom: backfill && !backfillFrom ? backfill.from : same && old.readsFrom !== undefined ? Math.min(old.readsFrom, readsFrom) : readsFrom, status: "ok", lastError: undefined,
-      syncedUpTo: same ? old.syncedUpTo : undefined, accountMap: same ? old.accountMap : {}, backfill,
+      syncedUpTo: same ? old.syncedUpTo : undefined, accountMap: same ? old.accountMap : {}, backfill, searchedAllAt: undefined,
     });
     // after the first check (scheduled by the caller), so the newest mail shows up first
     await kickBackfill(ctx, { _id: old._id, userId, backfill }, 30_000);
@@ -315,6 +317,8 @@ export const updateSettings = mutation({
     if (args.scanPurchases !== undefined) patch.scanPurchases = args.scanPurchases;
     // a new look-back counts from now: a longer one reaches older mail, "from now on" stops reading it; it ends reading back to a year
     if (args.lookbackDays !== undefined) Object.assign(patch, { lookbackDays: args.lookbackDays, readsFrom: readsFromFor(args.lookbackDays, Date.now()), backfill: undefined });
+    // other senders, another look-back: the next check searches all of it, not only the last day
+    if (args.senders || args.scanPurchases !== undefined || args.lookbackDays !== undefined) patch.searchedAllAt = undefined;
     if (args.paused === true && c.status === "ok") patch.status = "paused";
     const resumed = args.paused === false && c.status === "paused";
     if (resumed) { patch.status = "ok"; patch.lastError = undefined; }
@@ -406,7 +410,7 @@ export const muteSender = mutation({
     const list = new Set(c.muted ?? []);
     if (muted) list.add(address);
     else list.delete(address);
-    await ctx.db.patch(c._id, { muted: [...list].slice(-MAX_SENDERS), ...(muted ? { senders: c.senders.filter((s) => s !== address) } : {}) });
+    await ctx.db.patch(c._id, { muted: [...list].slice(-MAX_SENDERS), ...(muted ? { senders: c.senders.filter((s) => s !== address) } : {}), searchedAllAt: undefined });
   },
 });
 
@@ -424,7 +428,7 @@ export const addNewDefaultSenders = internalMutation({
     for (const c of all) {
       const senders = withNewDefaults(c.senders).slice(0, MAX_SENDERS);
       if (senders.length === c.senders.length) continue;
-      await ctx.db.patch(c._id, { senders });
+      await ctx.db.patch(c._id, { senders, searchedAllAt: undefined });
       updated++;
     }
     return { connections: all.length, updated };
@@ -709,6 +713,8 @@ type Prep = Awaited<ReturnType<typeof prepOf>>;
 
 type Collected = {
   scanned: number;
+  /** The search covered the whole look-back, not only the last day (wholeWindow). */
+  whole: boolean;
   inserts: (DraftCandidate & { matchedTransactionId?: Id<"transactions"> })[];
   updates: ReturnType<typeof foldDrafts>["updates"];
   /** Open drafts that look like an entry the user typed in since the draft was written. */
@@ -787,11 +793,23 @@ async function askClaude(ctx: ActionCtx, userId: Id<"users">, mails: Mail[], rea
 /** A day and the days either side: what "already added?" compares a mail's date with. */
 const around = (date: string) => [addDays(date, -1), date, addDays(date, 1)];
 
+/**
+ * Whether this check searches the whole look-back, or only the last day before the last check's end.
+ * Every mail a search lists is looked up (seenMessageIds), and the whole window is the same few hundred
+ * mails every hour. All of it still once a day (late or back-dated mail), on the first check, after
+ * anything that asks for it (searchedAllAt cleared: other senders, another look-back, mail forgotten so
+ * that it is read again), and after a check that failed or held mail back, which lies before the last day.
+ */
+const wholeWindow = (c: Connection, now: number) =>
+  !c.searchedAllAt || now - c.searchedAllAt >= DAY_MS - HOUR_MS || c.syncedUpTo === undefined || !c.lastSyncAt || c.syncedUpTo < c.lastSyncAt;
+
 /** Search, fetch, triage, parse, dedup: everything a check does short of writing. Shared by the check, a backfill slice and the dry run. */
 async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Range): Promise<Collected> {
   const c = prep.connection;
   const token = range?.token ?? await gmailApi.accessToken(await decryptText(c.refreshTokenEnc, c.iv));
-  const afterMs = range?.afterMs ?? windowStart(c, startedAt);
+  const windowFrom = range?.afterMs ?? windowStart(c, startedAt);
+  const whole = !!range || wholeWindow(c, startedAt);
+  const afterMs = whole ? windowFrom : Math.max(windowFrom, (c.syncedUpTo ?? startedAt) - RECENT_MS);
   const aiCap = range?.aiCap ?? AI_MONTHLY_CAP;
   const muted = c.muted ?? [];
   const q = buildQuery({ senders: c.senders, scanPurchases: c.scanPurchases, afterSeconds: afterMs / 1000, beforeSeconds: range && range.beforeMs / 1000, muted });
@@ -807,7 +825,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
   }
   // nothing new and nothing saved to learn from (most hours): nothing more to read
   if (!unread.length && !prep.learnFrom.length) {
-    return { scanned, inserts: [], updates: [], matches: [], learned: {}, learnedMerchants: {}, processed: [], syncedUpTo: startedAt, aiCalls: 0, aiSkipped: 0, aiDropped: 0, notes: [], unread: 0, fetched: 0, retryAt: [], aiCapped: false };
+    return { scanned, whole, inserts: [], updates: [], matches: [], learned: {}, learnedMerchants: {}, processed: [], syncedUpTo: startedAt, aiCalls: 0, aiSkipped: 0, aiDropped: 0, notes: [], unread: 0, fetched: 0, retryAt: [], aiCapped: false };
   }
   const read = await ctx.runQuery(internal.gmail.prepareRead, { userId: c.userId, since: range?.savedSince ?? afterMs - SAVED_SLACK_MS });
   const fresh = unread.slice(0, SYNC_MAX);
@@ -922,7 +940,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
   const covered = new Set(dates);
   const matchable = openDrafts.filter((d) => d.matchedTransactionId || around(d.proposal.date).every((x) => covered.has(x)));
   return {
-    scanned,
+    scanned, whole,
     inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, transactions, read.accounts) })),
     updates,
     matches: [...laterMatches(matchable, transactions, read.accounts)].map(([id, transactionId]) => ({ id, transactionId })),
@@ -932,7 +950,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
     unread: unread.length, fetched: fresh.length, retryAt: retry.map((m) => m.receivedAt), aiCapped,
     // a check starts the look-back before syncedUpTo: hold it back so the mail skipped this time is in
     // the next window (where this one started, when older mail still waits)
-    syncedUpTo: Math.min(startedAt, ...retry.map((m) => m.receivedAt + spanMs(c.lookbackDays)), ...(waiting ? [afterMs + spanMs(c.lookbackDays)] : [])),
+    syncedUpTo: Math.min(startedAt, ...retry.map((m) => m.receivedAt + spanMs(c.lookbackDays)), ...(waiting ? [windowFrom + spanMs(c.lookbackDays)] : [])),
   };
 }
 
@@ -949,7 +967,7 @@ export const syncUser = internalAction({
         userId, startedAt,
         inserts: got.inserts, updates: got.updates, matches: got.matches, learned: got.learned, learnedMerchants: got.learnedMerchants,
         aiCalls: got.aiCalls, scanned: got.scanned, note: got.notes.join(" · ") || undefined,
-        processed: got.processed, syncedUpTo: got.syncedUpTo, learnedRev: prep.rev,
+        processed: got.processed, syncedUpTo: got.syncedUpTo, learnedRev: prep.rev, whole: got.whole,
       });
       return { ran: true, found: got.inserts.length };
     } catch (e) {
@@ -1070,6 +1088,9 @@ export const releaseFolded = internalMutation({
       await patchSynced(ctx, userId, d._id, { extraMessageIds: [] });
       await forgetSeen(ctx, userId, d.extraMessageIds);
     }
+    // the mail forgotten here is anywhere in the look-back: the next check searches all of it
+    const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (c) await ctx.db.patch(c._id, { searchedAllAt: undefined });
     return { drafts, mails, unpriced };
   },
 });
@@ -1094,7 +1115,8 @@ export const rebuildOpenDrafts = internalMutation({
     }
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     let forgotten = c?.processed?.length ?? 0;
-    if (c?.processed) await ctx.db.patch(c._id, { processed: undefined });
+    // and the next check searches the whole look-back for them, not only the last day
+    if (c) await ctx.db.patch(c._id, { processed: undefined, searchedAllAt: undefined });
     // the first page here (its count is what is reported), any more scheduled
     const firstPage = await ctx.db.query("gmailSeen").withIndex("by_user_message", (q) => q.eq("userId", userId)).paginate({ numItems: 1000, cursor: null });
     for (const r of firstPage.page) {
@@ -1119,7 +1141,7 @@ export const rereadLookback = internalMutation({
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!c?.syncedUpTo || c.readsFrom === undefined) return { moved: false };
     const syncedUpTo = Math.min(c.syncedUpTo, c.readsFrom + spanMs(c.lookbackDays));
-    await ctx.db.patch(c._id, { syncedUpTo });
+    await ctx.db.patch(c._id, { syncedUpTo, searchedAllAt: undefined });
     return { moved: syncedUpTo !== c.syncedUpTo };
   },
 });
@@ -1211,8 +1233,10 @@ export const writeSync = internalMutation({
     syncedUpTo: v.optional(v.number()),
     /** The change number the check learned up to (prepareSync). */
     learnedRev: v.optional(v.number()),
+    /** The check searched the whole look-back (wholeWindow). */
+    whole: v.optional(v.boolean()),
   },
-  handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, learnedMerchants = {}, aiCalls, scanned, note, processed = [], syncedUpTo = startedAt, learnedRev }) => {
+  handler: async (ctx, { userId, startedAt, inserts, updates, matches, learned, learnedMerchants = {}, aiCalls, scanned, note, processed = [], syncedUpTo = startedAt, learnedRev, whole }) => {
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!c) return;
     const found = await writeDrafts(ctx, userId, startedAt, { inserts, updates, matches, processed });
@@ -1225,7 +1249,7 @@ export const writeSync = internalMutation({
     const month = monthOf(startedAt);
     const entry = { at: startedAt, scanned, found, ...(note ? { note } : {}) };
     await ctx.db.patch(c._id, {
-      lastSyncAt: startedAt, lastError: undefined, syncedUpTo, syncingSince: undefined, ...(learnedRev !== undefined ? { learnedRev } : {}),
+      lastSyncAt: startedAt, lastError: undefined, syncedUpTo, syncingSince: undefined, ...(learnedRev !== undefined ? { learnedRev } : {}), ...(whole ? { searchedAllAt: startedAt } : {}),
       ...learning(c, month, aiCalls, learned),
       log: [entry, ...c.log].slice(0, LOG_KEEP),
     });

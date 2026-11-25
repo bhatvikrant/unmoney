@@ -311,6 +311,45 @@ test("a check pages past the mail it has seen, reads the newest 300 of the rest,
   expect(await t.query(internal.gmail.seenMessageIds, { userId, ids: ["f1", "f300", "f301", "p1"] })).toEqual(["f1", "f300", "p1"]);
 });
 
+test("a check searches the whole look-back once a day and when something asks for it, otherwise only the last day", async () => {
+  const { t, as, userId, connect } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const { enc, iv } = await encryptText("1//refresh-token");
+  const cid = await connect({ refreshTokenEnc: enc, iv });
+  const hour = 60 * 60 * 1000, day = 24 * hour;
+  const connection = () => t.run((ctx) => ctx.db.get(cid)).then((c) => c!);
+  let after = 0;
+  const g = fakeGoogle((u) => { after = Number(/after:(\d+)/.exec(u.searchParams.get("q")!)![1]) * 1000; return { messages: [] }; });
+  /** A check, and how many days before `from` its search began. */
+  const daysSearched = async (from?: number) => {
+    const before = await connection();
+    expect(await t.action(internal.gmail.syncUser, { userId })).toEqual({ ran: true, found: 0 });
+    return Math.round(((from ?? before.syncedUpTo ?? (await connection()).lastSyncAt!) - after) / day);
+  };
+  try {
+    // the first check: the whole look-back
+    expect(await daysSearched()).toBe(30);
+    const first = await connection();
+    expect(first.searchedAllAt).toBe(first.lastSyncAt);
+    // the next: only the day before where the last one ended, and it does not count as a whole search
+    expect(await daysSearched()).toBe(1);
+    expect((await connection()).searchedAllAt).toBe(first.searchedAllAt);
+    // other senders: all of it again, then back to the last day
+    await as.mutation(api.gmail.updateSettings, { senders: ["hdfcbank.net", "icicibank.com"] });
+    expect(await daysSearched()).toBe(30);
+    expect(await daysSearched()).toBe(1);
+    // a day since the last whole search
+    await t.run((ctx) => ctx.db.patch(cid, { searchedAllAt: Date.now() - 23.5 * hour }));
+    expect(await daysSearched()).toBe(30);
+    // the last check failed or held mail back (syncedUpTo behind lastSyncAt): that mail lies before the last day
+    const held = (await connection()).lastSyncAt! - 5 * hour;
+    await t.run((ctx) => ctx.db.patch(cid, { syncedUpTo: held }));
+    expect(await daysSearched(held)).toBe(30);
+    expect(await daysSearched()).toBe(1);
+  } finally { g.restore(); }
+});
+
 test("the hourly check schedules one run per live connection", async () => {
   const { t, userId, connect } = await setup();
   await connect();
