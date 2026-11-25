@@ -110,7 +110,7 @@ export function RecapInsights({ recapKey, stored, open, onOpenChange }: { recapK
             <p className="text-muted-foreground">
               To point out what stands out{year ? "" : " and suggest next month's budgets"}, UnMoney sends Anthropic's Claude a summary of this{" "}
               {year ? "year and the two before it" : "month and the five before it"}: totals spent and received, your largest categories by name with
-              what went out under each, your budgets and whether they held, and the notes you logged most often{year ? "" : ". For what stands out in a month it also sends the notes and amounts of the few largest entries behind it"}.
+              what went out under each, your budgets and whether they held, and the notes you logged most often. For what stands out it also sends the notes and amounts of the few largest entries behind it.
               It does not send dates, accounts, descriptions or photos. Nothing changes until you set a budget yourself. <AiHow feature="recap" />
             </p>
             <p className="text-xs text-muted-foreground">From then on, a recap that has just finished gets its insights when you open it on this device. Preferences turns that off.</p>

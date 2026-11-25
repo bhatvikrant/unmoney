@@ -160,9 +160,10 @@ export default function PrivacyPage() {
             When you tap "Get insights" on a monthly or yearly recap, a summary of that period is sent to the same API: your
             currency, what you spent and received in the period and in up to five months (or two years) before it, the names
             of your ten largest expense categories with what went out under each, your budgets' limits and whether they
-            held, and the up to five notes you logged most often with how many times and what they came to. For a month,
-            UnMoney also works out what stands out against the months before (a category that jumped, a habit that grew) and
-            sends those findings, which can include the notes and amounts of the few largest entries behind one. Dates,
+            held, and the up to five notes you logged most often with how many times and what they came to. UnMoney also
+            works out what stands out, in a month against the months before and in a year across its months (a category that
+            jumped, a habit that grew), and sends those findings, which can include the notes and amounts of the few largest
+            entries behind one and the name of the month one turns on. Dates,
             payment methods, descriptions and photos are not sent. After that first tap on a device, the recap of a month or
             year that has just finished gets its insights the same way when you open it there; Preferences turns this off.
             The insights and suggested budgets that come back are kept with your account, so opening the recap again does

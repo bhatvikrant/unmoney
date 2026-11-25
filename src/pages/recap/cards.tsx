@@ -1050,6 +1050,7 @@ export function PersonalityCard({ card }: Props<"personality">) {
 const FINDING_LABEL: Record<FindingType, string> = {
   climb: "Climbing", spike: "Out of the ordinary", low: "A light month", drivers: "What was behind it", without: "One-offs",
   pace: "The month's pace", habit: "On repeat", weekday: "Your week", missing: "Gone quiet",
+  peak: "One big month", shift: "A year of two halves", oneoffs: "One-offs", growing: "On repeat", stopped: "Gone quiet",
 };
 
 /** Bars oldest first (or one per weekday): the ones the finding is about in the card's hue, the rest grey. Drag across for each bar's figure. */
@@ -1059,11 +1060,13 @@ function BarsChart({ chart }: { chart: Extract<FindingChart, { kind: "bars" }> }
   const scrub = useScrub(n);
   const max = Math.max(1, ...chart.bars.map((b) => b.value));
   const figure = (v: number) => (chart.unit === "money" ? short(v) : `${v}×`);
+  // a year's twelve months: closer together, an initial under each (the callout has the whole label)
+  const many = n > 8;
   // at rest the figure sits on the last bar the finding is about
   const at = scrub.at ?? chart.bars.findLastIndex((b) => b.on);
   return (
     <div>
-      <div {...scrub.bind} className="relative flex h-[170px] items-end gap-2 pt-6">
+      <div {...scrub.bind} className={cn("relative flex h-[170px] items-end pt-6", many ? "gap-1" : "gap-2")}>
         {at >= 0 ? <Callout i={at} n={n} label={chart.bars[at].label} value={figure(chart.bars[at].value)} /> : null}
         {chart.bars.map((b, i) => (
           <span key={i} className={cn("pointer-events-auto flex h-full min-w-0 flex-1 items-end transition-opacity", dimmed(scrub, i))}>
@@ -1071,7 +1074,7 @@ function BarsChart({ chart }: { chart: Extract<FindingChart, { kind: "bars" }> }
           </span>
         ))}
       </div>
-      <div className="mt-1.5 flex gap-2 text-center text-[11px] text-muted-foreground">{chart.bars.map((b, i) => <span key={i} className="min-w-0 flex-1 truncate">{b.label}</span>)}</div>
+      <div className={cn("mt-1.5 flex text-center text-[11px] text-muted-foreground", many ? "gap-1" : "gap-2")}>{chart.bars.map((b, i) => <span key={i} className="min-w-0 flex-1 truncate">{many ? b.label[0] : b.label}</span>)}</div>
     </div>
   );
 }
