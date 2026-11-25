@@ -6,7 +6,7 @@
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { CatType, Snapshot } from "./ops";
 import { addDays, todayISO } from "./dates";
-import { categoryUsage, normNote } from "./categoryLint";
+import { categoryUsage, cutText, normNote } from "./categoryLint";
 
 export const AI_MODEL = "claude-haiku-5-5";
 /** The AI part unlocks once there is enough to go on. */
@@ -69,7 +69,7 @@ export function buildSummary(snap: Snapshot, includeNotes: boolean): { summary: 
     s.total += amount;
     const key = normNote(note);
     if (key) {
-      const e = s.notes.get(key) ?? { text: note.trim().slice(0, MAX_NOTE_LEN), n: 0 };
+      const e = s.notes.get(key) ?? { text: cutText(note.trim(), MAX_NOTE_LEN), n: 0 };
       e.n++;
       s.notes.set(key, e);
     }
@@ -190,7 +190,7 @@ export function validateSuggestions(raw: unknown, categories: Doc<"categories">[
     if (out.length >= MAX_SUGGESTIONS) break;
     if (!r || typeof r !== "object") continue;
     const confidence: Confidence = r.confidence === "high" || r.confidence === "medium" ? r.confidence : "low";
-    const reason = typeof r.reason === "string" ? r.reason.trim().slice(0, 120) : "";
+    const reason = typeof r.reason === "string" ? cutText(r.reason.trim(), 120) : "";
     const ids = Array.isArray(r.ids) ? [...new Set(r.ids)].map(get) : [];
     if (!ids.length || ids.some((c) => !c)) continue;
     const cats = ids as Doc<"categories">[];

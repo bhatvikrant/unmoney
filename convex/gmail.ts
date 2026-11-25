@@ -22,6 +22,7 @@ import { recordSpend } from "./lib/aiSpend";
 import { reportServerError } from "./lib/posthog";
 import { GmailAuthError, GmailSetupError, SCOPE } from "./lib/gmailApi";
 import { addDays } from "../shared/dates";
+import { cutText } from "../shared/categoryLint";
 import { clean } from "../shared/ops";
 import type { Mail } from "../shared/gmail/mail";
 import { triage } from "../shared/gmail/triage";
@@ -691,13 +692,13 @@ function candidateOf(mail: Mail, resolved: ReturnType<typeof resolveParsed>, how
   return {
     source: "gmail",
     messageId: mail.id,
-    ...(merchant ? { merchant: merchant.slice(0, 120) } : {}),
+    ...(merchant ? { merchant: cutText(merchant, 120) } : {}),
     ...(summary ? { summary } : {}),
     extraMessageIds: [],
     threadId: mail.threadId,
     receivedAt: mail.receivedAt,
-    from: mail.from.slice(0, 200),
-    subject: mail.subject.replace(/\s+/g, " ").trim().slice(0, 120),
+    from: cutText(mail.from, 200),
+    subject: cutText(mail.subject.replace(/\s+/g, " ").trim(), 120),
     proposal: clean(resolved.proposal),
     confidence: resolved.confidence,
     how,
@@ -1113,7 +1114,7 @@ export const auditMail = internalAction({
         out.push({
           id: mail.id, from: mail.from, subject: mail.subject, receivedAt: mail.receivedAt, triage: verdict.keep ? "keep" : verdict.reason,
           parsed: parsed && { rule: parsed.rule, type: parsed.type, amount: parsed.amount, currency: parsed.currency, merchant: parsed.merchantRaw },
-          text: !verdict.keep ? mail.text.slice(0, 300) : parsed ? undefined : mail.text.slice(0, 1500),
+          text: !verdict.keep ? cutText(mail.text, 300) : parsed ? undefined : cutText(mail.text, 1500),
         });
       }
       const wait = FETCH_BATCH_MS - (Date.now() - started);

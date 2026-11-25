@@ -15,7 +15,7 @@ import { drawsFromLinked, resolveKind } from "./ledger";
 import { firstDateAfter, nextOccurrence, type Frequency } from "./repeat";
 import { monthKeyForDate, monthRange } from "./period";
 import { parseNumber, toMinor, type DecimalMark } from "./money";
-import { normName, normNote } from "./categoryLint";
+import { cutText, normName, normNote } from "./categoryLint";
 import { describeOp, HISTORY_COALESCE_MS, HISTORY_KINDS, HISTORY_MAX, type HistoryLine } from "./history";
 import { addBudgetAmounts, budgetAmountAt, earlierAfterChange, scaleEarlier } from "./budgetAmounts";
 import { aroundDates, fromGmail, sipFor, sipKey, sipsOf, type Rhythm, type Sip } from "./sips";
@@ -2094,7 +2094,7 @@ const handlers: Handlers = {
       const had = list.find((x) => x.id === batch.id);
       const next = had
         ? list.map((x) => (x.id === batch.id ? { ...x, count: x.count + inserted } : x))
-        : [{ id: batch.id, name: batch.name.trim().slice(0, 120) || "Import", at: w.at, count: inserted }, ...list].slice(0, RECENT_IMPORTS);
+        : [{ id: batch.id, name: cutText(batch.name.trim(), 120) || "Import", at: w.at, count: inserted }, ...list].slice(0, RECENT_IMPORTS);
       w.patch("settings", settings._id, { recentImports: next });
     }
     return { inserted, errors, createdAccounts, duplicates, likelyDuplicates };
