@@ -8,5 +8,6 @@ crons.hourly("check Gmail for new money mail", { minuteUTC: 20 }, internal.gmail
 crons.daily("prune old tombstones", { hourUTC: 3, minuteUTC: 20 }, internal.sync.pruneTombstones, {});
 crons.daily("prune resolved Gmail drafts", { hourUTC: 3, minuteUTC: 10 }, internal.sync.pruneDrafts, {});
 crons.daily("prune old usage sessions", { hourUTC: 3, minuteUTC: 30 }, internal.usage.pruneSessions, {});
-crons.daily("count each user's data for the superadmin dashboard", { hourUTC: 3, minuteUTC: 40 }, internal.admin.refreshStats, {});
+// weekly, not daily: a count reads every document of every user, which was a large part of the database I/O; "Refresh now" counts on demand
+crons.weekly("count each user's data for the superadmin dashboard", { dayOfWeek: "monday", hourUTC: 3, minuteUTC: 40 }, internal.admin.refreshStats, {});
 export default crons;
