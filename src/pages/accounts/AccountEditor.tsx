@@ -104,7 +104,7 @@ export default function AccountEditor() {
       };
       if (args.last4 && args.last4.length !== 4) throw new Error("Enter all 4 last digits, or leave them empty");
       if (id) await update({ id: id as Id<"accounts">, ...args }); else await create(args);
-      if (id) goBack("/payment-methods"); else nav("/payment-methods");
+      goBack("/payment-methods");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not save"); }
   }
 
