@@ -11,11 +11,13 @@ import { formatDistanceToNowStrict } from "date-fns";
 import { RefreshCw, Search, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
-import { LENGTH_BUCKETS } from "../../../shared/admin";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { LENGTH_BUCKETS, isSuperadmin } from "../../../shared/admin";
 import { useStore } from "@/lib/store";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Avatar } from "@/components/shell/Avatar";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -290,6 +292,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
           <Tile label="Calls to Claude" value={fmtNum(m.ai.calls)} sub={m.ai.calls ? `${fmtUsd(m.ai.costUsd / m.ai.calls)} a call` : undefined} delta={change(m.ai.calls, m.aiPrev.calls)} />
           <Tile label="Tokens" value={fmtNum(m.ai.inputTokens + m.ai.outputTokens)} sub={`In ${fmtNum(m.ai.inputTokens)} · out ${fmtNum(m.ai.outputTokens)}`} info="Input counts cached tokens too. Output tokens cost five times an input token." />
         </div>
+        <AiAccess users={data.users} />
         <AiUsersTable rows={m.aiUsers} total={m.ai.costUsd} others={m.view.users.length - m.aiUsers.length} onPick={onPick} period={periodLabel} />
         <div className="grid gap-4 lg:grid-cols-3">
           <Card title="AI cost per day" hint={`What Claude cost per day, last ${periodLabel}`} className="lg:col-span-2" info={aiInfo}>
@@ -455,6 +458,56 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
 
 const nameOf = (u: { name: string | null; email: string | null; id: string }) => u.name || u.email || u.id;
 const calls = (n: number) => `${fmtNum(n)} ${n === 1 ? "call" : "calls"}`;
+
+/** Who may use AI: off for everyone until switched on here, one user at a time or for everyone ticked. The superadmin always may, so is not listed. */
+function AiAccess({ users }: { users: Overview["users"] }) {
+  const setAi = useMutation(api.admin.setAi);
+  const [q, setQ] = useState("");
+  const [picked, setPicked] = useState<Set<Id<"users">>>(new Set());
+  const all = users.filter((u) => !isSuperadmin(u.email));
+  const shown = all.filter((u) => !q || `${u.name ?? ""} ${u.email ?? ""}`.toLowerCase().includes(q.toLowerCase()));
+  // only what is on screen: a search never changes someone it hides
+  const ticked = shown.filter((u) => picked.has(u.id)).map((u) => u.id);
+  const set = async (userIds: Id<"users">[], on: boolean, bulk = false) => {
+    try {
+      await setAi({ userIds, on });
+      if (bulk) { setPicked(new Set()); toast.success(`AI turned ${on ? "on" : "off"} for ${userIds.length} ${userIds.length === 1 ? "user" : "users"}`); }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't change who has AI");
+    }
+  };
+  const tick = (ids: Id<"users">[], on: boolean) => setPicked((p) => { const n = new Set(p); for (const id of ids) if (on) n.add(id); else n.delete(id); return n; });
+  return (
+    <Card title={`AI access (${all.filter((u) => u.ai).length} of ${all.length} on)`} hint="AI is off for everyone until you turn it on here. You always have it.">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="relative w-full md:max-w-xs md:flex-1">
+          <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" aria-label="Search users by name or email" className="h-9 pl-7 md:h-8" />
+        </div>
+        <Button size="sm" disabled={!ticked.length} onClick={() => void set(ticked, true, true)}>Turn on{ticked.length ? ` (${ticked.length})` : ""}</Button>
+        <Button size="sm" variant="outline" disabled={!ticked.length} onClick={() => void set(ticked, false, true)}>Turn off{ticked.length ? ` (${ticked.length})` : ""}</Button>
+      </div>
+      {shown.length ? (
+        <label className="flex items-center gap-3 border-t py-2.5 text-xs text-muted-foreground">
+          <Checkbox checked={ticked.length === shown.length} onCheckedChange={(v) => tick(shown.map((u) => u.id), v === true)} /> Select all{q ? " shown" : ""}
+        </label>
+      ) : <p className="border-t py-6 text-center text-sm text-muted-foreground">{all.length ? "No users match" : "No other users yet"}</p>}
+      <ul className="max-h-96 divide-y overflow-y-auto border-t">
+        {shown.map((u) => (
+          <li key={u.id} className="flex items-center gap-3 py-2.5">
+            <Checkbox aria-label={`Select ${nameOf(u)}`} checked={picked.has(u.id)} onCheckedChange={(v) => tick([u.id], v === true)} />
+            <Avatar seed={u.email || u.name || u.id} src={u.image ?? undefined} size={28} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{nameOf(u)}</div>
+              <div className="truncate text-xs text-muted-foreground">{u.email}</div>
+            </div>
+            <Switch aria-label={`AI for ${nameOf(u)}`} checked={u.ai} onCheckedChange={(v) => void set([u.id], v)} />
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
 
 /** Every user who used AI in the period: what it cost, their share, and what the calls were for. */
 function AiUsersTable({ rows, total, others, onPick, period }: { rows: ReturnType<typeof aiByUser<Overview["users"][number]>>; total: number; others: number; onPick: (id: string) => void; period: string }) {

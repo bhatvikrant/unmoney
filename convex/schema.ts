@@ -77,6 +77,20 @@ export const template = v.object({
 
 export default defineSchema({
   ...authTables,
+  /** The auth library's users table (same fields and indexes), plus who may use AI. */
+  users: defineTable({
+    name: v.optional(v.string()),
+    image: v.optional(v.string()),
+    email: v.optional(v.string()),
+    emailVerificationTime: v.optional(v.number()),
+    phone: v.optional(v.string()),
+    phoneVerificationTime: v.optional(v.number()),
+    isAnonymous: v.optional(v.boolean()),
+    /** AI features (Tidy up suggestions, photo reading, Gmail mail no rule reads) are off until the superadmin turns them on (admin.setAi). */
+    aiEnabled: v.optional(v.boolean()),
+  })
+    .index("email", ["email"])
+    .index("phone", ["phone"]),
 
   settings: defineTable({
     userId: v.id("users"),
