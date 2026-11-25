@@ -159,6 +159,13 @@ export default function PrivacyPage() {
             and are deleted with it. A suggested budget changes nothing until you tap "Set".
           </p>
           <p className="mt-3">
+            Search runs on your device. Only when you type a question in Search and tap Ask AI is that question sent to the
+            same API, to turn it into the search's filters (dates, type, category, payment method, tag and amount range).
+            With it go today's date, your currency, the days your month and week start on, and the names of your categories,
+            payment methods and tags. None of your entries, amounts or notes are sent: the filters come back and the search
+            itself still runs on your device. Typing in Search without tapping Ask AI sends nothing.
+          </p>
+          <p className="mt-3">
             A new entry can be filled in from a sentence you type or dictate, such as "450 swiggy dinner hdfc yesterday".
             Nothing is sent until you tap "Fill in". Then that sentence and today's date go to the same API, with the names of
             your categories and payment methods (with their kind, bank and the last four digits of cards and accounts), the
