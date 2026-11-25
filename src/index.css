@@ -285,6 +285,25 @@
   background-size: var(--pattern-size, auto);
   background-repeat: var(--pattern-repeat, repeat);
 }
+/*
+  Phones: cards run edge to edge and cover the page, so a glow behind them shows only in the gaps
+  between sections. There it is laid over the top of the page instead, header included. It takes no
+  taps, and at these strengths the text under it keeps its contrast (grey captions stay above 4.5:1;
+  the dark page has more room, so it glows stronger).
+*/
+@media (width < 48rem) {
+  :root[data-pattern="glow"] { --pattern: none; --glow: 12%; }
+  .dark[data-pattern="glow"] { --glow: 18%; }
+  :root[data-pattern="glow"] #main::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 24rem;
+    z-index: 35;
+    pointer-events: none;
+    background: radial-gradient(ellipse 110% 100% at 50% 0, color-mix(in oklch, var(--primary) var(--glow), transparent), transparent);
+  }
+}
 html, body, #root { height: 100%; }
 html, body { overscroll-behavior-y: none; }
 body { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
