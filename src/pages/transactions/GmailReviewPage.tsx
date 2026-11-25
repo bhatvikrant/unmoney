@@ -376,6 +376,7 @@ function ReviewRow({ item, on, focused, onToggle, onOpen, onFocus, onDismiss, on
             {method ? <span className={cn(guess("method"))}>{method}</span> : <span className="text-amber-600 dark:text-amber-400">Open it to pick both methods</span>}
             {p.description ? ` · ${p.description}` : ""}
           </div>
+          {d.summary ? <div className="truncate text-xs text-muted-foreground" title={d.summary}>{d.summary}</div> : null}
           {filled.length ? <div className="text-[11px] text-amber-600 dark:text-amber-400">{filled.length === 2 ? "Method and category" : filled[0] === "method" ? "Method" : "Category"} filled in; tap to change</div> : null}
           {unknown ? <div className="mt-0.5 truncate text-xs text-muted-foreground" title={senderAddress(d.from)}>Sender not on your list, so unticked</div> : null}
           {matched ? <div className="mt-0.5 truncate text-xs text-muted-foreground">Looks like: {matched.note || categoryLabel(matched) || "an entry"} · {fmt(matched.amount)} · {dateLabel(matched.date)}</div> : null}

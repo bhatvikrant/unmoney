@@ -107,9 +107,9 @@ export default function PrivacyPage() {
           </p>
           <p className="mt-3">What is stored, in UnMoney's database:</p>
           <ul className="mt-1.5 list-disc space-y-1.5 pl-5">
-            <li>For each draft: the mail's Gmail id and thread id, the sender, the subject cut to 120 characters, when it arrived, and the fields read from it (type, amount, currency, date, time, merchant, which payment method and category it seems to belong to, and the last four digits of a card or account when the mail names them).</li>
+            <li>For each draft: the mail's Gmail id and thread id, the sender, the subject cut to 120 characters, when it arrived, and the fields read from it (type, amount, currency, date, time, merchant, which payment method and category it seems to belong to, and the last four digits of a card or account when the mail names them). When Claude read the mail (see below), also its one-line summary of what the mail says happened, at most 80 characters.</li>
             <li>On a saved entry: the Gmail id of the mail it came from, so the entry can link back to it in Gmail.</li>
-            <li>For the connection: your Gmail address, Google's refresh token encrypted with AES-256-GCM, your sender list and options, which card digits you matched to which payment method, and a log of the last ten checks (when, how many mails, how many drafts, and any error).</li>
+            <li>For the connection: your Gmail address, Google's refresh token encrypted with AES-256-GCM, your sender list and options, which card digits you matched to which payment method, and a log of the last ten checks (when, how many mails, how many drafts, how many were set aside as not payments and of what kind, and any error).</li>
           </ul>
           <p className="mt-3">
             What is not stored: the text of your mail, attachments, other headers, and anything from mail that turned out not
@@ -135,8 +135,10 @@ export default function PrivacyPage() {
           <p>
             Most bank and shop mail is read by rules that run on UnMoney's server. When a mail looks like a payment but no rule
             can read it, its sender, subject, date received and up to 2,500 characters of its text are sent to Anthropic's API,
-            where the Claude model picks out the amount, date and merchant. With them go the names of your categories and
-            payment methods (with the last four digits of cards and accounts), so the answer uses your own names. The same API
+            where the Claude model picks out the amount, date and merchant, says in one line what the mail is about, and sets
+            aside mail that names an amount but is not a payment (an autopay being set up, a declined payment, a bill). With
+            them go the names of your categories and payment methods (with the last four digits of cards and accounts), so the
+            answer uses your own names. The same API
             suggests category clean-ups in More › Categories › Tidy up, when you ask for it, from your category names, how
             much each is used and its most common notes.
           </p>
