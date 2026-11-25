@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { aiSeries, aiTotals, applyFilters, cohorts, daySeries, fmtUsd, hourOfWeek, streaks, usageGap, userRows, weekOf, GAP_AFTER_MS, type Ai, type Daily, type Overview } from "./metrics";
+import { aiByUser, aiSeries, aiTotals, applyFilters, cohorts, daySeries, fmtUsd, hourOfWeek, streaks, usageGap, userRows, weekOf, GAP_AFTER_MS, type Ai, type Daily, type Overview } from "./metrics";
 
 const row = (over: object): Daily => ({
   userId: "u1", deviceId: "d1", day: "2026-11-02", opens: 1, activeMs: 60_000, bytesDown: 100, bytesUp: 10, photoFetches: 0, opsSent: 0,
@@ -81,6 +81,9 @@ test("AI cost follows the users shown, and sums per user, feature and day", () =
   const rows = userRows(v, v.daily, "2026-11-02", v.ai);
   expect(rows.find((u) => u.id === "u1")!.aiCost).toBeCloseTo(0.00095, 10);
   expect(rows.find((u) => u.id === "u2")).toMatchObject({ aiCalls: 4 });
+  // per user: dearest first, nobody without a call, each feature's calls and the last day asked
+  const by = aiByUser(v.users, v.ai);
+  expect(by.map((x) => [x.u.id, x.t.calls, x.t.gmailCalls, x.t.tidyCalls, x.t.lastDay])).toEqual([["u2", 4, 4, 0, "2026-11-01"], ["u1", 2, 1, 1, "2026-11-02"]]);
 });
 
 test("dollars keep the places a small bill needs", () => {

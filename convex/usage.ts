@@ -4,7 +4,9 @@
  * ping counts nothing twice. Server-only tables, never synced to devices.
  */
 import { v } from "convex/values";
-import { internalMutation, mutation } from "./_generated/server";
+import { internalMutation, mutation, type MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import schema from "./schema";
 import { internal } from "./_generated/api";
 import { currentUserId } from "./lib/auth";
 import { dayAt, lengthBucket } from "../shared/admin";
@@ -98,26 +100,52 @@ function max(a: Counts, b: Counts): Counts {
   return Object.fromEntries(COUNT_KEYS.map((k) => [k, Math.max(a[k], Math.round(b[k]))])) as Counts;
 }
 
+const aiFeature = schema.tables.aiDaily.validator.fields.feature;
+
+/** Today for a user's Claude calls: their own day, by their latest device's clock (India's when none reported one), as for entries created. */
+async function aiDay(ctx: MutationCtx, userId: Id<"users">): Promise<string> {
+  const device = (await ctx.db.query("usageDevices").withIndex("by_user_device", (q) => q.eq("userId", userId)).collect())
+    .sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0];
+  return dayAt(Date.now(), device?.tzOffset ?? 330);
+}
+
 /**
- * One Claude call, added to its user's day (convex/lib/aiSpend.ts records it). The day is the user's
- * own, by their latest device's clock (India's when none reported one), as for entries created.
+ * Counts a Claude call before it is made, for a feature with a monthly limit: false when the month is
+ * used up. In a transaction of its own, so calls started at the same moment cannot all pass. The call
+ * is on the user's day from here on, even if it then fails; recordAi is told not to count it again.
  */
+export const claimAi = internalMutation({
+  args: { userId: v.id("users"), feature: aiFeature, cap: v.number() },
+  handler: async (ctx, { userId, feature, cap }): Promise<boolean> => {
+    if (!(await ctx.db.get(userId))) return false;
+    const day = await aiDay(ctx, userId);
+    const month = day.slice(0, 7);
+    const rows = (await ctx.db.query("aiDaily").withIndex("by_user_day", (q) => q.eq("userId", userId).gte("day", `${month}-01`).lte("day", `${month}-31`)).collect())
+      .filter((r) => r.feature === feature);
+    if (rows.reduce((n, r) => n + r.calls, 0) >= cap) return false;
+    const row = rows.find((r) => r.day === day);
+    if (row) await ctx.db.patch(row._id, { calls: row.calls + 1 });
+    else await ctx.db.insert("aiDaily", { userId, day, feature, calls: 1, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, costUsd: 0 });
+    return true;
+  },
+});
+
+/** One Claude call, added to its user's day (convex/lib/aiSpend.ts records it). `counted`: claimAi already counted the call. */
 export const recordAi = internalMutation({
   args: {
     userId: v.id("users"),
-    feature: v.union(v.literal("tidy"), v.literal("gmail")),
+    feature: aiFeature,
     model: v.string(),
     tokens: v.object({ input: v.number(), output: v.number(), cacheWrite: v.number(), cacheRead: v.number() }),
+    counted: v.optional(v.boolean()),
   },
-  handler: async (ctx, { userId, feature, model, tokens }) => {
+  handler: async (ctx, { userId, feature, model, tokens, counted }) => {
     // deleted while the call was out: nothing of theirs is written back
     if (!(await ctx.db.get(userId))) return;
-    const device = (await ctx.db.query("usageDevices").withIndex("by_user_device", (q) => q.eq("userId", userId)).collect())
-      .sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0];
-    const day = dayAt(Date.now(), device?.tzOffset ?? 330);
+    const day = await aiDay(ctx, userId);
     const row = await ctx.db.query("aiDaily").withIndex("by_user_day", (q) => q.eq("userId", userId).eq("day", day).eq("feature", feature)).unique();
     const sums = {
-      calls: (row?.calls ?? 0) + 1,
+      calls: (row?.calls ?? 0) + (counted ? 0 : 1),
       inputTokens: (row?.inputTokens ?? 0) + tokens.input,
       outputTokens: (row?.outputTokens ?? 0) + tokens.output,
       cacheWriteTokens: (row?.cacheWriteTokens ?? 0) + tokens.cacheWrite,

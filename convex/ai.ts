@@ -11,12 +11,16 @@ import { action, internalMutation, internalQuery, query } from "./_generated/ser
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import schema from "./schema";
-import { loadSnapshot } from "./lib/snapshot";
+import { loadSnapshot, loadTable } from "./lib/snapshot";
+import { toB64 } from "./lib/gmailCrypto";
 import { recordSpend } from "./lib/aiSpend";
 import { reportServerError } from "./lib/posthog";
 import {
   AI_MODEL, AI_RUN_EVERY_MS, OUTPUT_SCHEMA, SYSTEM_PROMPT, aiEligibility, buildSummary, summaryHash, validateSuggestions, type AiSuggestion,
 } from "../shared/tidyAi";
+import {
+  RECEIPT_MAX_BYTES, RECEIPT_MEDIA_TYPES, RECEIPT_MONTHLY_CAP, RECEIPT_RECENT_ENTRIES, buildReceiptInput, receiptRequest, validateReceipt, type ReceiptRead,
+} from "../shared/receiptAi";
 
 type Usage = Doc<"aiUsage">;
 export type SuggestResult = { suggestions: AiSuggestion[]; lastRunAt: number; cached: boolean };
@@ -126,5 +130,57 @@ export const suggestCategoryCleanup = action({
     const lastRunAt = Date.now();
     await ctx.runMutation(internal.ai.record, { userId, lastRunAt, summaryHash: prep.hash, result: suggestions });
     return { suggestions, lastRunAt, cached: false };
+  },
+});
+
+// ---- reading a photo attached to an entry (shared/receiptAi.ts) ----
+
+const entryType = v.union(v.literal("expense"), v.literal("income"));
+
+/** What goes with the photo, built from the database so the prompt can't be inflated, and whether the person turned this on. */
+export const prepareReceipt = internalQuery({
+  args: { userId: v.id("users"), type: entryType, today: v.string() },
+  handler: async (ctx, { userId, type, today }) => {
+    const [settings, categories, transactions] = await Promise.all([
+      loadTable(ctx, userId, "settings"),
+      loadTable(ctx, userId, "categories"),
+      // the newest entries of any type: enough of this type's notes among them without reading the whole ledger
+      ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).order("desc").take(RECEIPT_RECENT_ENTRIES),
+    ]);
+    return { enabled: !!settings[0]?.receiptAiEnabled, categories, ...buildReceiptInput({ settings, categories, transactions }, type, today) };
+  },
+});
+
+/**
+ * Ask Claude what a photo attached to an entry says: a note in the person's own words, a description,
+ * a category and the date. Only for people who turned it on, and at most RECEIPT_MONTHLY_CAP times a
+ * month. The photo is passed through and not kept here; the entry's own copy is uploaded as before.
+ * Nothing is saved: the form fills in what is still empty and the person checks it.
+ */
+export const readReceipt = action({
+  args: { image: v.bytes(), mediaType: v.union(...RECEIPT_MEDIA_TYPES.map((t) => v.literal(t))), type: entryType, today: v.string() },
+  handler: async (ctx, { image, mediaType, type, today }): Promise<ReceiptRead> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new ConvexError("Sign in first");
+    if (!image.byteLength || image.byteLength > RECEIPT_MAX_BYTES || !/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new ConvexError("That photo can't be read");
+    const prep = await ctx.runQuery(internal.ai.prepareReceipt, { userId, type, today });
+    if (!prep.enabled) throw new ConvexError("Reading photos with AI is turned off");
+    if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("Reading photos with AI isn't set up yet");
+    if (!(await ctx.runMutation(internal.usage.claimAi, { userId, feature: "receipt", cap: RECEIPT_MONTHLY_CAP }))) {
+      throw new ConvexError(`AI has read ${RECEIPT_MONTHLY_CAP} photos this month, the most it reads. It starts again next month.`);
+    }
+    const client = new Anthropic({ timeout: 45_000, maxRetries: 1 });
+    try {
+      const res = await client.messages.create(receiptRequest(prep.input, mediaType, toB64(new Uint8Array(image))));
+      console.log("receipt-ai", { userId, stop: res.stop_reason, input: res.usage.input_tokens, output: res.usage.output_tokens });
+      await recordSpend(ctx, userId, "receipt", res, true);
+      if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`stopped: ${res.stop_reason}`);
+      const text = res.content.find((b) => b.type === "text");
+      return validateReceipt(JSON.parse(text && text.type === "text" ? text.text : "{}"), prep.ids, prep.categories, today);
+    } catch (e) {
+      console.error("receipt-ai failed", e instanceof Error ? e.message : e);
+      await reportServerError("ai.readReceipt", e, { userId });
+      throw new ConvexError("Couldn't read the photo with AI. Fill it in yourself this time.");
+    }
   },
 });
