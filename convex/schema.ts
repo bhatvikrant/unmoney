@@ -1,6 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { authTables } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import { AI_FEATURE_KEYS } from "../shared/aiCost";
 
 export const txType = v.union(v.literal("income"), v.literal("expense"), v.literal("transfer"));
 /** What a payment method is. Decides behaviour: credit cards get billing cycles, debit cards (and linked UPIs) draw from a bank account. */
@@ -656,7 +657,7 @@ export default defineSchema({
   aiDaily: defineTable({
     userId: v.id("users"),
     day: v.string(),
-    feature: v.union(v.literal("tidy"), v.literal("gmail"), v.literal("receipt"), v.literal("quick")),
+    feature: v.union(...AI_FEATURE_KEYS.map((k) => v.literal(k))),
     calls: v.number(),
     inputTokens: v.number(),
     outputTokens: v.number(),
