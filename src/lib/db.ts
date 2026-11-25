@@ -3,7 +3,8 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { TABLES, emptySnapshot, type Op, type Snapshot, type Table } from "../../shared/ops";
 
 export type QueuedOp = Op & { seq: number };
-export type Profile = { name?: string; email?: string; image?: string };
+/** `ai`: the superadmin turned AI on for this user (convex/lib/auth.ts aiAllowed); the screens hide their AI parts without it. */
+export type Profile = { name?: string; email?: string; image?: string; ai?: boolean };
 export type Meta = {
   userId: string | null;
   user: Profile | null;
