@@ -577,6 +577,8 @@ export default defineSchema({
     }),
     confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
     how: v.union(v.literal("rule"), v.literal("ai")),
+    /** Read by the AI: its one line on what the mail says happened, at most 80 characters, shown on the draft's row. */
+    summary: v.optional(v.string()),
     /** An entry the user already typed in that looks like this one ("already added?"). */
     matchedTransactionId: v.optional(v.id("transactions")),
     /** The user said "No, it's new": the draft is never matched to an entry again. */
