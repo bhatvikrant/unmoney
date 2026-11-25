@@ -29,6 +29,7 @@ import { sipFor, sipsOf } from "../../../shared/sips";
 import { useBudgetLabel } from "@/components/tx/entryBudgets";
 import { useOverText } from "@/lib/budgetText";
 import { importable, type Importable } from "../../../shared/gmail/importable";
+import { suggestMethods } from "../../../shared/gmail/suggest";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { useBottomBar } from "@/components/shell/SplitLayout";
@@ -57,10 +58,14 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 const FIRST_ROWS = 60;
 const MORE_ROWS = 200;
 
+// shortcut: a suggestion the person closed is remembered on this device only; move it to settings if it should follow them
+const HIDDEN_HINTS = "unmoney.gmail.methodHints.hidden";
+const readHidden = (): string[] => { try { return JSON.parse(localStorage.getItem(HIDDEN_HINTS) ?? "[]") as string[]; } catch { return []; } };
+
 export default function GmailReviewPage() {
   const nav = useNavigate();
   const view = useView();
-  const { settings, currencies, fmt } = useApp();
+  const { settings, currencies, fmt, accountName } = useApp();
   const openEntry = useOpenEntry();
   const confirm = useConfirm();
   const bar = useBottomBar();
@@ -75,6 +80,14 @@ export default function GmailReviewPage() {
   // the draft open in the form beside the list (wide screens): Import must not save it from under the user's edits
   const openDraft = entryOpen ? new URLSearchParams(search).get("draft") : null;
   const [busy, setBusy] = useState(false);
+  // what the mail saved to a payment method says it is, where it has no type, bank or digits; closed ones stay closed until the mail says something else
+  const [hidden, setHidden] = useState(readHidden);
+  const hints = useMemo(() => suggestMethods(view).filter((s) => !hidden.includes(`${s.accountId}|${s.looks}`)), [view, hidden]);
+  const hideHint = (key: string) => {
+    const next = [...hidden, key].slice(-50);
+    setHidden(next);
+    try { localStorage.setItem(HIDDEN_HINTS, JSON.stringify(next)); } catch { /* private mode: it shows again next time */ }
+  };
 
   const matches = useMemo(() => draftMatches(view), [view]);
   const items = useMemo<Item[]>(() => {
@@ -225,6 +238,13 @@ export default function GmailReviewPage() {
       <PageHeader back="/" title="From Gmail" right={<Button variant="ghost" size="icon" aria-label="Gmail settings" onClick={() => nav("/settings/gmail")}><Settings className="size-5" /></Button>} />
       <Page className={cn(items.length ? "pb-40" : "pb-10")}>
         {gmail ? <StillReading gmail={gmail} onDetails={() => nav("/settings/gmail")} /> : null}
+        {hints.map((s) => (
+          <div key={s.accountId} className="mx-4 mt-4 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm" role="status">
+            <span className="min-w-0 flex-1"><span className="font-medium">{accountName(s.accountId)}</span> looks like {s.looks}.</span>
+            <Button variant="outline" size="sm" onClick={() => nav(`/payment-methods/${s.accountId}/edit`, { state: { fill: true } })}>Fill in</Button>
+            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Not now" title="Not now" onClick={() => hideHint(`${s.accountId}|${s.looks}`)}><X className="size-4" /></Button>
+          </div>
+        ))}
         {!items.length ? (
           <EmptyState title="Nothing from Gmail to import" hint="New money mail is checked every hour. What it finds shows up here to pick from, and as faded rows on their days." action={<Button variant="outline" size="sm" onClick={() => nav("/settings/gmail")}><Mail className="size-4" />Gmail settings</Button>} />
         ) : (
