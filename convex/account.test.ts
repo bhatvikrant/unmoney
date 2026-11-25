@@ -32,6 +32,7 @@ test("deleting an account removes every document, file and sign-in of that user,
         proposal: { type: "expense", date: "2026-01-01", amount: 1, note: "" }, confidence: "high", how: "rule", status: "open",
       });
       await ctx.db.insert("aiUsage", { userId, lastRunAt: 1, summaryHash: "h", result: [] });
+      await ctx.db.insert("recapInsights", { userId, key: "2026-01", hash: "h", at: 1, insights: ["x"], budgets: [] });
     });
     return { userId, as, photo };
   };
