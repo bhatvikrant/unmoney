@@ -445,7 +445,7 @@ export default function GmailSettings() {
                     </div>
                   ))}
                 </div>
-                <div className="mt-2 text-xs text-muted-foreground">Mail no rule can read is read by AI: {s.aiCalls} of {s.aiCap} AI reads used this month.</div>
+                {s.ai ? <div className="mt-2 text-xs text-muted-foreground">Mail no rule can read is read by AI: {s.aiCalls} of {s.aiCap} AI reads used this month.</div> : null}
               </Collapsible>
             </Section>
 

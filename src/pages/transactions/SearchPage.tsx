@@ -4,7 +4,7 @@ import { useAction } from "convex/react";
 import { ConvexError } from "convex/values";
 import { SlidersHorizontal, CheckSquare, Loader2, Sparkles } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
-import { useView } from "@/lib/store";
+import { useStore, useView } from "@/lib/store";
 import { txSearch, txTags } from "../../../shared/views";
 import { todayISO } from "../../../shared/dates";
 import { SEARCH_TIMEOUT_MS } from "../../../shared/searchAi";
@@ -59,6 +59,8 @@ export default function SearchPage() {
   const [min, setMin] = param("min", "");
   const [max, setMax] = param("max", "");
   const view = useView();
+  // Ask AI shows only for someone the superadmin turned AI on for (convex/lib/auth.ts aiAllowed)
+  const { user } = useStore();
   const tags = useMemo(() => txTags(view), [view]);
   const active = !!(q.trim() || from || to || type !== "any" || account !== "any" || category !== "any" || tag !== "any" || min || max);
   const results = useMemo(() => active ? txSearch(view, {
@@ -122,12 +124,14 @@ export default function SearchPage() {
         <div className="mx-auto max-w-3xl px-3 pb-2 space-y-2">
           <div className="flex gap-2">
             <Input autoFocus placeholder="Search notes, tags, categories, payment methods" value={q} onChange={(e) => setQ(e.target.value)} />
-            <Button variant="outline" className="shrink-0" disabled={!q.trim() || asking} onClick={ask}>{asking ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Ask AI</Button>
+            {user?.ai ? <Button variant="outline" className="shrink-0" disabled={!q.trim() || asking} onClick={ask}>{asking ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}Ask AI</Button> : null}
             <Button variant={showFilters ? "secondary" : "outline"} size="icon" aria-label="Filters" onClick={() => setShowFilters(!showFilters)}><SlidersHorizontal className="size-4" /></Button>
           </div>
-          <p role="status" className="text-xs text-muted-foreground">
-            {aiNote || "Ask AI turns a question into filters. It sends what you typed and the names of your categories, payment methods and tags to Anthropic's Claude."}
-          </p>
+          {user?.ai ? (
+            <p role="status" className="text-xs text-muted-foreground">
+              {aiNote || "Ask AI turns a question into filters. It sends what you typed and the names of your categories, payment methods and tags to Anthropic's Claude."}
+            </p>
+          ) : null}
           {showFilters ? (
             <div className="grid grid-cols-2 gap-2 text-sm">
               <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From" />
@@ -144,7 +148,7 @@ export default function SearchPage() {
         </div>
       } />
       <Page className={cn(bulk.active && "pb-40")}>
-        {!active ? <div className="p-10 text-center text-sm text-muted-foreground">Type to search, or open the filters. Or type a question, like "food over 500 last month", and tap Ask AI.</div> : null}
+        {!active ? <div className="p-10 text-center text-sm text-muted-foreground">Type to search, or open the filters.{user?.ai ? ` Or type a question, like "food over 500 last month", and tap Ask AI.` : ""}</div> : null}
         {active && results === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Searching…</div> : null}
         {results ? <TransactionList txs={results.slice(0, shown)} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No matches" /> : null}
         {results && results.length > shown ? (

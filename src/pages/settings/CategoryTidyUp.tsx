@@ -63,7 +63,7 @@ function dryRun(view: Snapshot, steps: CleanupStep[], userId: string): { snap: S
 export default function CategoryTidyUp() {
   const bar = useBottomBar();
   const view = useView();
-  const { userId } = useStore();
+  const { userId, user } = useStore();
   const { categoryById } = useApp();
   const nav = useNavigate();
   const apply = useOp("categories.applyCleanup");
@@ -138,7 +138,7 @@ export default function CategoryTidyUp() {
     <>
       <PageHeader back="/settings/categories" title="Tidy up categories" />
       <Page className="pb-36">
-        <AiPanel recentAt={recent?.lastRunAt} found={aiList ? ai.length : null} onResult={setFresh} />
+        {user?.ai ? <AiPanel recentAt={recent?.lastRunAt} found={aiList ? ai.length : null} onResult={setFresh} /> : null}
         {!fixes.length ? (
           <EmptyState title="Your categories look tidy" hint="No look-alike names, unused categories or deleted ones still in use." />
         ) : (

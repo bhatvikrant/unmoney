@@ -14,6 +14,7 @@ import schema from "./schema";
 import { loadSnapshot, loadTable } from "./lib/snapshot";
 import { toB64 } from "./lib/gmailCrypto";
 import { recordSpend } from "./lib/aiSpend";
+import { aiAllowed } from "./lib/auth";
 import { reportServerError } from "./lib/posthog";
 import {
   AI_MODEL, AI_RUN_EVERY_MS, OUTPUT_SCHEMA, SYSTEM_PROMPT, aiEligibility, buildSummary, summaryHash, validateSuggestions, type AiSuggestion,
@@ -33,7 +34,7 @@ export const status = query({
   args: {},
   handler: async (ctx): Promise<{ lastRunAt: number; result: AiSuggestion[] } | null> => {
     const userId = await getAuthUserId(ctx);
-    if (!userId) return null;
+    if (!userId || !(await aiAllowed(ctx, userId))) return null;
     const u = await ctx.db.query("aiUsage").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     // lastRunAt 0 is a row that only counts attempts (claim): no run has worked yet
     return u?.lastRunAt ? { lastRunAt: u.lastRunAt, result: u.result } : null;
@@ -49,7 +50,7 @@ export const prepare = internalQuery({
     const { summary, idMap } = buildSummary(snap, includeNotes);
     const usage = await ctx.db.query("aiUsage").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     return {
-      eligible, summary, idMap, hash: summaryHash(summary), usage,
+      allowed: await aiAllowed(ctx, userId), eligible, summary, idMap, hash: summaryHash(summary), usage,
       categories: snap.categories, subcategoriesEnabled: snap.settings[0]?.subcategoryEnabled ?? true,
     };
   },
@@ -98,6 +99,7 @@ export const suggestCategoryCleanup = action({
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new ConvexError("Sign in first");
     const prep = await ctx.runQuery(internal.ai.prepare, { userId, includeNotes, today });
+    if (!prep.allowed) throw new ConvexError("AI suggestions aren't turned on for your account");
     if (!prep.eligible.ok) throw new ConvexError(prep.eligible.reason);
     const usage = prep.usage;
     // Nothing changed since the last run: show its answer again, free.
@@ -140,7 +142,7 @@ export const suggestCategoryCleanup = action({
 
 const entryType = v.union(v.literal("expense"), v.literal("income"));
 
-/** What goes with the photo, built from the database so the prompt can't be inflated, and whether the person turned this on. */
+/** What goes with the photo, built from the database so the prompt can't be inflated, and whether the person turned this on and may use AI. */
 export const prepareReceipt = internalQuery({
   args: { userId: v.id("users"), type: entryType, today: v.string() },
   handler: async (ctx, { userId, type, today }) => {
@@ -150,7 +152,7 @@ export const prepareReceipt = internalQuery({
       // the newest entries of any type: enough of this type's notes among them without reading the whole ledger
       ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).order("desc").take(RECEIPT_RECENT_ENTRIES),
     ]);
-    return { enabled: !!settings[0]?.receiptAiEnabled, categories, ...buildReceiptInput({ settings, categories, transactions }, type, today) };
+    return { enabled: !!settings[0]?.receiptAiEnabled && (await aiAllowed(ctx, userId)), categories, ...buildReceiptInput({ settings, categories, transactions }, type, today) };
   },
 });
 
@@ -190,7 +192,7 @@ export const readReceipt = action({
 
 // ---- search by asking a question (shared/searchAi.ts) ----
 
-/** The names that go with a question, built from the database so the prompt can't be inflated. No entry leaves here: only the tags on the newest ones. */
+/** The names that go with a question, built from the database so the prompt can't be inflated, and whether the person may use AI. No entry leaves here: only the tags on the newest ones. */
 export const prepareSearch = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
@@ -200,7 +202,7 @@ export const prepareSearch = internalQuery({
       loadTable(ctx, userId, "accounts"),
       ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).order("desc").take(SEARCH_RECENT_ENTRIES),
     ]);
-    return buildSearchContext({ settings, categories, accounts, transactions });
+    return { allowed: await aiAllowed(ctx, userId), ...buildSearchContext({ settings, categories, accounts, transactions }) };
   },
 });
 
@@ -220,6 +222,7 @@ export const askSearch = action({
     if (question.length > SEARCH_MAX_QUESTION) throw new ConvexError(`That question is too long for AI: keep it under ${SEARCH_MAX_QUESTION} characters`);
     if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("Asking AI isn't set up yet");
     const prep = await ctx.runQuery(internal.ai.prepareSearch, { userId });
+    if (!prep.allowed) throw new ConvexError("Asking AI isn't turned on for your account");
     if (!(await ctx.runMutation(internal.usage.claimAi, { userId, feature: "search", cap: SEARCH_MONTHLY_CAP }))) {
       throw new ConvexError(`AI has answered ${SEARCH_MONTHLY_CAP} questions this month, the most it answers. It starts again next month.`);
     }
