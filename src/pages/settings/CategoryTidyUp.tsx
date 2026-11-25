@@ -63,7 +63,7 @@ function dryRun(view: Snapshot, steps: CleanupStep[], userId: string): { snap: S
 export default function CategoryTidyUp() {
   const bar = useBottomBar();
   const view = useView();
-  const { userId, user } = useStore();
+  const { userId, user, status: sync } = useStore();
   const { categoryById } = useApp();
   const nav = useNavigate();
   const apply = useOp("categories.applyCleanup");
@@ -75,6 +75,8 @@ export default function CategoryTidyUp() {
   const recent = status && now - status.lastRunAt < AI_RUN_EVERY_MS ? status : null;
   const [fresh, setFresh] = useState<AiSuggestion[] | null>(null);
   const aiList = fresh ?? recent?.result ?? null;
+  // Until the last AI run is known the list waits: drawing the quick fixes first and then adding AI's makes the page jump.
+  const loading = !!user?.ai && status === undefined && !sync.offline;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ai = useMemo(() => (aiList ? aiFixes(stillRelevant(aiList, view), rules) : []), [aiList, rules]);
   const fixes = useMemo(() => [...rules, ...ai], [rules, ai]);
@@ -138,8 +140,8 @@ export default function CategoryTidyUp() {
     <>
       <PageHeader back="/settings/categories" title="Tidy up categories" />
       <Page className="pb-36">
-        {user?.ai ? <AiPanel recentAt={recent?.lastRunAt} found={aiList ? ai.length : null} onResult={setFresh} /> : null}
-        {!fixes.length ? (
+        {user?.ai ? <AiPanel loading={loading} recentAt={recent?.lastRunAt} found={aiList ? ai.length : null} onResult={setFresh} /> : null}
+        {loading ? null : !fixes.length ? (
           <EmptyState title="Your categories look tidy" hint="No look-alike names, unused categories or deleted ones still in use." />
         ) : (
           <>
@@ -180,7 +182,7 @@ export default function CategoryTidyUp() {
         )}
       </Page>
 
-      {fixes.length ? (
+      {fixes.length && !loading ? (
         <div className={cn(bar, "z-30 bg-background border-t md:safe-bottom")}>
           <div className="mx-auto max-w-3xl space-y-2 p-3">
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -336,7 +338,7 @@ function PreviewSheet({ open, onOpenChange, snap }: { open: boolean; onOpenChang
  * The AI half: asks Claude for suggestions once the user has agreed to send a summary, shows the
  * last run's suggestions for the rest of the month, and says why it can't run when it can't.
  */
-function AiPanel({ recentAt, found, onResult }: { recentAt?: number; found: number | null; onResult: (list: AiSuggestion[]) => void }) {
+function AiPanel({ loading, recentAt, found, onResult }: { loading: boolean; recentAt?: number; found: number | null; onResult: (list: AiSuggestion[]) => void }) {
   const view = useView();
   const { status: sync } = useStore();
   const suggest = useAction(api.ai.suggestCategoryCleanup);
@@ -371,14 +373,15 @@ function AiPanel({ recentAt, found, onResult }: { recentAt?: number; found: numb
   let line: string;
   let canRun = false;
   const foundText = found ? `${found} AI ${found === 1 ? "suggestion" : "suggestions"} below` : "AI found nothing else to change";
-  if (state.kind === "running") line = "Reading your categories…";
+  if (loading) line = "Looking for this month's suggestions…";
+  else if (state.kind === "running") line = "Reading your categories…";
   else if (state.kind === "error") { line = state.text!; canRun = !recentAt; }
   else if (found !== null) line = recentAt ? `${foundText} · new suggestions on ${nextOn}` : foundText;
   else if (recentAt) line = `New AI suggestions on ${nextOn}`;
   else if (!eligible.ok) line = eligible.reason;
   else if (!sync.connected) line = "AI suggestions need a connection";
   else if (sync.pending) line = "Syncing your changes… try again in a moment";
-  else { line = "Claude looks for look-alikes, vague names and categories that belong together. Once a month."; canRun = true; }
+  else { line = "AI looks for look-alikes, vague names and categories that belong together. Once a month."; canRun = true; }
   if (canRun && (!eligible.ok || !sync.connected || sync.pending)) canRun = false;
 
   return (
