@@ -10,6 +10,14 @@ import type { BackupData } from "../../shared/ops";
 /** A backup's photos by the id its entries name them with; each is read from the file only when asked for. */
 export type BackupPhotos = Map<string, () => Promise<File>>;
 
+/**
+ * The answer, or null when none has come in `ms`. A one-shot Convex query waits for the socket for as long
+ * as it is down, so asking the server something in the middle of a backup or a restore would otherwise leave
+ * it hanging (and its button disabled) until the connection came back.
+ */
+export const orGiveUp = <T>(answer: Promise<T>, ms = 10_000): Promise<T | null> =>
+  Promise.race([answer, new Promise<null>((done) => setTimeout(() => done(null), ms))]);
+
 const JSON_NAME = "backup.json";
 const SIG_LOCAL = 0x04034b50, SIG_CENTRAL = 0x02014b50, SIG_END = 0x06054b50;
 

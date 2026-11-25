@@ -164,6 +164,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const metaRef = useRef(meta);
   const viewRef = useRef<Snapshot>(emptySnapshot());
   const pumping = useRef(false);
+  /** Photo uploads the server has refused while their toast is still up, so it can say how many. */
+  const uploadFailures = useRef(0);
   const liveRef = useRef(false);
   const connectedRef = useRef(false);
   const meRef = useRef<typeof me>(undefined);
@@ -449,7 +451,14 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
             setLastError(error);
             // the kind of change only: its arguments are ledger data
             reportError(new Error(`Sync dropped: ${error}`), { source: "sync", op: op.kind });
-            toast.error(`${opLabel(op.kind, op.args)} couldn't be synced and was undone: ${error}`);
+            const what = `${opLabel(op.kind, op.args)} couldn't be synced and was undone`;
+            if (op.kind !== "files.upload") toast.error(`${what}: ${error}`);
+            else {
+              // A restore queues a photo per receipt: if the server turns them away, one toast that counts, not hundreds.
+              const n = ++uploadFailures.current;
+              const forget = () => { uploadFailures.current = 0; };
+              toast.error(`${n === 1 ? what : `${n} photo uploads couldn't be synced and were undone`}: ${error}`, { id: "upload-failed", onDismiss: forget, onAutoClose: forget });
+            }
           }
         };
 
