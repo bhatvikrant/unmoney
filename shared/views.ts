@@ -485,7 +485,7 @@ export function statsEntries(snap: Snapshot, from: string, to: string, type: "in
  * Splits what an entry counts into its Stats buckets. A transfer counts its amount (when the target
  * counts as spending) under "transfer:<account>" and its fee under "fees", so one transfer can be two.
  */
-function entryBuckets(t: Doc<"transactions">, amount: number, catIds: Set<string>): { bucket: string; amount: number }[] {
+export function entryBuckets(t: Doc<"transactions">, amount: number, catIds: Set<string>): { bucket: string; amount: number }[] {
   if (t.type !== "transfer") return [{ bucket: t.categoryId && catIds.has(t.categoryId) ? t.categoryId : "none", amount }];
   const fee = Math.min(t.feeAmount ?? 0, amount);
   const out: { bucket: string; amount: number }[] = [];
