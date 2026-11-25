@@ -61,6 +61,8 @@ const earlierAmounts = v.array(v.object({ until: v.string(), amount: v.number() 
 
 /** [categoryId, subcategoryId] of an entry or template, null where unset. */
 const catPair = v.array(v.union(v.id("categories"), v.null()));
+/** Merchant (as mail names it, shared/gmail/learn.ts merchantKey) → the note and category the user saves it with. */
+const merchantMap = v.record(v.string(), v.object({ note: v.string(), categoryId: v.optional(v.id("categories")), subcategoryId: v.optional(v.id("categories")) }));
 
 /** Shape shared by bookmarks and repeat schedules. */
 export const template = v.object({
@@ -522,8 +524,8 @@ export default defineSchema({
      * a later check's overlap does not fetch them and ask the AI again. Kept while a window can still reach them.
      */
     processed: v.optional(v.array(v.object({ id: v.string(), receivedAt: v.number() }))),
-    /** Merchant (as mail names it, shared/gmail/learn.ts merchantKey) → the note and category the user saves it with. */
-    merchantMap: v.optional(v.record(v.string(), v.object({ note: v.string(), categoryId: v.optional(v.id("categories")), subcategoryId: v.optional(v.id("categories")) }))),
+    /** From before gmailMemory, which holds this now: a connection's first check after the change moves it there (gmail.ts claimSync). */
+    merchantMap: v.optional(merchantMap),
     /** Senders the user said send no money mail: left out of the search and never read. */
     muted: v.optional(v.array(v.string())),
     /**
@@ -630,6 +632,16 @@ export default defineSchema({
     .index("by_user_status_date", ["userId", "status", "proposal.date"])
     .index("by_user_message", ["userId", "messageId"])
     .index("by_user_rev", ["userId", "rev"]),
+
+  /**
+   * What a user taught Gmail reading about merchants, one row per user. Apart from the connection
+   * because every check reads and rewrites the connection, and this, by far its largest part (up to
+   * 400 merchants), is only wanted when there is mail to read. Removed with the connection.
+   */
+  gmailMemory: defineTable({
+    userId: v.id("users"),
+    merchantMap,
+  }).index("by_user", ["userId"]),
 
   /**
    * Every Gmail message a check has dealt with: the mail of a draft (its own and the ones folded
