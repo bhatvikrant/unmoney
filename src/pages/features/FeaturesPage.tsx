@@ -110,7 +110,7 @@ const FEATURES: Record<AiFeature, Feature> = {
     lead: "What stood out.", rest: "What marked a month or a year, as cards in its recap, and budgets to try.",
     Picture: RecapPicture,
     steps: ["Open a month's or year's recap", "Tap Get insights", "See the cards, try a budget"],
-    sent: ["Totals spent and received", "The five months before, or two years", "Your ten largest categories", "Budgets, and whether they held", "Your five most-logged notes", "What stood out in a month, with the notes and amounts of the few largest entries behind it"],
+    sent: ["Totals spent and received", "The five months before, or two years", "Your ten largest categories", "Budgets, and whether they held", "Your five most-logged notes", "What stood out, with the notes and amounts of the few largest entries behind it"],
     kept: { icon: Calculator, lead: "The figures are UnMoney's own.", rest: "UnMoney finds what stands out and draws the charts; Claude picks and words it. No date, account or photo is sent." },
     stat: { lead: "Only your top", value: "10", label: "expense categories go out, by name and total" },
     where: "A month's or year's recap",
