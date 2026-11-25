@@ -7,6 +7,7 @@
  */
 import type Anthropic from "@anthropic-ai/sdk";
 import { formatNumber } from "./money";
+import { cutText } from "./categoryLint";
 import type { ReceiptMediaType } from "./receiptAi";
 
 export const SPLIT_MODEL = "claude-haiku-5-5";
@@ -97,7 +98,7 @@ export function validateBill(raw: unknown, decimals: number, entryAmount: number
   const r = raw as { isBill?: unknown; items?: unknown; charges?: unknown; total?: unknown } | null;
   if (!r || typeof r !== "object" || r.isBill !== true || !Array.isArray(r.items) || !Array.isArray(r.charges)) return { ok: false, reason: NO_BILL };
   const minor = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? Math.round(n * 10 ** decimals) : null);
-  const clean = (s: unknown) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) : "");
+  const clean = (s: unknown) => (typeof s === "string" ? cutText(s.replace(/\s+/g, " ").trim(), MAX_NAME) : "");
   const money = (n: number) => formatNumber(n, decimals);
   const unreadable: BillRead = { ok: false, reason: "Some of the amounts on that photo could not be read, so there is nothing to split on." };
 

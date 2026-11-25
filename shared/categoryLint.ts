@@ -20,6 +20,14 @@ export function normNote(s: string): string {
   return s.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+/**
+ * The first `max` characters, never ending on half an emoji. A plain slice can cut one in two, and the
+ * half left behind is text Convex will not store or return and that cannot be sent as JSON.
+ */
+export function cutText(s: string, max: number): string {
+  return s.slice(0, max).replace(/[\uD800-\uDBFF]$/, "");
+}
+
 export type Usage = { entries: number; total: number };
 
 /** Entries and their total per category. A main category counts its subcategories' entries too. */

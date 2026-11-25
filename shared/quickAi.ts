@@ -8,7 +8,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import { addDays } from "./dates";
-import { normNote } from "./categoryLint";
+import { cutText, normNote } from "./categoryLint";
 import { usedNotes } from "./receiptAi";
 
 export const QUICK_MODEL = "claude-haiku-5-5";
@@ -83,10 +83,10 @@ export function buildQuickNames(snap: Snap): { names: string; known: QuickKnown 
   const shortOf = new Map<string, string>();
   cats.forEach((c, i) => { shortOf.set(c._id, `c${i + 1}`); known.categories[`c${i + 1}`] = { id: c._id, parentId: c.parentId, type: c.type }; });
   const list = (type: "expense" | "income") => cats.filter((c) => c.type === type)
-    .map((c) => ({ id: shortOf.get(c._id)!, name: c.name.slice(0, MAX_NAME), parent: c.parentId ? shortOf.get(c.parentId) : undefined }));
+    .map((c) => ({ id: shortOf.get(c._id)!, name: cutText(c.name, MAX_NAME), parent: c.parentId ? shortOf.get(c.parentId) : undefined }));
   const methods = snap.accounts.filter((a) => !a.deletedAt && !a.archivedAt && !a.hidden).sort((a, b) => a.order - b.order).slice(0, MAX_METHODS).map((a, i) => {
     known.methods[`m${i + 1}`] = a._id;
-    return { id: `m${i + 1}`, name: a.name.slice(0, MAX_NAME), kind: a.kind, bank: a.bankName, last4: a.last4 };
+    return { id: `m${i + 1}`, name: cutText(a.name, MAX_NAME), kind: a.kind, bank: a.bankName, last4: a.last4 };
   });
   const notes = usedNotes(snap.transactions.filter((t) => t.type !== "transfer"), shortOf, MAX_NOTES)
     .sort((a, b) => (normNote(a.note) < normNote(b.note) ? -1 : 1));
@@ -164,7 +164,7 @@ export function validateQuick(raw: unknown, known: QuickKnown, sentence: string,
   const r = raw as Record<string, unknown> | null;
   if (!r || typeof r !== "object") return {};
   const out: QuickRead = {};
-  const clean = (s: unknown, max: number) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  const clean = (s: unknown, max: number) => (typeof s === "string" ? cutText(s.replace(/\s+/g, " ").trim(), max) : "");
   const said = normNote(sentence);
   // the person's own words: every word of it is somewhere in what they typed
   const theirs = (s: string) => { const words = normNote(s).match(/[\p{L}\p{N}]+/gu); return !!words && words.every((w) => said.includes(w)); };

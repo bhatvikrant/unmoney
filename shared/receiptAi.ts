@@ -8,7 +8,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import { addDays } from "./dates";
-import { normNote } from "./categoryLint";
+import { cutText, normNote } from "./categoryLint";
 
 import { AI_MODEL } from "./tidyAi";
 
@@ -82,10 +82,10 @@ export function usedNotes(transactions: Doc<"transactions">[], shortOf: Map<stri
     .slice(0, RECEIPT_RECENT_ENTRIES);
   for (const t of recent) {
     const key = normNote(t.note);
-    const description = t.description?.replace(/\s+/g, " ").trim().slice(0, MAX_DESCRIPTION) || undefined;
+    const description = cutText(t.description?.replace(/\s+/g, " ").trim() ?? "", MAX_DESCRIPTION) || undefined;
     const e = seen.get(key);
     if (e) { e.used++; e.description ??= description; continue; }
-    seen.set(key, { note: t.note.trim().slice(0, MAX_NOTE), category: shortOf.get(t.subcategoryId ?? "") ?? shortOf.get(t.categoryId ?? ""), description, used: 1 });
+    seen.set(key, { note: cutText(t.note.trim(), MAX_NOTE), category: shortOf.get(t.subcategoryId ?? "") ?? shortOf.get(t.categoryId ?? ""), description, used: 1 });
   }
   // a stable sort: among notes used as often, the one used most recently stays first
   return [...seen.values()].sort((a, b) => b.used - a.used).slice(0, max);
@@ -136,7 +136,7 @@ export function receiptRequest(input: ReceiptInput, mediaType: ReceiptMediaType,
 export function validateReceipt(raw: unknown, ids: Record<string, Id<"categories">>, categories: Doc<"categories">[], today: string): ReceiptRead {
   const r = raw as { isReceipt?: unknown; note?: unknown; description?: unknown; category?: unknown; date?: unknown } | null;
   if (!r || typeof r !== "object" || r.isReceipt !== true) return {};
-  const text = (s: unknown, max: number) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  const text = (s: unknown, max: number) => (typeof s === "string" ? cutText(s.replace(/\s+/g, " ").trim(), max) : "");
   const out: ReceiptRead = {};
   const note = text(r.note, MAX_NOTE);
   if (note) out.note = note;

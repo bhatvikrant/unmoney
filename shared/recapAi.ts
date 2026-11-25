@@ -24,6 +24,7 @@ import { monthRange, parseMonthKey, shiftMonthKey, yearRange } from "./period";
 import { monthRecap, yearRecap, type RecapCard } from "./recap";
 import { monthFindings, type Figure, type Finding, type FindingChart, type FindingType } from "./recapFindings";
 import { settingsOf, statsByCategory } from "./views";
+import { cutText } from "./categoryLint";
 
 /** This feature's own model and effort, so they can change without touching the other AI features. */
 export const RECAP_MODEL = "claude-haiku-5-5";
@@ -114,7 +115,7 @@ export function storyCards(cards: RecapCard[], ai: RecapInsights | null | undefi
     .map((c) => (c.kind === "cover" ? { ...c, count: cards.length + extra.length, ...(ai?.title ? { title: ai.title } : {}) } : c));
 }
 
-const clip = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, MAX_NAME);
+const clip = (s: string) => cutText(s.replace(/\s+/g, " ").trim(), MAX_NAME);
 const sum = (ns: number[]) => ns.reduce((a, n) => a + n, 0);
 
 /** The same small fingerprint Tidy up uses for its summary (shared/tidyAi.ts). */
