@@ -159,6 +159,13 @@ export default function PrivacyPage() {
             and are deleted with it. A suggested budget changes nothing until you tap "Set".
           </p>
           <p className="mt-3">
+            Search runs on your device. Only when you type a question in Search and tap Ask AI is that question sent to the
+            same API, to turn it into the search's filters (dates, type, category, payment method, tag and amount range).
+            With it go today's date, your currency, the days your month and week start on, and the names of your categories,
+            payment methods and tags. None of your entries, amounts or notes are sent: the filters come back and the search
+            itself still runs on your device. Typing in Search without tapping Ask AI sends nothing.
+          </p>
+          <p className="mt-3">
             When you import a bank statement and tap "Suggest categories with AI" (nothing is sent until you do), the bank's
             description of each row that is new to UnMoney, up to 120 characters of it, is sent to the same API with whether
             the row was money out, money in or a refund, to suggest a note and a category for it. A bank's description can
