@@ -85,7 +85,7 @@ export default function BudgetPage() {
   } : null;
   return (
     <>
-      <PageHeader title={null} className="border-b-0" sub={<StatsHeaderBar />} />
+      <PageHeader title="Budget" hideTitle className="border-b-0" sub={<StatsHeaderBar />} />
       <Page className="pb-8">
         <div className="flex items-center justify-between px-4 py-3 border-t">
           <div>
@@ -98,7 +98,7 @@ export default function BudgetPage() {
               </div>
             ) : null}
           </div>
-          <Button variant="secondary" size="sm" onClick={() => nav(`/budget/settings?period=${period}&key=${key}`)}>Budget setting ›</Button>
+          <Button variant="secondary" size="sm" onClick={() => nav(`/budget/settings?period=${period}&key=${key}`)}>Budget settings ›</Button>
         </div>
         {stayedUnder ? (
           <div className="flex items-center gap-2 px-4 pb-3 text-sm text-income">

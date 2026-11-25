@@ -75,7 +75,8 @@ function Recap({ month }: { month: string }) {
   const [dir, setDir] = useState(1);
   // what holds the timer: a finger or the mouse held down on the card, the button (or Space), a hidden tab
   const [held, setHeld] = useState(false);
-  const [stopped, setStopped] = useState(false);
+  // reduced motion: the cards wait to be tapped instead of moving on by themselves every few seconds
+  const [stopped, setStopped] = useState(!!still);
   const [hidden, setHidden] = useState(() => document.hidden);
   const press = useRef({ at: 0, long: false });
   // the pull to close: where the finger went down, whether it is a pull or a sideways swipe, its speed

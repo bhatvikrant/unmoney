@@ -1,10 +1,17 @@
-export const ACCENTS: Record<string, { label: string; primary: string; fg: string }> = {
+/**
+ * Each accent in two strengths, because it is used both ways round: as the fill under button text and as
+ * text (the active tab, links) on the page. On white it is the darker one with white text; on the dark theme
+ * the brighter one with dark text. Every pairing is at least 4.5:1 (the single shade used before was 2.6 to 4).
+ */
+const WHITE = "oklch(0.99 0 0)";
+const INK = "oklch(0.15 0 0)";
+export const ACCENTS: Record<string, { label: string; primary: string; fg: string; dark?: { primary: string; fg: string } }> = {
   neutral: { label: "Ink", primary: "oklch(0.205 0 0)", fg: "oklch(0.985 0 0)" },
-  red: { label: "Coral", primary: "oklch(0.64 0.2 25)", fg: "oklch(0.99 0 0)" },
-  orange: { label: "Amber", primary: "oklch(0.72 0.17 60)", fg: "oklch(0.15 0 0)" },
-  green: { label: "Mint", primary: "oklch(0.62 0.15 160)", fg: "oklch(0.99 0 0)" },
-  blue: { label: "Sky", primary: "oklch(0.6 0.19 255)", fg: "oklch(0.99 0 0)" },
-  purple: { label: "Iris", primary: "oklch(0.58 0.2 290)", fg: "oklch(0.99 0 0)" },
+  red: { label: "Coral", primary: "oklch(0.58 0.2 25)", fg: WHITE, dark: { primary: "oklch(0.66 0.2 25)", fg: INK } },
+  orange: { label: "Amber", primary: "oklch(0.57 0.17 60)", fg: WHITE, dark: { primary: "oklch(0.72 0.17 60)", fg: INK } },
+  green: { label: "Mint", primary: "oklch(0.53 0.15 160)", fg: WHITE, dark: { primary: "oklch(0.64 0.15 160)", fg: INK } },
+  blue: { label: "Sky", primary: "oklch(0.56 0.19 255)", fg: WHITE, dark: { primary: "oklch(0.64 0.19 255)", fg: INK } },
+  purple: { label: "Iris", primary: "oklch(0.58 0.2 290)", fg: WHITE, dark: { primary: "oklch(0.66 0.2 290)", fg: INK } },
 };
 
 /** Eight categorical slots in a fixed order (see --chart-N in index.css); anything past them is the neutral "rest" tone. */
@@ -27,7 +34,8 @@ export function applyTheme(theme: "system" | "light" | "dark", accent: string, c
   // for index.html's first paint, before the app has its settings
   try { localStorage.setItem("unmoney:theme", theme); } catch { /* storage unavailable: the first paint follows the system */ }
   root.dataset.colorset = colorSet;
-  const a = ACCENTS[accent] ?? ACCENTS.neutral;
+  const chosen = ACCENTS[accent] ?? ACCENTS.neutral;
+  const a = (dark && chosen.dark) || chosen;
   if (accent === "neutral") {
     root.style.removeProperty("--primary");
     root.style.removeProperty("--primary-foreground");

@@ -4,7 +4,7 @@ import { useLocation } from "react-router";
 import { toast } from "sonner";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useOp, useView } from "@/lib/store";
-import { useUndoableDelete } from "@/lib/undo";
+import { offerUndo, useUndoableDelete } from "@/lib/undo";
 import { useApp } from "@/lib/app";
 import { sumKinds } from "../../../shared/ledger";
 import { Money } from "@/components/shell/Money";
@@ -25,6 +25,8 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type Edit = null | "date" | "note" | "delete";
+/** What a bulk edit replaced on one entry: what Undo sets again. */
+type Was = { date?: string; note?: string; categoryId?: Id<"categories">; subcategoryId?: Id<"categories">; accountId?: Id<"accounts"> };
 
 /**
  * Action bar (plus the pickers and dialogs it opens) for the entries ticked in `bulk`. Gmail `drafts`
@@ -77,23 +79,48 @@ export function BulkBar({ bulk, txs, drafts = [] }: { bulk: BulkSelect; txs: Tx[
     finally { setBusy(false); }
   }
 
+  /** Undo for a bulk edit, taken before it runs: each entry gets back what it had, one update per old value. */
+  const undoOf = (hit: Tx[], old: (t: Tx) => Was | null) => {
+    const groups = new Map<string, { ids: Id<"transactions">[]; was: Was }>();
+    for (const t of hit) {
+      const was = old(t);
+      if (!was) continue;
+      const g = groups.get(JSON.stringify(was)) ?? { ids: [], was };
+      g.ids.push(t._id as Id<"transactions">);
+      groups.set(JSON.stringify(was), g);
+    }
+    return async () => { for (const g of groups.values()) await bulkUpdate({ ids: g.ids, ...g.was }); };
+  };
+  const entries = (k: number) => `${k} ${k === 1 ? "entry" : "entries"}`;
+
   const applyDialog = () => run(async () => {
     if (edit === "delete") { await undoable.entries(ids()); return null; } // its own toast offers Undo
-    if (edit === "date") await bulkUpdate({ ids: ids(), date: val });
-    if (edit === "note") await bulkUpdate({ ids: ids(), note: val });
+    if (edit === "date") {
+      const undo = undoOf(chosen, (t) => ({ date: t.date }));
+      await bulkUpdate({ ids: ids(), date: val });
+      offerUndo(`Date changed on ${entries(n)}`, undo);
+    }
+    if (edit === "note") {
+      const undo = undoOf(chosen, (t) => ({ note: t.note ?? "" }));
+      await bulkUpdate({ ids: ids(), note: val });
+      offerUndo(`Note changed on ${entries(n)}`, undo);
+    }
   });
 
+  // One tap in a picker changes every ticked entry, so each of these can be taken back.
   const pickCategory = (categoryId: Id<"categories">, subcategoryId?: Id<"categories">) => run(async () => {
     const hit = chosen.filter((t) => t.type === catType);
+    const undo = undoOf(hit, (t) => (t.categoryId ? { categoryId: t.categoryId as Id<"categories">, subcategoryId: t.subcategoryId as Id<"categories"> | undefined } : null));
     await bulkUpdate({ ids: hit.map((t) => t._id as Id<"transactions">), categoryId, subcategoryId });
     const skipped = n - hit.length;
-    return skipped ? `Category set on ${hit.length}; ${skipped} ${catType === "expense" ? "income/transfer" : "expense/transfer"} skipped` : undefined;
+    offerUndo(skipped ? `Category set on ${hit.length}; ${skipped} ${catType === "expense" ? "income/transfer" : "expense/transfer"} skipped` : `Category set on ${entries(hit.length)}`, undo);
   });
 
   const pickAccount = (accountId: Id<"accounts">) => run(async () => {
+    const undo = undoOf(chosen, (t) => (t.accountId ? { accountId: t.accountId as Id<"accounts"> } : null));
     await bulkUpdate({ ids: ids(), accountId });
     const skipped = chosen.filter((t) => t.type === "transfer" && t.toAccountId === accountId).length;
-    return skipped ? `Payment method set on ${n - skipped}; ${skipped} transfer${skipped === 1 ? "" : "s"} to it skipped` : undefined;
+    offerUndo(skipped ? `Payment method set on ${n - skipped}; ${skipped} transfer${skipped === 1 ? "" : "s"} to it skipped` : `Payment method set on ${entries(n)}`, undo);
   });
 
   // Bookmark every selected entry; if they are all bookmarked already, this removes those bookmarks instead.

@@ -1,0 +1,30 @@
+name: CI
+
+# Typecheck, lint, tests and a production build on every pull request and on main. Vercel builds each
+# push too, but it never ran the tests, so a failing one could reach production.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      # tsc -b, then vite build: no Convex URL is needed to compile
+      - run: npm run build

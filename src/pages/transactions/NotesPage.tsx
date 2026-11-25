@@ -72,11 +72,11 @@ export default function NotesPage() {
           <DialogHeader><DialogTitle>{editing?.id ? "Edit note" : "New note"}</DialogTitle></DialogHeader>
           {editing ? (
             <div className="space-y-3">
-              <Input type="date" value={editing.date} onChange={(e) => setEditing({ ...editing, date: e.target.value })} />
-              <Textarea autoFocus value={editing.text} onChange={(e) => setEditing({ ...editing, text: e.target.value })} placeholder="What happened today?" className="min-h-24" />
+              <Input type="date" aria-label="Date" value={editing.date} onChange={(e) => setEditing({ ...editing, date: e.target.value })} />
+              <Textarea autoFocus aria-label="Note" value={editing.text} onChange={(e) => setEditing({ ...editing, text: e.target.value })} placeholder="What happened today?" className="min-h-24" />
               <div className="flex gap-2">
                 {NOTE_COLORS.map((c) => (
-                  <button key={c} type="button" aria-label={`Colour ${c}`} onClick={() => setEditing({ ...editing, color: c })} className={cn("size-7 rounded-full border-2", editing.color === c ? "border-foreground" : "border-transparent")} style={{ background: c }} />
+                  <button key={c} type="button" aria-label={`Colour ${c}`} aria-pressed={editing.color === c} onClick={() => setEditing({ ...editing, color: c })} className={cn("size-7 rounded-full border-2", editing.color === c ? "border-foreground" : "border-transparent")} style={{ background: c }} />
                 ))}
               </div>
             </div>

@@ -194,79 +194,89 @@ export const saveStats = internalMutation({
   },
 });
 
-/** Count every user's documents again and store the result in adminStats. */
+/**
+ * Count every user's documents again. Each user is counted by an action of their own, a second apart:
+ * one action walking everyone in turn ran out of its ten minutes at a few hundred users.
+ */
 export const refreshStats = internalAction({
   args: {},
   handler: async (ctx) => {
-    for (const userId of await ctx.runQuery(internal.admin.userIds, {})) {
-      const basics = await ctx.runQuery(internal.admin.userBasics, { userId });
-      const tables: Record<string, { count: number; bytes: number }> = {};
-      const tally: Record<string, number> = {};
-      let firstEntryDate: string | undefined;
-      for (const table of Object.keys(COUNTED) as Counted[]) {
-        let cursor: string | null = null;
-        const sum = { count: 0, bytes: 0 };
-        for (;;) {
-          const page: { count: number; bytes: number; tally: Record<string, number>; firstEntryDate?: string; isDone: boolean; continueCursor: string } =
-            await ctx.runQuery(internal.admin.countPage, { userId, table, tzOffset: basics.tzOffset, paginationOpts: { numItems: PAGE, cursor } });
-          sum.count += page.count;
-          sum.bytes += page.bytes;
-          for (const [k, n] of Object.entries(page.tally)) tally[k] = (tally[k] ?? 0) + n;
-          if (page.firstEntryDate && (!firstEntryDate || page.firstEntryDate < firstEntryDate)) firstEntryDate = page.firstEntryDate;
-          if (page.isDone) break;
-          cursor = page.continueCursor;
-        }
-        tables[table] = sum;
+    const ids = await ctx.runQuery(internal.admin.userIds, {});
+    for (const [i, userId] of ids.entries()) await ctx.scheduler.runAfter(i * 1000, internal.admin.refreshUser, { userId });
+  },
+});
+
+/** Count one user's documents and store the result in adminStats. */
+export const refreshUser = internalAction({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const basics = await ctx.runQuery(internal.admin.userBasics, { userId });
+    const tables: Record<string, { count: number; bytes: number }> = {};
+    const tally: Record<string, number> = {};
+    let firstEntryDate: string | undefined;
+    for (const table of Object.keys(COUNTED) as Counted[]) {
+      let cursor: string | null = null;
+      const sum = { count: 0, bytes: 0 };
+      for (;;) {
+        const page: { count: number; bytes: number; tally: Record<string, number>; firstEntryDate?: string; isDone: boolean; continueCursor: string } =
+          await ctx.runQuery(internal.admin.countPage, { userId, table, tzOffset: basics.tzOffset, paginationOpts: { numItems: PAGE, cursor } });
+        sum.count += page.count;
+        sum.bytes += page.bytes;
+        for (const [k, n] of Object.entries(page.tally)) tally[k] = (tally[k] ?? 0) + n;
+        if (page.firstEntryDate && (!firstEntryDate || page.firstEntryDate < firstEntryDate)) firstEntryDate = page.firstEntryDate;
+        if (page.isDone) break;
+        cursor = page.continueCursor;
       }
-      const pick = (prefix: string) => Object.fromEntries(Object.entries(tally).filter(([k]) => k.startsWith(prefix)).map(([k, n]) => [k.slice(prefix.length), n]));
-      const src = pick("src:");
-      const draft = pick("draft:");
-      const op = pick("op:");
-      const count = (t: Counted) => tables[t]?.count ?? 0;
-      const s = basics.settings;
-      await ctx.runMutation(internal.admin.saveStats, {
-        userId,
-        stats: {
-          tables,
-          files: { count: tally["file:count"] ?? 0, bytes: tally["file:bytes"] ?? 0 },
-          entries: { manual: src.manual ?? 0, gmail: src.gmail ?? 0, imported: src.imported ?? 0, repeat: src.repeat ?? 0, split: src.split ?? 0, withPhotos: src.withPhotos ?? 0, transfers: src.transfers ?? 0 },
-          createdByDay: pick("day:"),
-          createdByHour: pick("hour:"),
-          firstEntryDate,
-          features: {
-            budgets: count("budgets") > 0,
-            repeats: !!tally["feat:repeats"],
-            installments: !!tally["feat:installments"],
-            bookmarks: count("bookmarks") > 0,
-            notes: count("notes") > 0,
-            subCurrencies: !!tally["feat:subCurrencies"],
-            photos: (src.withPhotos ?? 0) > 0,
-            imports: (src.imported ?? 0) > 0 || (s?.imports ?? 0) > 0,
-            unsplit: (src.split ?? 0) > 0,
-            gmail: !!basics.gmail,
-            gmailBackfill: !!basics.gmail?.backfill,
-            sips: (s?.sips ?? 0) > 0,
-            aiTidy: count("aiUsage") > 0,
-            tidyUp: count("categoryCleanups") > 0,
-            iphoneShortcut: count("importLinks") > 0,
-            passcode: !!s?.passcode,
-            subcategories: !!s?.subcategories,
-            carryOver: !!s?.carryOver,
-            timeInput: !!s?.timeInput,
-            onboarded: !!s?.onboarded,
-          },
-          prefs: s ? { currency: s.mainCurrency, theme: s.theme, accent: s.accent, startScreen: s.startScreen } : {},
-          accountKinds: pick("kind:"),
-          gmail: basics.gmail ? {
-            status: basics.gmail.status, aiCalls: basics.gmail.aiCalls, aiMonth: basics.gmail.aiMonth, lastSyncAt: basics.gmail.lastSyncAt,
-            hasError: basics.gmail.hasError, senders: basics.gmail.senders,
-            drafts: { open: draft.open ?? 0, accepted: draft.accepted ?? 0, dismissed: draft.dismissed ?? 0, rule: draft.rule ?? 0, ai: draft.ai ?? 0 },
-          } : undefined,
-          syncOps: { applied: op.applied ?? 0, rejected: op.rejected ?? 0 },
-          signIns: basics.signIns,
-          lastSignInAt: basics.lastSignInAt,
-        },
-      });
+      tables[table] = sum;
     }
+    const pick = (prefix: string) => Object.fromEntries(Object.entries(tally).filter(([k]) => k.startsWith(prefix)).map(([k, n]) => [k.slice(prefix.length), n]));
+    const src = pick("src:");
+    const draft = pick("draft:");
+    const op = pick("op:");
+    const count = (t: Counted) => tables[t]?.count ?? 0;
+    const s = basics.settings;
+    await ctx.runMutation(internal.admin.saveStats, {
+      userId,
+      stats: {
+        tables,
+        files: { count: tally["file:count"] ?? 0, bytes: tally["file:bytes"] ?? 0 },
+        entries: { manual: src.manual ?? 0, gmail: src.gmail ?? 0, imported: src.imported ?? 0, repeat: src.repeat ?? 0, split: src.split ?? 0, withPhotos: src.withPhotos ?? 0, transfers: src.transfers ?? 0 },
+        createdByDay: pick("day:"),
+        createdByHour: pick("hour:"),
+        firstEntryDate,
+        features: {
+          budgets: count("budgets") > 0,
+          repeats: !!tally["feat:repeats"],
+          installments: !!tally["feat:installments"],
+          bookmarks: count("bookmarks") > 0,
+          notes: count("notes") > 0,
+          subCurrencies: !!tally["feat:subCurrencies"],
+          photos: (src.withPhotos ?? 0) > 0,
+          imports: (src.imported ?? 0) > 0 || (s?.imports ?? 0) > 0,
+          unsplit: (src.split ?? 0) > 0,
+          gmail: !!basics.gmail,
+          gmailBackfill: !!basics.gmail?.backfill,
+          sips: (s?.sips ?? 0) > 0,
+          aiTidy: count("aiUsage") > 0,
+          tidyUp: count("categoryCleanups") > 0,
+          iphoneShortcut: count("importLinks") > 0,
+          passcode: !!s?.passcode,
+          subcategories: !!s?.subcategories,
+          carryOver: !!s?.carryOver,
+          timeInput: !!s?.timeInput,
+          onboarded: !!s?.onboarded,
+        },
+        prefs: s ? { currency: s.mainCurrency, theme: s.theme, accent: s.accent, startScreen: s.startScreen } : {},
+        accountKinds: pick("kind:"),
+        gmail: basics.gmail ? {
+          status: basics.gmail.status, aiCalls: basics.gmail.aiCalls, aiMonth: basics.gmail.aiMonth, lastSyncAt: basics.gmail.lastSyncAt,
+          hasError: basics.gmail.hasError, senders: basics.gmail.senders,
+          drafts: { open: draft.open ?? 0, accepted: draft.accepted ?? 0, dismissed: draft.dismissed ?? 0, rule: draft.rule ?? 0, ai: draft.ai ?? 0 },
+        } : undefined,
+        syncOps: { applied: op.applied ?? 0, rejected: op.rejected ?? 0 },
+        signIns: basics.signIns,
+        lastSignInAt: basics.lastSignInAt,
+      },
+    });
   },
 });

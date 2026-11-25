@@ -21,6 +21,14 @@ test("a claimed photo is served to its owner only", async () => {
   expect((await asB.query(api.files.urls, { ids: [id] }))[id]).toBeNull();
 });
 
+test("owned names the caller's own files and no one else's", async () => {
+  const { asA, asB, store } = await twoUsers();
+  const [mine, theirs, nobodys] = [await store(), await store(), await store()];
+  await asA.mutation(api.files.claim, { storageId: mine });
+  await asB.mutation(api.files.claim, { storageId: theirs });
+  expect(await asA.query(api.files.owned, { ids: [mine, theirs, nobodys] })).toEqual([mine]);
+});
+
 test("nobody can claim or delete another user's photo", async () => {
   const { t, asA, asB, store } = await twoUsers();
   const id = await store();
@@ -32,8 +40,16 @@ test("nobody can claim or delete another user's photo", async () => {
   expect(await t.run((ctx) => ctx.storage.getUrl(id))).toBeNull();
 });
 
+test("an upload nobody claimed is served to no one", async () => {
+  const { asA, store } = await twoUsers();
+  const id = await store();
+  expect((await asA.query(api.files.urls, { ids: [id] }))[id]).toBeNull();
+});
+
 test("the backfill gives photos from before owners existed to the user whose entry holds them", async () => {
   vi.useFakeTimers();
+  // uploaded before owners were recorded
+  vi.setSystemTime(new Date("2026-09-01T00:00:00Z"));
   const { t, a, asA, asB, store } = await twoUsers();
   const id = await store();
   await t.run(async (ctx) => {

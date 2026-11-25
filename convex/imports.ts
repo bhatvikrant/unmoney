@@ -40,6 +40,8 @@ export const createLink = action({
 export const storeLink = internalMutation({
   args: { userId: v.id("users"), tokenHash: v.string(), createdAt: v.number() },
   handler: async (ctx, args) => {
+    // an action's token outlives a deleted account: no upload link for one that is gone
+    if (!(await ctx.db.get(args.userId))) throw new Error("Not signed in");
     const old = await ctx.db.query("importLinks").withIndex("by_user", (q) => q.eq("userId", args.userId)).collect();
     for (const o of old) await ctx.db.delete(o._id);
     await ctx.db.insert("importLinks", args);

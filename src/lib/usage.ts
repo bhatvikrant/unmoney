@@ -14,7 +14,8 @@ import { device } from "./device";
 const DEVICE_KEY = "unmoney:deviceId";
 /** Back after this long away: a new session, as if opened again. */
 const NEW_SESSION_AFTER_MS = 30 * 60_000;
-const PING_EVERY_MS = 60_000;
+/** Each ping is a mutation with three writes; leaving the app sends one anyway, so this only bounds what a crash loses. */
+const PING_EVERY_MS = 5 * 60_000;
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`);
 

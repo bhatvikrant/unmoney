@@ -246,6 +246,8 @@ export default defineSchema({
     .index("by_user_category", ["userId", "categoryId"])
     .index("by_repeat", ["repeatId"])
     .index("by_sip", ["sipId"])
+    /** The entry made from a mail, so reading that mail again (a second backfill) does not draft it twice. */
+    .index("by_user_source", ["userId", "source.messageId"])
     .searchIndex("search_note", { searchField: "note", filterFields: ["userId"] })
     .index("by_user_rev", ["userId", "rev"]),
 
@@ -390,6 +392,9 @@ export default defineSchema({
       reason: v.string(),
       confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
     })),
+    /** Runs started on `attemptDay` (UTC), counted before Claude is asked (ai.claim); a run that worked clears them. */
+    attemptDay: v.optional(v.string()),
+    attempts: v.optional(v.number()),
   }).index("by_user", ["userId"]),
 
   /**

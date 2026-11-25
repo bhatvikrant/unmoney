@@ -47,15 +47,21 @@ export type Parsed = {
   item?: string;
 };
 
+/**
+ * The address part of a From header: what is inside the last <…>, or all of it when there are no brackets.
+ * The display name is the sender's to choose, so `"alerts@hdfcbank.net" <x@evil.example>` must not read as the bank.
+ */
+const addrSpec = (from: string) => from.match(/<([^<>]*)>[^<>]*$/)?.[1] ?? from;
+
 /** The sender's domain, lower case: "alerts@hdfcbank.net" and "HDFC <alerts@hdfcbank.net>" both give "hdfcbank.net". */
 export function senderDomain(from: string): string {
-  const m = from.match(/@([A-Za-z0-9.-]+)/);
+  const m = addrSpec(from).match(/@([A-Za-z0-9.-]+)/);
   return (m ? m[1] : "").toLowerCase();
 }
 
 /** The sender's address alone, lower case. */
 export function senderAddress(from: string): string {
-  const m = from.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/);
+  const m = addrSpec(from).match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/);
   return (m ? m[0] : from).trim().toLowerCase();
 }
 
