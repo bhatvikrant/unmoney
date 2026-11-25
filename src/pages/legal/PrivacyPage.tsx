@@ -150,6 +150,15 @@ export default function PrivacyPage() {
             is stored as before. Turn the setting off and photos are again read only on your device.
           </p>
           <p className="mt-3">
+            When you tap "Get insights" on a monthly or yearly recap, and only then, a summary of that period is sent to the
+            same API: your currency, what you spent and received in the period and in up to five months (or two years) before
+            it, the names of your ten largest expense categories with what went out under each, your budgets' limits and
+            whether they held, and the up to five notes you logged most often with how many times and what they came to.
+            Individual entries, their dates, your payment methods, descriptions and photos are not sent. The insights and
+            suggested budgets that come back are kept with your account, so opening the recap again does not send anything,
+            and are deleted with it. A suggested budget changes nothing until you tap "Set".
+          </p>
+          <p className="mt-3">
             Anthropic processes this only to return the answer to UnMoney. Under Anthropic's commercial terms, data sent
             through its API is not used to train its models, and it is deleted after a limited retention period. UnMoney checks
             every answer against your real categories and payment methods before it becomes a draft.
