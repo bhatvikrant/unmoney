@@ -246,7 +246,7 @@ export default function GmailReviewPage() {
           </div>
         ))}
         {!items.length ? (
-          <EmptyState title="Nothing from Gmail to import" hint="New money mail is checked every hour. What it finds shows up here to pick from, and as faded rows on their days." action={<Button variant="outline" size="sm" onClick={() => nav("/settings/gmail")}><Mail className="size-4" />Gmail settings</Button>} />
+          <EmptyState title="Nothing from Gmail to import" hint="New money mail is checked every hour while you use the app. What it finds shows up here to pick from, and as faded rows on their days." action={<Button variant="outline" size="sm" onClick={() => nav("/settings/gmail")}><Mail className="size-4" />Gmail settings</Button>} />
         ) : (
           <>
             <div className="px-4 pt-4 text-sm">
