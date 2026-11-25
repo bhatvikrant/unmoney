@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useView } from "@/lib/store";
 import { budgetStatus, draftsRange, notesRange, txCarryBefore, txCsvRows, txListRange } from "../../../shared/views";
 import { upcomingOccurrences } from "../../../shared/upcoming";
+import { budgetPace } from "../../../shared/budgetPace";
 import { isSip, sipDrafts } from "../../../shared/sips";
 import { useToday } from "@/lib/today";
 import { useApp } from "@/lib/app";
@@ -322,6 +323,8 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
   const snap = useView();
   const { ledger, accountById, categoryById } = useApp();
   const status = useMemo(() => budgetStatus(snap, "monthly", month), [snap, month]);
+  const today = useToday();
+  const paces = useMemo(() => (status ? budgetPace(snap, "monthly", status, today) : null), [snap, status, today]);
   const byGroup = useMemo(() => {
     const exp = new Map<string, number>();
     const tr = new Map<string, number>();
@@ -355,10 +358,10 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
         </div>
         <Button variant="outline" size="sm" onClick={() => nav("/budget/settings")}>Budget settings ›</Button>
       </div>
-      {status?.total ? <div className="border-y bg-card"><BudgetBar item={status.total} label="Monthly" elapsed={status.elapsed} onClick={() => nav("/budget")} /></div> : null}
+      {status?.total ? <div className="border-y bg-card"><BudgetBar item={status.total} label="Monthly" elapsed={status.elapsed} pace={paces?.get(status.total.budget._id)} onClick={() => nav("/budget")} /></div> : null}
       {status?.perCategory.length ? (
         <div className="border-y bg-card mt-2">
-          {status.perCategory.map((it, i) => <BudgetBar key={it.budget._id} index={i + 1} item={it} label={categoryById.get(it.budget.categoryId!)?.name ?? ""} elapsed={status.elapsed} onClick={() => nav("/budget")} />)}
+          {status.perCategory.map((it, i) => <BudgetBar key={it.budget._id} index={i + 1} item={it} label={categoryById.get(it.budget.categoryId!)?.name ?? ""} elapsed={status.elapsed} pace={paces?.get(it.budget._id)} onClick={() => nav("/budget")} />)}
         </div>
       ) : !status?.total ? <div className="px-4 text-xs text-muted-foreground">No budgets yet.</div> : null}
 
