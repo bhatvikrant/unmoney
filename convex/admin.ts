@@ -72,7 +72,7 @@ const COUNTED = {
   settings: "by_user", accountGroups: "by_user", accounts: "by_user", categories: "by_user_rev", transactions: "by_user_date",
   repeats: "by_user", bookmarks: "by_user", budgets: "by_user", notes: "by_user_date", currencies: "by_user",
   categoryCleanups: "by_user", history: "by_user", drafts: "by_user", importLinks: "by_user", pendingImports: "by_user",
-  fileOwners: "by_user", aiUsage: "by_user", syncState: "by_user", tombstones: "by_user_rev", syncOps: "by_user_op",
+  fileOwners: "by_user", aiUsage: "by_user", recapInsights: "by_user_key", syncState: "by_user", tombstones: "by_user_rev", syncOps: "by_user_op",
   gmailConnections: "by_user", gmailSeen: "by_user_message",
 } as const satisfies Partial<Record<TableNames, string>>;
 type Counted = keyof typeof COUNTED;

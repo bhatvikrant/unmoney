@@ -15,11 +15,16 @@
  * On a phone, pulling the story down closes it, the way a story does: it follows the finger,
  * shrinking and rounding its corners over a darkening backdrop, and goes on a long enough pull or
  * a flick; anything less springs back. A pull is never also a tap.
+ *
+ * "Insights" in the top bar opens what Claude makes of the period (RecapInsights). It is only there
+ * once the server has answered whether an answer is stored, so offline the recap is unchanged.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router";
+import { useQuery } from "convex/react";
 import { animate, AnimatePresence, motion, useMotionValue, useReducedMotion, useTransform, type Transition } from "framer-motion";
-import { ChevronLeft, ChevronRight, Pause, Play, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, WandSparkles, X } from "lucide-react";
+import { api } from "../../../convex/_generated/api";
 import { useStore, useView } from "@/lib/store";
 import { useGoBack } from "@/lib/nav";
 import { useShortcuts, useSwipe } from "@/lib/shortcuts";
@@ -35,6 +40,7 @@ import { monthRecap, yearRecap, RECAP_MIN_ENTRIES, RECAP_YEAR_MIN_MONTHS, type R
 import { settingsOf, statsEntries } from "../../../shared/views";
 import { RecapCardView } from "./cards";
 import { RecapDrawer } from "./RecapDrawer";
+import { RecapInsights } from "./RecapInsights";
 import { decodeDrill, DrillContext, encodeDrill, HintContext } from "./drill";
 
 const SLIDE = 16;
@@ -72,6 +78,9 @@ function Recap({ month }: { month: string }) {
   // a month (or year) still running has no recap yet: a bookmark or Back lands on the Recaps list instead, and nothing is marked seen
   const finished = range.to < today;
   const recap = useMemo(() => (!finished ? null : year !== null ? yearRecap(view, year) : monthRecap(view, month)), [view, month, year, finished]);
+  // the stored AI insights for this recap: undefined until the server answers (and while offline), null when never asked for
+  const stored = useQuery(api.recapAi.get, userId && recap ? { key: month } : "skip");
+  const [insights, setInsights] = useState(false);
   const [dir, setDir] = useState(1);
   // what holds the timer: a finger or the mouse held down on the card, the button (or Space), a hidden tab
   const [held, setHeld] = useState(false);
@@ -116,7 +125,7 @@ function Recap({ month }: { month: string }) {
   const prev = () => { if (at > 0) go(at - 1); };
   useShortcuts({ ArrowRight: next, ArrowLeft: prev, Escape: close, " ": () => setStopped((v) => !v) });
   const swipe = useSwipe(next, prev);
-  const paused = held || stopped || hidden || !!drill;
+  const paused = held || stopped || hidden || !!drill || insights;
   // holding pauses; a release after a long hold is not a tap on the zone beneath. A long press
   // must not select text (iOS) or open the context menu (Android) either: select-none and the
   // callout style cover most of it, and the story refuses to start a selection at all.
@@ -212,6 +221,9 @@ function Recap({ month }: { month: string }) {
   );
   const closeButton = (
     <>
+      {stored !== undefined ? (
+        <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" title="AI insights" onClick={() => setInsights(true)}><WandSparkles className="size-4" />Insights</Button>
+      ) : null}
       {!last ? (
         <Button variant="ghost" size="icon" aria-label={stopped ? "Play" : "Pause"} aria-pressed={stopped} title={stopped ? "Play (Space)" : "Pause (Space)"} onClick={() => setStopped((v) => !v)}>
           {stopped ? <Play className="size-4" /> : <Pause className="size-4" />}
@@ -240,7 +252,12 @@ function Recap({ month }: { month: string }) {
   );
 
   // outside the story, so a drag in the drawer is not a swipe to the next card
-  const drawer = <RecapDrawer drill={drill} recapKey={month} range={recap.range} onDrill={openDrill} onClose={() => openDrill(null)} />;
+  const drawer = (
+    <>
+      <RecapDrawer drill={drill} recapKey={month} range={recap.range} onDrill={openDrill} onClose={() => openDrill(null)} />
+      {stored !== undefined ? <RecapInsights recapKey={month} stored={stored} open={insights} onOpenChange={setInsights} /> : null}
+    </>
+  );
   if (!wide) {
     return (
       <DrillContext.Provider value={openDrill}>

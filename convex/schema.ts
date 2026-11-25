@@ -400,6 +400,20 @@ export default defineSchema({
   }).index("by_user", ["userId"]),
 
   /**
+   * Claude's checked answer for one recap (convex/recapAi.ts): one row per user per period, `key` a
+   * month "2026-10" or a year "2026". `hash` is a fingerprint of the facts it saw: while they are the
+   * same the answer is shown again and Claude is not asked. Money inside a sentence is {m:<minor units>}.
+   */
+  recapInsights: defineTable({
+    userId: v.id("users"),
+    key: v.string(),
+    hash: v.string(),
+    at: v.number(),
+    insights: v.array(v.string()),
+    budgets: v.array(v.object({ categoryId: v.id("categories"), amount: v.number(), why: v.string() })),
+  }).index("by_user_key", ["userId", "key"]),
+
+  /**
    * A user's change number: every mutation that writes their synced documents adds one and stamps
    * what it wrote with it (convex/lib/changes.ts). `prunedRev` is the newest delete whose tombstone
    * has been dropped; a device that last looked before it has to load everything again.
@@ -642,7 +656,7 @@ export default defineSchema({
   aiDaily: defineTable({
     userId: v.id("users"),
     day: v.string(),
-    feature: v.union(v.literal("tidy"), v.literal("gmail"), v.literal("receipt")),
+    feature: v.union(v.literal("tidy"), v.literal("gmail"), v.literal("receipt"), v.literal("recap")),
     calls: v.number(),
     inputTokens: v.number(),
     outputTokens: v.number(),
