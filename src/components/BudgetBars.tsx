@@ -3,12 +3,15 @@ import { useApp } from "@/lib/app";
 import { Money } from "@/components/shell/Money";
 import { cn } from "@/lib/utils";
 import { budgetLevel } from "../../shared/views";
-import { useOverText, useShortMoney } from "@/lib/budgetText";
+import { dayInPeriod, useOverText, useShortMoney } from "@/lib/budgetText";
+import type { BudgetPace } from "../../shared/budgetPace";
 
 export type BudgetItem = { budget: { _id: string; categoryId?: string; period: string }; limit: number; spent: number; remaining: number; isOverride?: boolean; carry?: number };
 
-export function BudgetBar({ item, label, elapsed, onClick, due = 0, index = 0 }: {
+export function BudgetBar({ item, label, elapsed, pace, onClick, due = 0, index = 0 }: {
   item: BudgetItem; label: string; elapsed: number; onClick?: () => void;
+  /** In the period running today: where the budget is headed, from how earlier periods went. Without it the marker is today's date. */
+  pace?: BudgetPace;
   /** Position in a list of bars: they grow in a beat apart. */
   index?: number;
   /** Bills scheduled before the period ends, not added yet: drawn lighter after what was spent. */
@@ -18,7 +21,9 @@ export function BudgetBar({ item, label, elapsed, onClick, due = 0, index = 0 }:
   const ratio = item.limit > 0 ? item.spent / item.limit : item.spent > 0 ? 1 : 0;
   // a zero (or carried-below-zero) budget is over as soon as anything is spent
   const over = item.spent > 0 && item.spent > item.limit;
-  const warn = !over && ratio > elapsed + 0.0001;
+  // the marker is where spending would be by now if the period were to end on the limit: past it is ahead of pace
+  const mark = pace?.mark ?? elapsed;
+  const warn = !over && ratio > mark + 0.0001;
   const Wrapper = onClick ? "button" : "div";
   return (
     <Wrapper type={onClick ? "button" : undefined} onClick={onClick} className={cn("w-full text-left px-4 py-3 border-b last:border-b-0", onClick && "hover:bg-accent/40")}>
@@ -38,7 +43,7 @@ export function BudgetBar({ item, label, elapsed, onClick, due = 0, index = 0 }:
           <div className={cn("bar-grow-x h-full rounded transition-all", over ? "bg-expense" : warn ? "bg-expense/70" : "bg-income")} style={{ width: `${Math.min(100, ratio * 100)}%`, "--i": index } as CSSProperties} />
           {due > 0 && ratio < 1 ? <div className={cn("h-full", item.spent + due > item.limit ? "bg-expense/35" : "bg-foreground/25")} style={{ width: `${Math.min(100 - ratio * 100, (due / Math.max(1, item.limit)) * 100)}%` }} title="Bills still due" /> : null}
         </div>
-        <div className="absolute top-0 bottom-0 w-0.5 bg-foreground/70" style={{ left: `${Math.min(100, elapsed * 100)}%` }} title="Today" />
+        <div className="absolute top-0 bottom-0 w-0.5 bg-foreground/70" style={{ left: `${Math.min(100, mark * 100)}%` }} title={pace ? "Usual by today" : "Today"} />
       </div>
       <div className="flex justify-between text-xs mt-1">
         <span><Money amount={item.spent} kind={over ? "expense" : "income"} /> <span className="text-muted-foreground">spent</span></span>
@@ -51,6 +56,7 @@ export function BudgetBar({ item, label, elapsed, onClick, due = 0, index = 0 }:
             : <span className="text-budget-left"><Money amount={item.remaining - due} /> left after them</span>}
         </div>
       ) : null}
+      {pace?.overOn ? <div className="mt-0.5 text-xs text-expense">Likely over by <Money amount={pace.end - item.limit} />, around {dayInPeriod(item.budget.period, pace.overOn)}</div> : null}
     </Wrapper>
   );
 }
