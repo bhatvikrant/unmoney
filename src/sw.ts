@@ -39,7 +39,8 @@ cleanupOutdatedCaches();
 registerRoute(new NavigationRoute(createHandlerBoundToURL("/index.html"), { denylist: [/^\/api/, /\.shortcut$/] }));
 // receipt photos: keep what was seen so they still show offline
 registerRoute(
-  ({ url }) => /\.convex\.cloud$/.test(url.hostname) && url.pathname.startsWith("/api/storage/"),
+  // images on screen only: a backup fetching every photo must not push the ones seen out of the 300 kept
+  ({ url, request }) => request.destination === "image" && /\.convex\.cloud$/.test(url.hostname) && url.pathname.startsWith("/api/storage/"),
   new CacheFirst({ cacheName: "photos", plugins: [
     new ExpirationPlugin({ maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 90 }),
     // a photo that came from the network, not the cache: the page counts it (src/lib/usage.ts)

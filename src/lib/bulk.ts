@@ -7,11 +7,14 @@
  */
 import { useLayoutEffect, useRef } from "react";
 import { toast } from "sonner";
+import { useConvex } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { useStore } from "@/lib/store";
 import { currencyInfo } from "../../shared/currencies";
-import { restoreRowsFrom, scaleAmount, type BackupData } from "../../shared/ops";
+import { restoreRowsFrom, rewriteIds, scaleAmount, type BackupData } from "../../shared/ops";
 import { backupExport } from "../../shared/views";
 import { saveSafetyCopy, type SafetyReason } from "./safetyCopy";
+import type { BackupPhotos } from "./backupFile";
 import type { Id } from "../../convex/_generated/dataModel";
 
 const CHUNK = 500;
@@ -32,7 +35,8 @@ function chunks<T>(items: T[]): T[][] {
 }
 
 export function useBulkOps() {
-  const { view, userId, dispatchTracked, whenSynced } = useStore();
+  const { view, userId, status, dispatchTracked, whenSynced, enqueueUpload } = useStore();
+  const convex = useConvex();
   // the data as of the last render, for an action started later from a toast (Undo after an import)
   const latest = useRef(view);
   useLayoutEffect(() => { latest.current = view; });
@@ -49,6 +53,46 @@ export function useBulkOps() {
     } catch {
       toast.warning("Couldn't keep a safety copy on this device. Download a backup first if you may want this data back.");
     }
+  }
+
+  /**
+   * The photos of a backup that this account already has, as the server tells it: the backup was made here,
+   * so they keep their ids. Uploading them again doubled the account's storage on every restore and left
+   * the first copies with nothing pointing at them. Offline (or with no answer in ten seconds) nothing is
+   * known, so every photo is uploaded: wasteful, but no photo is left out on a guess.
+   */
+  async function alreadyHere(ids: string[]): Promise<Set<string>> {
+    const here = new Set<string>();
+    for (let i = 0; status.connected && i < ids.length; i += 200) {
+      const got = await Promise.race([
+        convex.query(api.files.owned, { ids: ids.slice(i, i + 200) as Id<"_storage">[] }).catch(() => [] as string[]),
+        new Promise<string[]>((done) => setTimeout(() => done([]), 10_000)),
+      ]);
+      for (const id of got) here.add(id);
+    }
+    return here;
+  }
+
+  /**
+   * Queue the photos a backup file carries for upload, and point its entries at the new copies. The uploads
+   * sit in the queue ahead of the restore, so this works offline too. A photo this account already has, one
+   * the file does not carry, or one this device can't queue (storage full) keeps its old id.
+   */
+  async function withPhotos(data: BackupData, photos?: BackupPhotos): Promise<BackupData> {
+    if (!photos?.size) return data;
+    const named = (data.transactions ?? []).flatMap((t) => (Array.isArray(t.photoIds) ? (t.photoIds as string[]) : []));
+    const here = await alreadyHere([...new Set(named.filter((id) => photos.has(id)))]);
+    const ids: Record<string, string> = {};
+    let failed = 0;
+    for (const t of data.transactions ?? []) {
+      for (const id of Array.isArray(t.photoIds) ? (t.photoIds as string[]) : []) {
+        const read = photos.get(id);
+        if (!read || ids[id] || here.has(id)) continue;
+        try { ids[id] = await enqueueUpload(await read()); } catch { failed++; }
+      }
+    }
+    if (failed) toast.warning(`${failed.toLocaleString()} ${failed === 1 ? "photo" : "photos"} in the backup could not be read or kept on this device, so ${failed === 1 ? "it was" : "they were"} not restored.`);
+    return { ...data, transactions: rewriteIds(data.transactions, ids) };
   }
 
   async function removeEntries(ifPresent?: boolean): Promise<string[]> {
@@ -111,8 +155,10 @@ export function useBulkOps() {
       return track(ids, { loading: "Deleting entries… keep UnMoney open until it is saved", success: "Entries deleted" });
     },
 
-    async restore(data: BackupData) {
+    /** `photos`: the receipt photos the backup file carries, re-uploaded for this account. */
+    async restore(backup: BackupData, photos?: BackupPhotos) {
       await safetyCopy("restore");
+      const data = await withPhotos(backup, photos);
       if (view.transactions.length + (data.transactions?.length ?? 0) <= ONE_OP) {
         const { id } = await dispatchTracked("backup.restore", { data });
         return track([id], { loading: "Restoring…", success: "Restored" });

@@ -2,30 +2,73 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-import { useStore, useView } from "@/lib/store";
+import { useConvex } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { useStore } from "@/lib/store";
 import { listSafetyCopies, readSafetyCopy, SAFETY_DAYS, SAFETY_REASON, type SafetyCopyInfo } from "@/lib/safetyCopy";
 import { useBulkOps } from "@/lib/bulk";
 import { backupExport, txCsvRows } from "../../../shared/views";
-import { backupProblem, type BackupData } from "../../../shared/ops";
+import { backupProblem, isTmpId, type BackupData } from "../../../shared/ops";
+import { packBackup, readBackupFile, type BackupPhotos } from "@/lib/backupFile";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { downloadText, toCSV } from "@/lib/csv";
+import { downloadBlob, downloadText, toCSV } from "@/lib/csv";
 import { completeSheets, moneyManagerSheet } from "../../../shared/export";
 import { downloadWorkbook, downloadXlsx } from "@/lib/xlsx";
 
 export default function BackupSettings() {
-  const view = useView();
+  const { view, status } = useStore();
+  const convex = useConvex();
   const nav = useNavigate();
   const bulk = useBulkOps();
   const confirm = useConfirm();
   const restoreRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
+  /**
+   * The receipt photos the entries name, fetched from the server. One that can't be fetched (offline, still
+   * waiting to upload, gone) is simply not in the map: the backup is made without it and says how many.
+   */
+  async function fetchPhotos(ids: string[]): Promise<Map<string, Blob>> {
+    const photos = new Map<string, Blob>();
+    const real = ids.filter((id) => !isTmpId(id)) as Id<"_storage">[];
+    // the socket being down means the URL query would wait for it; photos are fetched 6 at a time
+    for (let i = 0; status.connected && i < real.length; i += 200) {
+      const urls = Object.entries(await convex.query(api.files.urls, { ids: real.slice(i, i + 200) }).catch(() => ({} as Record<string, string | null>)));
+      for (let j = 0; j < urls.length; j += 6) {
+        await Promise.all(urls.slice(j, j + 6).map(async ([id, url]) => {
+          const res = url ? await fetch(url, { signal: AbortSignal.timeout(60_000) }).catch(() => null) : null;
+          const blob = res?.ok ? await res.blob().catch(() => null) : null;
+          if (blob) photos.set(id, blob);
+        }));
+      }
+    }
+    return photos;
+  }
   async function exportJSON() {
     const data = backupExport(view);
-    downloadText(`UnMoney-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 1), "application/json");
+    const name = `UnMoney-backup-${new Date().toISOString().slice(0, 10)}`;
+    const ids = [...new Set(view.transactions.flatMap((t) => t.photoIds as string[]))];
+    if (!ids.length) { downloadBlob(`${name}.json`, (await packBackup(data, new Map())).blob); return; }
+    setBusy(true);
+    const progress = toast.loading(`Collecting ${ids.length.toLocaleString()} ${ids.length === 1 ? "photo" : "photos"}…`);
+    try {
+      const photos = await fetchPhotos(ids);
+      // a zip this device can't build (too large for it) still leaves a backup of everything else
+      const file = await packBackup(data, photos).catch(() => { photos.clear(); return packBackup(data, photos); });
+      downloadBlob(`${name}.${file.ext}`, file.blob);
+      const left = ids.length - photos.size;
+      if (left) toast.warning(`${left.toLocaleString()} of ${ids.length.toLocaleString()} receipt photos could not be fetched, so they are not in this backup. Download it again when you are online to include them.`, { duration: 10_000 });
+      else toast.success(`Backup downloaded with ${photos.size.toLocaleString()} ${photos.size === 1 ? "photo" : "photos"}`);
+    } catch {
+      toast.error("Could not make the backup");
+    } finally {
+      toast.dismiss(progress);
+      setBusy(false);
+    }
   }
   async function exportCSV(delim: "," | "\t") {
     const csv = toCSV(txCsvRows(view), delim);
@@ -42,19 +85,19 @@ export default function BackupSettings() {
   async function onRestoreFile(file: File | undefined) {
     if (!file) return;
     const reset = () => { if (restoreRef.current) restoreRef.current.value = ""; };
-    let data: BackupData;
-    try { data = JSON.parse(await file.text()) as BackupData; }
+    let data: BackupData, photos: BackupPhotos;
+    try { ({ data, photos } = await readBackupFile(file)); }
     catch { toast.error("That file is not a backup"); reset(); return; }
     const problem = backupProblem(data);
     if (problem) { toast.error(problem); reset(); return; }
     const made = data.exportedAt && !Number.isNaN(Date.parse(data.exportedAt)) ? new Date(data.exportedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null;
     const count = (n: number | undefined, one: string, many: string) => `${(n ?? 0).toLocaleString()} ${n === 1 ? one : many}`;
-    const has = `${count(data.transactions?.length, "entry", "entries")}, ${count(data.accounts?.length, "payment method", "payment methods")} and ${count(data.categories?.length, "category", "categories")}`;
+    const has = `${count(data.transactions?.length, "entry", "entries")}, ${count(data.accounts?.length, "payment method", "payment methods")} and ${count(data.categories?.length, "category", "categories")}${photos.size ? `, with ${count(photos.size, "receipt photo", "receipt photos")}` : ""}`;
     const description = `${made ? `This backup from ${made}` : "This backup"} has ${has}. Restoring replaces ALL current data with it. A safety copy of what you have now is kept on this device for a week.`;
     if (!(await confirm({ title: "Restore this backup?", description, action: "Restore" }))) { reset(); return; }
     setBusy(true);
     // the toast from bulk.restore reports how the sync ends
-    try { await bulk.restore(data); }
+    try { await bulk.restore(data, photos); }
     catch (e) { if (!(e as { reported?: boolean }).reported) toast.error(e instanceof Error ? e.message : "Could not restore"); }
     setBusy(false);
     reset();
@@ -64,9 +107,9 @@ export default function BackupSettings() {
       <PageHeader back="/settings" title="Backup & data" />
       <Page className="pb-10">
         <Section title="Backup">
-          <Row label="Download backup (JSON)" hint="Accounts, categories, entries, budgets, schedules and settings. Receipt photos are not in the file: they stay with this account" right={<Button size="sm" variant="outline" onClick={exportJSON}>Download</Button>} />
+          <Row label="Download backup" hint="Accounts, categories, entries, budgets, schedules and settings. With receipt photos it is a .zip that holds them too, so they come back in any account" right={<Button size="sm" variant="outline" disabled={busy} onClick={() => void exportJSON()}>Download</Button>} />
           <Row label="Restore from backup" hint="Replaces all current data" right={<Button size="sm" variant="outline" disabled={busy} onClick={() => restoreRef.current?.click()}>Choose file</Button>} />
-          <input ref={restoreRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => onRestoreFile(e.target.files?.[0])} />
+          <input ref={restoreRef} type="file" accept="application/json,.json,application/zip,.zip" className="hidden" onChange={(e) => onRestoreFile(e.target.files?.[0])} />
         </Section>
         <Section title="Export">
           <Row label="Money Manager Excel (.xlsx)" hint="Same layout as Money Manager's own export. Import it there or back here, any time" right={<Button size="sm" variant="outline" onClick={exportMoneyManager}>Excel</Button>} />

@@ -21,6 +21,14 @@ test("a claimed photo is served to its owner only", async () => {
   expect((await asB.query(api.files.urls, { ids: [id] }))[id]).toBeNull();
 });
 
+test("owned names the caller's own files and no one else's", async () => {
+  const { asA, asB, store } = await twoUsers();
+  const [mine, theirs, nobodys] = [await store(), await store(), await store()];
+  await asA.mutation(api.files.claim, { storageId: mine });
+  await asB.mutation(api.files.claim, { storageId: theirs });
+  expect(await asA.query(api.files.owned, { ids: [mine, theirs, nobodys] })).toEqual([mine]);
+});
+
 test("nobody can claim or delete another user's photo", async () => {
   const { t, asA, asB, store } = await twoUsers();
   const id = await store();

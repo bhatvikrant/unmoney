@@ -15,7 +15,7 @@ import { opLabel } from "./opLabel";
 import { api } from "../../convex/_generated/api";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import {
-  TABLES, applyOp, emptySnapshot, isTmpId, rewriteIds, tmpIdsIn, type Op, type OpArgs, type OpKind, type OpResult, type Snapshot, type Table,
+  TABLES, applyOp, dropTmpPhotos, emptySnapshot, rewriteIds, tmpIdsIn, type Op, type OpArgs, type OpKind, type OpResult, type Snapshot, type Table,
 } from "../../shared/ops";
 import { applyChanges } from "../../shared/changes";
 import { viewOf, type Landed } from "./replay";
@@ -488,8 +488,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         const sent: Op[] = [];
         let skipped = false;
         for (const op of batch) {
-          let args = rewriteIds(op.args, metaRef.current.idMap) as Record<string, unknown>;
-          if (args && typeof args === "object" && Array.isArray(args.photoIds)) args = { ...args, photoIds: (args.photoIds as string[]).filter((p) => !isTmpId(p)) };
+          // a restore names its photos inside its rows, so every photoIds list is cleaned, not only the op's own
+          const args = dropTmpPhotos(rewriteIds(op.args, metaRef.current.idMap));
           const unresolved = [...tmpIdsIn(args)].filter((t) => !batch.some((b) => t.startsWith(`tmp_${b.id}_`)));
           if (unresolved.length) {
             await drop(op, "it depends on an earlier change that failed");
