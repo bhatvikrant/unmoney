@@ -8,7 +8,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { deleteSynced, insertSynced, patchSynced, replaceSynced } from "./changes";
 import {
-  applyOp, emptySnapshot, isTmpId, mergeTxScopes, OP_TABLES, rewriteIds, tmpIdsIn, txScope, type Op, type OpKind, type Snapshot, type Table, type TxScope,
+  applyOp, emptySnapshot, horizonFor, isTmpId, mergeTxScopes, OP_TABLES, rewriteIds, tmpIdsIn, txScope, type Op, type OpKind, type Snapshot, type Table, type TxScope,
 } from "../../shared/ops";
 
 export async function loadTable<T extends Table>(ctx: QueryCtx | MutationCtx, userId: Id<"users">, table: T): Promise<Doc<T>[]> {
@@ -100,8 +100,17 @@ export async function loadSnapshot(ctx: QueryCtx | MutationCtx, userId: Id<"user
  * finds the schedule each such entry belongs to.
  */
 async function scopeFor(ctx: MutationCtx, userId: Id<"users">, ops: Op[], tables: Set<Table>): Promise<TxScope> {
-  const scope = mergeTxScopes(ops.map(txScope));
-  if (!tables.has("transactions") || scope.all || !scope.seriesOf?.some(isTmpId)) return scope;
+  let scope = mergeTxScopes(ops.map(txScope));
+  if (!tables.has("transactions") || scope.all) return scope;
+  // repeats.catchUp names no entries, yet must not add one a schedule already has for a date (its next date
+  // moved back by hand, or a device got there first): load the entries of the schedules that are due.
+  const days = ops.flatMap((op) => (op.kind === "repeats.catchUp" && typeof (op.args as { today?: unknown })?.today === "string" ? [(op.args as { today: string }).today] : []));
+  if (days.length) {
+    const [settings, repeats] = await Promise.all([loadTable(ctx, userId, "settings"), loadTable(ctx, userId, "repeats")]);
+    const horizon = days.map((d) => horizonFor(settings[0] ?? null, d)).sort().at(-1)!;
+    scope = mergeTxScopes([scope, { repeatIds: repeats.filter((r) => r.active && r.nextDate <= horizon).map((r) => r._id) }]);
+  }
+  if (!scope.seriesOf?.some(isTmpId)) return scope;
   const wanted = new Set(scope.seriesOf.filter(isTmpId));
   const repeatIds = new Set<string>();
   let snap = await loadSnapshot(ctx, userId, tables, scope);

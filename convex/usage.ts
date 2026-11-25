@@ -43,9 +43,11 @@ export const ping = mutation({
     if (!userId || !/^\d{4}-\d{2}-\d{2}$/.test(a.day)) return;
     const now = Date.now();
     const deviceId = clip(a.deviceId, 64);
+    // looked up by the id it is stored under: a longer one would otherwise insert a new row on every ping
+    const sessionId = clip(a.sessionId, 64);
     const device = { os: clip(a.os), browser: clip(a.browser), formFactor: a.formFactor, standalone: a.standalone, appVersion: clip(a.appVersion), tzOffset: Math.round(a.tzOffset), lastSeenAt: now };
 
-    let session = await ctx.db.query("usageSessions").withIndex("by_session", (q) => q.eq("sessionId", a.sessionId)).unique();
+    let session = await ctx.db.query("usageSessions").withIndex("by_session", (q) => q.eq("sessionId", sessionId)).unique();
     if (session && session.userId !== userId) return;
     const isNew = !session;
     const before: Counts = session ?? { activeMs: 0, bytesDown: 0, bytesUp: 0, photoFetches: 0, opsSent: 0 };
@@ -67,7 +69,7 @@ export const ping = mutation({
       for (const [k, n] of Object.entries(screens)) seen = bump(seen, k, n);
       await ctx.db.patch(session._id, { ...max(session, totals), lastSeenAt: now, appVersion: device.appVersion, screens: seen });
     } else {
-      const id = await ctx.db.insert("usageSessions", { userId, deviceId, sessionId: clip(a.sessionId, 64), day: a.day, startedAt: Math.min(a.startedAt, now), lastSeenAt: now, ...max(before, totals), screens, appVersion: device.appVersion });
+      const id = await ctx.db.insert("usageSessions", { userId, deviceId, sessionId, day: a.day, startedAt: Math.min(a.startedAt, now), lastSeenAt: now, ...max(before, totals), screens, appVersion: device.appVersion });
       session = (await ctx.db.get(id))!;
     }
 

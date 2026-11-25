@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Loader2, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { retryForcedUpdate, skipForcedUpdate, useForcedUpdate } from "@/lib/pwa";
@@ -7,10 +8,13 @@ const day = (ms: number) => new Date(ms).toLocaleDateString("en-IN", { day: "num
 /** Covers the app while it switches to a newer version on its own (src/lib/pwa.ts, applyForced). */
 export function ForcedUpdate() {
   const { state, current } = useForcedUpdate();
+  const ref = useRef<HTMLDivElement>(null);
+  // it covers the app: keyboard and screen-reader focus comes here too, instead of staying on what is underneath
+  useEffect(() => { if (state !== "idle") ref.current?.focus(); }, [state]);
   if (state === "idle") return null;
   const failed = state === "failed";
   return (
-    <div role="alertdialog" aria-modal="true" aria-labelledby="forced-update-title" aria-describedby="forced-update-body" className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-background px-8 text-center">
+    <div ref={ref} tabIndex={-1} role="alertdialog" aria-modal="true" aria-labelledby="forced-update-title" aria-describedby="forced-update-body" className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-background px-8 text-center outline-none">
       <img src="/pwa-192x192.png" alt="" className="size-16 rounded-2xl" />
       <h1 id="forced-update-title" className="mt-6 text-lg font-semibold">{failed ? "Couldn't finish updating" : "Updating UnMoney"}</h1>
       <p id="forced-update-body" className="mt-2 max-w-xs text-sm text-muted-foreground">

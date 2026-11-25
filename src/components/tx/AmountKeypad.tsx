@@ -33,7 +33,7 @@ export function AmountKeypad({ open, onOpenChange, initial, onDone, currencyLabe
         <div className="h-12 flex items-center justify-end text-2xl tabular font-medium rounded-md bg-muted px-3 mb-2 overflow-x-auto no-scrollbar">{expr || "0"}</div>
         <div className="grid grid-cols-4 gap-1.5">
           {keys.map((k) => (
-            <button key={k} type="button" onClick={() => press(k)} className={cn("h-12 rounded-md text-lg bg-card border hover:bg-accent active:scale-95 transition", /[÷×+-]/.test(k) && "bg-muted text-muted-foreground")}>
+            <button key={k} type="button" aria-label={k === "⌫" ? "Delete last digit" : undefined} onClick={() => press(k)} className={cn("h-12 rounded-md text-lg bg-card border hover:bg-accent active:scale-95 transition", /[÷×+-]/.test(k) && "bg-muted text-muted-foreground")}>
               {k === "⌫" ? <Delete className="size-5 mx-auto" /> : k}
             </button>
           ))}

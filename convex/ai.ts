@@ -28,7 +28,8 @@ export const status = query({
     const userId = await getAuthUserId(ctx);
     if (!userId) return null;
     const u = await ctx.db.query("aiUsage").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
-    return u ? { lastRunAt: u.lastRunAt, result: u.result } : null;
+    // lastRunAt 0 is a row that only counts attempts (claim): no run has worked yet
+    return u?.lastRunAt ? { lastRunAt: u.lastRunAt, result: u.result } : null;
   },
 });
 
@@ -56,6 +57,28 @@ export const record = internalMutation({
   },
 });
 
+/** A failed run does not use up the month, but each one is a paid Claude call: this many a day at most. */
+const MAX_ATTEMPTS_A_DAY = 3;
+
+/**
+ * Counts a run before Claude is asked. In a transaction of its own, so runs started at the same moment
+ * cannot all pass the limits the way they did when the run was only recorded after it had worked.
+ */
+export const claim = internalMutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }): Promise<"ok" | "ran" | "tooMany"> => {
+    const now = Date.now();
+    const day = new Date(now).toISOString().slice(0, 10);
+    const u = await ctx.db.query("aiUsage").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+    if (u && now - u.lastRunAt < AI_RUN_EVERY_MS) return "ran";
+    const attempts = u?.attemptDay === day ? u.attempts ?? 0 : 0;
+    if (attempts >= MAX_ATTEMPTS_A_DAY) return "tooMany";
+    if (u) await ctx.db.patch(u._id, { attemptDay: day, attempts: attempts + 1 });
+    else await ctx.db.insert("aiUsage", { userId, lastRunAt: 0, summaryHash: "", result: [], attemptDay: day, attempts: 1 });
+    return "ok";
+  },
+});
+
 const nextRunDate = (u: Usage) => new Date(u.lastRunAt + AI_RUN_EVERY_MS).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 /**
@@ -74,6 +97,9 @@ export const suggestCategoryCleanup = action({
     if (usage && usage.summaryHash === prep.hash) return { suggestions: usage.result, lastRunAt: usage.lastRunAt, cached: true };
     if (usage && Date.now() - usage.lastRunAt < AI_RUN_EVERY_MS) throw new ConvexError(`You can get new AI suggestions on ${nextRunDate(usage)}`);
     if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("AI suggestions aren't set up yet");
+    const claimed = await ctx.runMutation(internal.ai.claim, { userId });
+    if (claimed === "ran") throw new ConvexError("AI suggestions were just made. Open Tidy up again to see them.");
+    if (claimed === "tooMany") throw new ConvexError("AI suggestions didn't work a few times today. Try again tomorrow.");
 
     const client = new Anthropic({ timeout: 60_000, maxRetries: 1 });
     let raw: unknown;

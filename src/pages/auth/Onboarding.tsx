@@ -34,12 +34,13 @@ export default function Onboarding() {
       <div className="w-full max-w-md">
         <h1 className="text-xl font-semibold">Pick your main currency</h1>
         <p className="text-sm text-muted-foreground mt-1">Every total is shown in it. You can add other currencies later and change this one from Settings.</p>
-        <Input className="mt-4" placeholder="Search currencies" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+        <Input className="mt-4" placeholder="Search currencies" aria-label="Search currencies" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
         <div className="mt-3 max-h-72 overflow-y-auto border rounded-lg divide-y">
           {list.map((c) => (
             <button
               key={c.code}
               type="button"
+              aria-pressed={code === c.code}
               onClick={() => setCode(c.code)}
               className={cn("w-full flex items-center justify-between px-3 py-2.5 text-sm text-left hover:bg-accent", code === c.code && "bg-accent font-medium")}
             >

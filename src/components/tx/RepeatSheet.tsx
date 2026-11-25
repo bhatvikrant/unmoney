@@ -35,7 +35,7 @@ export function RepeatSheet({ open, onOpenChange, value, onChange }: { open: boo
       <div className="px-2 space-y-4">
         <div className="grid grid-cols-3 gap-1.5">
           {(["none", "repeat", "installment"] as const).map((m) => (
-            <button key={m} type="button" onClick={() => setMode(m)} className={cn("rounded-md border px-2 py-2 text-sm capitalize", mode === m && "bg-primary text-primary-foreground border-primary")}>{m === "none" ? "Once" : m}</button>
+            <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)} className={cn("rounded-md border px-2 py-2 text-sm capitalize", mode === m && "bg-primary text-primary-foreground border-primary")}>{m === "none" ? "Once" : m}</button>
           ))}
         </div>
         {mode === "repeat" ? (
