@@ -6,8 +6,10 @@ import { useGoBack } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { SyncStrip } from "./SyncStatus";
 
-export function PageHeader({ title, back, left, right, className, sub }: {
+export function PageHeader({ title, hideTitle, back, left, right, className, sub }: {
   title?: ReactNode; back?: boolean | string; left?: ReactNode; right?: ReactNode; className?: string; sub?: ReactNode;
+  /** The title is not drawn (the bar under the header says where this is) but still names the page for the tab and screen readers. */
+  hideTitle?: boolean;
 }) {
   const nav = useNavigate();
   const goBack = useGoBack();
@@ -30,7 +32,7 @@ export function PageHeader({ title, back, left, right, className, sub }: {
           ) : null}
           {left}
         </div>
-        {title ? <h1 className="flex-1 text-center font-semibold truncate">{title}</h1> : <div className="flex-1" />}
+        {title && !hideTitle ? <h1 className="flex-1 text-center font-semibold truncate">{title}</h1> : <div className="flex-1">{title ? <h1 className="sr-only">{title}</h1> : null}</div>}
         <div className="flex items-center justify-end w-24 gap-0.5">{right}</div>
       </div>
       <SyncStrip />

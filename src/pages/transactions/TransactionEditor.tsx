@@ -15,7 +15,7 @@ import { amountInput, localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { addDays, todayISO } from "../../../shared/dates";
 import { evaluateExpression, formatRate, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
-import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useOpenEntry } from "@/lib/nav";
+import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useLeaveTo, useOpenEntry } from "@/lib/nav";
 import { useColumn } from "@/components/shell/SplitLayout";
 import { offerUndo, useUndoableDelete } from "@/lib/undo";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
@@ -251,7 +251,7 @@ function useSaveFromLink(link: ReturnType<typeof parseEntryLink> | null, bookmar
 type Existing = TxDetail;
 
 function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: Id<"transactions">; existing?: Existing; draft?: Doc<"drafts">; panel: boolean }) {
-  const nav = useNavigate();
+  const leaveTo = useLeaveTo();
   const closeEntry = useCloseEntry();
   const openEntry = useOpenEntry();
   const undoable = useUndoableDelete();
@@ -416,7 +416,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     const refund = f.type === "expense" && f.refund;
     const amount = refund ? -Math.abs(typed) : typed;
     const subTyped = sub ? toMinor(evaluateExpression(f.subAmount, LOCALE_DECIMAL) ?? 0, sub.decimals) : undefined;
-    if (!f.accountId) throw new Error("Pick an account");
+    if (!f.accountId) throw new Error("Pick a payment method");
     if (f.type !== "transfer" && !f.categoryId) throw new Error(PICK_CATEGORY);
     if (f.type === "transfer" && !f.toAccountId) throw new Error("Pick a payment method to transfer to");
     const fee = f.type === "transfer" && f.feeOn ? toMinor(evaluateExpression(f.fee, LOCALE_DECIMAL) ?? 0, settings.decimals) : undefined;
@@ -548,7 +548,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
                   <span className="max-w-24 truncate">{f.repeat.kind === "none" ? "Repeat" : repeatLabel(f.repeat)}</span>
                 </button>
               ) : inSeries ? (
-                <button type="button" onClick={() => nav("/settings/repeats")} className="text-[10px] text-primary flex items-center gap-1"><Repeat className="size-3" />{existing?.installmentIndex ? `${existing.installmentIndex}/${existing.installmentCount}` : "In a series"}</button>
+                <button type="button" onClick={() => leaveTo("/settings/repeats")} className="text-[10px] text-primary flex items-center gap-1"><Repeat className="size-3" />{existing?.installmentIndex ? `${existing.installmentIndex}/${existing.installmentCount}` : "In a series"}</button>
               ) : null}
             </div>
             <div className="mt-1.5 flex gap-1.5">
@@ -740,15 +740,15 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       {saved ? <SplitDialog open={sheet === "split"} onOpenChange={(o) => !o && setSheet(null)} txs={[saved]} /> : null}
       <BottomSheet open={sheet === "currency"} onOpenChange={(o) => !o && setSheet(null)} title="Currency">
         <div className="grid grid-cols-2 gap-1.5 px-2">
-          <button type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", !sub && "bg-accent")} onClick={() => { setF((p) => ({ ...p, subCurrency: "", subAmount: "", rate: undefined, rateFromFeed: false })); setSheet(null); }}>{settings.mainCurrency} <span className="text-muted-foreground text-xs">main</span></button>
+          <button type="button" aria-pressed={!sub} className={cn("rounded-md border px-3 py-2 text-sm text-left", !sub && "bg-accent")} onClick={() => { setF((p) => ({ ...p, subCurrency: "", subAmount: "", rate: undefined, rateFromFeed: false })); setSheet(null); }}>{settings.mainCurrency} <span className="text-muted-foreground text-xs">main</span></button>
           {currencies.map((c) => (
-            <button key={c._id} type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", sub?.code === c.code && "bg-accent")} onClick={() => pickCurrency(c)}>
+            <button key={c._id} type="button" aria-pressed={sub?.code === c.code} className={cn("rounded-md border px-3 py-2 text-sm text-left", sub?.code === c.code && "bg-accent")} onClick={() => pickCurrency(c)}>
               {c.code} <span className="text-muted-foreground text-xs">{formatRate(mainSide, c, c.rate)}</span>
             </button>
           ))}
         </div>
         {ratesAge ? <p className="text-xs text-muted-foreground mt-3 px-2">{ratesAge}</p> : null}
-        <button type="button" className="text-xs text-muted-foreground underline mt-3 px-2" onClick={() => { setSheet(null); nav("/settings/sub-currencies"); }}>Manage sub-currencies and rates</button>
+        <button type="button" className="text-xs text-muted-foreground underline mt-3 px-2" onClick={() => { setSheet(null); leaveTo("/settings/sub-currencies"); }}>Manage sub-currencies and rates</button>
       </BottomSheet>
 
       <DeleteSeriesEntryDialog open={confirm === "delete"} onOpenChange={(o) => !o && setConfirm(null)} onPick={(scope) => void undoable.entry(id!, scope).then(() => done(closeEntry))} />

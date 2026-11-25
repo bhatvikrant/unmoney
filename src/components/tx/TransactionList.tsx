@@ -98,8 +98,8 @@ export function DayHeader({ date, income, expense, totals = true, style, classNa
       <span className="flex-1" />
       {totals ? (
         <>
-          <Money amount={income} kind="income" className="text-xs opacity-60" />
-          <Money amount={expense} kind="expense" className="text-xs w-24 text-right opacity-60" />
+          <Money amount={income} kind="income" label="Income" className="text-xs" />
+          <Money amount={expense} kind="expense" label="Expenses" className="text-xs w-24 text-right" />
         </>
       ) : null}
     </div>

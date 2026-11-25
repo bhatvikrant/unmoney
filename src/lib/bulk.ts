@@ -20,9 +20,10 @@ const CHUNK = 500;
  * device has not seen yet (made on another device, or by the hourly repeats job). Beyond it the
  * entries go in chunks by id; for a wipe or restore the server then sweeps away any older entries
  * the chunks did not name (sync.sweepEntries). A currency change past it can miss an entry that
- * arrives meanwhile.
+ * arrives meanwhile. Each delete writes the entry and a tombstone for the other devices, so this stays
+ * well under half of Convex's 16,000 writes a transaction (8,000 failed, and the wipe was "undone").
  */
-const ONE_OP = 8_000;
+const ONE_OP = 5_000;
 
 function chunks<T>(items: T[]): T[][] {
   const out: T[][] = [];
@@ -116,15 +117,20 @@ export function useBulkOps() {
         const { id } = await dispatchTracked("backup.restore", { data });
         return track([id], { loading: "Restoring…", success: "Restored" });
       }
-      // Everything but the entries goes first, and alone: only once the server has taken it are the
-      // old entries removed, so a refused restore leaves the ledger as it was. (The server also
-      // sweeps the old entries itself after this op, hence ifPresent.)
+      // Everything but the entries goes first, and alone. The backup's entries are queued right behind it,
+      // not once the server has answered: a reload or a closed tab in between (easy when offline) left the
+      // restore applied, the old entries swept by the server and the new ones never sent, i.e. an empty
+      // ledger. They name the payment methods the restore made, so the queue drops them if it is refused.
       const restored = await dispatchTracked("backup.restore", { data: { ...data, transactions: [] }, entries: false });
+      const ids: string[] = [];
+      for (const rows of chunks(restoreRowsFrom(data, restored.result))) ids.push((await dispatchTracked("transactions.restoreRows", { rows, bookmarks: restored.result.bookmarks })).id);
       return track((async () => {
         const { rejected } = await whenSynced([restored.id]);
         if (rejected.length) throw new Error(`Nothing was restored: ${rejected[0].error}`);
-        const ids = await removeEntries(true);
-        for (const rows of chunks(restoreRowsFrom(data, restored.result))) ids.push((await dispatchTracked("transactions.restoreRows", { rows, bookmarks: restored.result.bookmarks })).id);
+        // Only now do the old entries go from this device, so a refused restore leaves the ledger as it
+        // was. The server sweeps them itself after the restore (hence ifPresent); if the app is closed
+        // before this runs, that sweep reaches this device as ordinary changes.
+        ids.push(...await removeEntries(true));
         await confirmed(ids);
       })(), { loading: "Restoring… keep UnMoney open until it is saved", success: "Restored" });
     },

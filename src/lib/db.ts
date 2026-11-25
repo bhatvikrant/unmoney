@@ -26,11 +26,14 @@ let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 function db(): Promise<IDBPDatabase<Schema>> {
   if (!dbPromise) {
     const p = openDB<Schema>("unmoney", 1, {
+      // Only what is missing: when the version is ever raised this runs again on a database that has
+      // these stores, and creating one twice throws, which would leave the app without its local copy.
       upgrade(d) {
-        d.createObjectStore("tables");
-        d.createObjectStore("meta");
-        d.createObjectStore("ops", { keyPath: "seq", autoIncrement: true });
-        d.createObjectStore("blobs");
+        const has = (name: string) => d.objectStoreNames.contains(name as never);
+        if (!has("tables")) d.createObjectStore("tables");
+        if (!has("meta")) d.createObjectStore("meta");
+        if (!has("ops")) d.createObjectStore("ops", { keyPath: "seq", autoIncrement: true });
+        if (!has("blobs")) d.createObjectStore("blobs");
       },
       // a newer version of the app in another tab needs this connection gone
       blocking() { void p.then((d) => d.close()); if (dbPromise === p) dbPromise = null; },

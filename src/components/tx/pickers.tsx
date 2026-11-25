@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLeaveTo } from "@/lib/nav";
 import { Pencil, Eye, EyeOff, Search, X, ArrowDownAZ, ArrowDownZA } from "lucide-react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useApp } from "@/lib/app";
@@ -58,7 +58,7 @@ export function CategoryPicker({ open, onOpenChange, type, onPick, budgets }: {
   const { categories, settings } = useApp();
   const short = useShortMoney();
   const overText = useOverText();
-  const nav = useNavigate();
+  const leaveTo = useLeaveTo();
   const [main, setMain] = useState<Id<"categories"> | null>(null);
   const [query, setQuery] = useState("");
   const [desc, setDesc] = useState(readSortDesc);
@@ -102,7 +102,7 @@ export function CategoryPicker({ open, onOpenChange, type, onPick, budgets }: {
       <span className="flex items-center justify-center gap-2">
         {main ? <button type="button" className="text-muted-foreground" onClick={() => { setMain(null); setQuery(""); }}>‹ Back</button> : null}
         {main ? nameOf(main) : "Category"}
-        <Button variant="ghost" size="icon" className="size-6" aria-label="Edit categories" onClick={() => { close(); nav("/settings/categories"); }}><Pencil className="size-3" /></Button>
+        <Button variant="ghost" size="icon" className="size-6" aria-label="Edit categories" onClick={() => { close(); leaveTo("/settings/categories"); }}><Pencil className="size-3" /></Button>
       </span>
     }>
       <div className="flex items-center gap-1.5 px-0.5 pb-2">

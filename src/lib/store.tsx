@@ -60,6 +60,11 @@ type Store = {
 };
 
 const Ctx = createContext<Store | null>(null);
+// The data and the way to change it, apart from the rest. One save changes the store six times (queued,
+// sending, landed, change number, ids, sent) and only two of those change the data: screens that read
+// these two contexts render for those two, not for all six.
+const ViewCtx = createContext<Snapshot | null>(null);
+const DispatchCtx = createContext<Store["dispatch"] | null>(null);
 
 const BATCH = 25;
 /** Entries per page when a device loads everything; each page is one bounded server read. */
@@ -603,7 +608,9 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Store>(() => ({
     ready,
-    hasLocal: !!effectiveBase,
+    // only the signed-in user's own copy: after a session ran out and someone else signed in, the old
+    // one must not be drawn while theirs loads
+    hasLocal: !!effectiveBase && (!me || meta.userId === me.userId),
     userId: me?.userId ?? meta.userId,
     user: me?.user ?? meta.user,
     view,
@@ -618,7 +625,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     clearLocal,
   }), [ready, effectiveBase, me, meta, view, conn.isWebSocketConnected, offline, live, ops.length, syncing, lastError, dispatch, dispatchTracked, whenSynced, enqueueUpload, blobUrls, rememberPhotoUrls, clearLocal]);
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={value}><ViewCtx.Provider value={view}><DispatchCtx.Provider value={dispatch}>{children}</DispatchCtx.Provider></ViewCtx.Provider></Ctx.Provider>;
 }
 
 export function useStore(): Store {
@@ -629,11 +636,20 @@ export function useStore(): Store {
 
 /** The local replica with every queued change applied. */
 export function useView(): Snapshot {
-  return useStore().view;
+  const v = useContext(ViewCtx);
+  if (!v) throw new Error("useView outside OfflineProvider");
+  return v;
+}
+
+/** `dispatch` alone: the same function for the life of the app, so reading it never causes a render. */
+export function useDispatch(): Store["dispatch"] {
+  const d = useContext(DispatchCtx);
+  if (!d) throw new Error("useDispatch outside OfflineProvider");
+  return d;
 }
 
 /** A write, applied locally right away and synced later. Resolves (or throws) immediately. */
 export function useOp<K extends OpKind>(kind: K): (args: OpArgs<K>) => Promise<OpResult<K>> {
-  const { dispatch } = useStore();
+  const dispatch = useDispatch();
   return useCallback((args: OpArgs<K>) => dispatch(kind, args), [dispatch, kind]);
 }

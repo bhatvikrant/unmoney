@@ -5,7 +5,9 @@ import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Switch } from "@/components/ui/switch";
+import { useState } from "react";
 import { play, setSoundsEnabled, useSoundsEnabled } from "@/lib/sound";
+import { analyticsConfigured, analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const ordinal = (n: number) => `${n}${n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th"}`;
@@ -18,6 +20,7 @@ export default function PreferencesSettings() {
   const { settings: s } = useApp();
   const update = useOp("settings.update");
   const sounds = useSoundsEnabled();
+  const [reports, setReports] = useState(analyticsEnabled);
   return (
     <>
       <PageHeader back="/settings" title="Preferences" />
@@ -37,6 +40,11 @@ export default function PreferencesSettings() {
           <Row label="Time input" hint="Record the time of each entry" info="Adds a time field next to the date when you enter a transaction. Turn it off if you only care about the day." right={(id) => <Switch aria-labelledby={id} checked={s.timeInputEnabled} onCheckedChange={(v) => update({ patch: { timeInputEnabled: v } })} />} />
           <Row label="Sounds" hint="Kept on this device" info="Quiet sounds when you make a transfer, pay a card, delete an entry, open a menu or drag across a chart. Nothing plays on its own. On iPhone the ringer switch silences them too." right={(id) => <Switch aria-labelledby={id} checked={sounds} onCheckedChange={(v) => { setSoundsEnabled(v); if (v) play("ding"); }} />} />
         </Section>
+        {analyticsConfigured ? (
+          <Section title="Privacy">
+            <Row label="Usage reports" hint="Kept on this device" info="Which screens and buttons are used, masked recordings of the screens, and crash reports. They help find bugs. Your amounts, notes, names and photos are never part of them. Turn this off and nothing is sent from this device." right={(id) => <Switch aria-labelledby={id} checked={reports} onCheckedChange={(v) => { setAnalyticsEnabled(v); setReports(v); }} />} />
+          </Section>
+        ) : null}
       </Page>
     </>
   );

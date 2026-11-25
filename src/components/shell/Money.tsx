@@ -1,8 +1,10 @@
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app";
 
-export function Money({ amount, kind, className, sign, muted }: {
+export function Money({ amount, kind, className, sign, muted, label }: {
   amount: number; kind?: "income" | "expense" | "transfer" | "auto" | "plain"; className?: string; sign?: boolean; muted?: boolean;
+  /** Said before the amount to screen readers, where only the colour tells income from expense. */
+  label?: string;
 }) {
   const { fmt } = useApp();
   const k = kind === "auto" ? (amount > 0 ? "income" : amount < 0 ? "expense" : "plain") : kind ?? "plain";
@@ -17,7 +19,8 @@ export function Money({ amount, kind, className, sign, muted }: {
         className,
       )}
     >
-      {fmt(kind === "auto" ? amount : amount, { sign })}
+      {label ? <span className="sr-only">{label} </span> : null}
+      {fmt(amount, { sign })}
     </span>
   );
 }
@@ -34,6 +37,6 @@ export function SummaryBar({ income, expense, total, totalLabel = "Total" }: { i
 
 /** An entry's amount in its type's colour. An expense below zero is a refund: money coming back, shown "+₹899" in the income colour. */
 export function EntryMoney({ type, amount, className }: { type: "income" | "expense" | "transfer"; amount: number; className?: string }) {
-  if (type === "expense" && amount < 0) return <Money amount={-amount} kind="income" sign className={className} />;
-  return <Money amount={amount} kind={type} className={className} />;
+  if (type === "expense" && amount < 0) return <Money amount={-amount} kind="income" sign label="Refund" className={className} />;
+  return <Money amount={amount} kind={type} label={type === "income" ? "Income" : type === "expense" ? "Expense" : "Transfer"} className={className} />;
 }

@@ -1186,7 +1186,9 @@ export function scaleAmount(n: number, factor: number): number {
 function rescale(w: Work, ids: Id<"transactions">[], factor: number) {
   const scale = (n: number | undefined) => (n === undefined ? undefined : scaleAmount(n, factor));
   for (const id of ids) {
-    const t = w.must("transactions", id);
+    // gone meanwhile (deleted on another device): the rest of the chunk still changes scale, or 500 entries end up off by a power of ten
+    const t = w.get("transactions", id);
+    if (!t) continue;
     w.patch("transactions", id, { amount: scale(t.amount)!, feeAmount: scale(t.feeAmount), installmentTotal: scale(t.installmentTotal), merged: scaleMerge(t.merged as MergeRecord | undefined, scale) });
   }
 }

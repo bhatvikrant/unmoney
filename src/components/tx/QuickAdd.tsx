@@ -4,7 +4,7 @@ import { Repeat, Star } from "lucide-react";
 import { toast } from "sonner";
 import type { TxFields } from "../../../shared/ops";
 import { fromTemplate, quickItems } from "../../../shared/quickAdd";
-import { useStore, useView } from "@/lib/store";
+import { useDispatch, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { useOpenEntry } from "@/lib/nav";
 import { useToday } from "@/lib/today";
@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 
 /** Save an entry without the form, with Undo and Open in the toast. */
 export function useQuickSave() {
-  const { dispatch } = useStore();
+  const dispatch = useDispatch();
   const openEntry = useOpenEntry();
   const { fmt, accountName, categoryLabel } = useApp();
   return async (fields: TxFields) => {

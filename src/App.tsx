@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentType } from "react";
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentType } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigationType } from "react-router";
 import { useConvexAuth } from "@convex-dev/auth/react";
 import { AppDataProvider } from "@/lib/app";
@@ -213,13 +213,24 @@ function Gate() {
   useEffect(() => { if (userId) identifyUser(userId); }, [userId]);
   // the other tabs' code, once the ledger has had a moment to settle, so the first tap on them is instant
   useEffect(() => {
-    const t = setTimeout(() => { void loadStats(); void loadAccounts(); void loadSettings(); }, 1500);
+    // Stats brings the charts library with it: evaluated in a quiet moment, not on top of the first taps
+    const load = () => { void loadStats(); void loadAccounts(); void loadSettings(); };
+    const t = setTimeout(() => ("requestIdleCallback" in window ? requestIdleCallback(load, { timeout: 5000 }) : load()), 1500);
     return () => clearTimeout(t);
   }, []);
   if (!settings?.onboarded) return <Onboarding />;
   const s = settings;
   // Replaces the app rather than covering it: an open dialog would otherwise sit on top of the lock.
   if (lock.locked) return <Lock hash={s.passcodeHash!} salt={s.passcodeSalt!} resetRequested={lock.resetRequested} onUnlock={lock.unlock} />;
+  return <SignedIn settings={s} user={user} />;
+}
+
+/**
+ * Everything behind sign-in, onboarding and the lock. Memoised: Gate renders again for every change in
+ * the store (sync status, the queue), and without this each one re-rendered every screen under it. The
+ * screens still render when what they read changes (useView, useApp, the router).
+ */
+const SignedIn = memo(function SignedIn({ settings: s, user }: { settings: NonNullable<ReturnType<typeof settingsOf>>; user: ReturnType<typeof useStore>["user"] }) {
   return (
     <AppDataProvider settings={s} user={user}>
       <Routes>
@@ -288,7 +299,7 @@ function Gate() {
       </Routes>
     </AppDataProvider>
   );
-}
+});
 
 export default function App() {
   // Above every early return, so the privacy page, sign-in and onboarding get it too.
