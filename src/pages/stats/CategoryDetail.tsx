@@ -61,7 +61,7 @@ export default function CategoryDetail() {
         <div className="flex items-baseline justify-between px-4 pt-3"><span className="text-sm text-muted-foreground">{p.label}</span><Money amount={item?.amount ?? 0} kind={type} className="text-lg font-semibold" /></div>
         {budget?.now && budget.status ? <div className="mt-2 bg-card border-y"><BudgetBar item={budget.now} label="Budget" elapsed={budget.status.elapsed} pace={pace} onClick={() => nav(`/budget?${new URLSearchParams(sp).toString()}`)} /></div> : null}
         <div className="px-2 py-2">{trend ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} color={type === "income" ? "var(--income)" : "var(--expense)"} onPick={pick}
-          limit={budget ? budget.limits[budget.limits.length - 1] ?? budget.limits.find((l) => l !== undefined) : undefined} limits={budget?.limits as number[] | undefined} /> : <div className="h-48" />}</div>
+          limit={budget ? budget.limits[budget.limits.length - 1] ?? budget.limits.find((l) => l !== undefined) : undefined} limits={budget?.limits as number[] | undefined} /> : <div className="h-[13.5rem]" />}</div>
         {!parentId && main && main.children.length > 1 ? (
           <div className="bg-card border-y mb-3">
             {main.children.map((c) => {

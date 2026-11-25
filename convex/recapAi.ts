@@ -18,10 +18,16 @@ import { recordSpend } from "./lib/aiSpend";
 import { reportServerError } from "./lib/posthog";
 import { addDays } from "../shared/dates";
 import { monthRange, yearRange } from "../shared/period";
-import { RECAP_MONTHLY_CAP, buildRecapFacts, recapRequest, validateRecap, type RecapInsights } from "../shared/recapAi";
+import { RECAP_MONTHLY_CAP, buildRecapFacts, recapRequest, validateRecap, type RecapAiCard, type RecapInsights } from "../shared/recapAi";
 
 const KEY = /^\d{4}(-(0[1-9]|1[0-2]))?$/;
 export type StoredInsights = RecapInsights & { hash: string; at: number };
+type Row = { insights: string[]; budgets: RecapInsights["budgets"]; hash: string; at: number; title?: string; cards?: unknown };
+/** A stored row as the app reads it. The schema keeps a card's type as a string; it is only ever written from a checked answer. */
+const answerOf = (row: Row): StoredInsights => ({
+  insights: row.insights, budgets: row.budgets, hash: row.hash, at: row.at,
+  ...(row.title ? { title: row.title } : {}), ...(row.cards ? { cards: row.cards as RecapAiCard[] } : {}),
+});
 
 /** The stored answer for a recap, or null when it was never asked for. */
 export const get = query({
@@ -30,7 +36,7 @@ export const get = query({
     const userId = await getAuthUserId(ctx);
     if (!userId) return null;
     const row = await ctx.db.query("recapInsights").withIndex("by_user_key", (q) => q.eq("userId", userId).eq("key", key)).unique();
-    return row ? { insights: row.insights, budgets: row.budgets, hash: row.hash, at: row.at } : null;
+    return row ? answerOf(row) : null;
   },
 });
 
@@ -51,7 +57,7 @@ export const prepare = internalQuery({
 
 const fields = schema.tables.recapInsights.validator.fields;
 export const store = internalMutation({
-  args: { userId: v.id("users"), key: v.string(), hash: v.string(), at: v.number(), insights: fields.insights, budgets: fields.budgets },
+  args: { userId: v.id("users"), key: v.string(), hash: v.string(), at: v.number(), insights: fields.insights, budgets: fields.budgets, title: fields.title, cards: fields.cards },
   handler: async (ctx, args) => {
     // deleted while the call was out: nothing of theirs is written back
     if (!(await ctx.db.get(args.userId))) return;
@@ -76,7 +82,7 @@ export const ask = action({
     if (!allowed) throw new ConvexError("AI insights aren't turned on for your account");
     if (!facts) throw new ConvexError("There isn't a recap for this period yet");
     // nothing changed since the last run: show its answer again, free
-    if (stored && stored.hash === facts.hash) return { insights: stored.insights, budgets: stored.budgets, hash: stored.hash, at: stored.at };
+    if (stored && stored.hash === facts.hash) return answerOf(stored);
     if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("AI insights aren't set up yet");
     if (!(await ctx.runMutation(internal.usage.claimAi, { userId, feature: "recap", cap: RECAP_MONTHLY_CAP }))) {
       throw new ConvexError(`AI has written insights ${RECAP_MONTHLY_CAP} times this month, the most it does. It starts again next month.`);
@@ -90,7 +96,7 @@ export const ask = action({
       const text = res.content.find((b) => b.type === "text");
       const result = validateRecap(JSON.parse(text && text.type === "text" ? text.text : "{}"), facts);
       // an answer with nothing usable in it is not kept: the person can ask again
-      if (!result.insights.length) throw new Error("no insight passed the checks");
+      if (!result.insights.length && !result.cards?.length) throw new Error("no insight passed the checks");
       const out = { ...result, hash: facts.hash, at: Date.now() };
       await ctx.runMutation(internal.recapAi.store, { userId, key, ...out });
       return out;
