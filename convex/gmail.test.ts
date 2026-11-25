@@ -7,6 +7,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { decryptText, encryptText, sign, verify } from "./lib/gmailCrypto";
 import { parseMail } from "../shared/gmail/rules";
 import { noteOf } from "../shared/gmail/resolve";
+import { merchantKey } from "../shared/gmail/learn";
 import { patchSynced } from "./lib/changes";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -490,7 +491,35 @@ test("a check can turn a draft into the transfer its other side shows, and keeps
   const after = (await t.run((ctx) => ctx.db.get(d._id)))!;
   expect([after.proposal.type, after.proposal.accountId, after.proposal.toAccountId, after.proposal.categoryId, after.extraMessageIds]).toEqual(["transfer", cash._id, bank._id, undefined, ["m2"]]);
   expect(after.proposal.description).toContain("paired with the other side's mail");
-  expect((await t.run((ctx) => ctx.db.get(cid)))!.merchantMap).toEqual({ paytmqr2812: { note: "Chai stall", categoryId: food } });
+  // merchants are kept beside the connection, which every check rewrites, not on it
+  const memory = () => t.run((ctx) => ctx.db.query("gmailMemory").withIndex("by_user", (q) => q.eq("userId", userId)).unique());
+  expect((await memory())!.merchantMap).toEqual({ paytmqr2812: { note: "Chai stall", categoryId: food } });
+  expect((await t.run((ctx) => ctx.db.get(cid)))!.merchantMap).toBeUndefined();
+  // what reading mail is given comes from there, and disconnecting forgets it with the connection
+  expect((await t.query(internal.gmail.prepareRead, { userId, since: 0 })).merchantMap).toEqual({ paytmqr2812: { note: "Chai stall", categoryId: food } });
+  await t.mutation(internal.gmail.removeConnection, { userId });
+  expect(await memory()).toBeNull();
+});
+
+test("a connection from before merchants had a row of their own hands them over at its first check, once, and later lessons add to them", async () => {
+  const { t, userId, connect } = await setup();
+  const at = Date.parse("2026-10-20T10:00:00Z");
+  const cid = await connect({ merchantMap: { swiggy: { note: "Swiggy" }, zomato: { note: "Zomato" } } });
+  const memory = () => t.run((ctx) => ctx.db.query("gmailMemory").withIndex("by_user", (q) => q.eq("userId", userId)).collect());
+  // not claimed yet (the dry run reads without claiming): reading still finds them on the connection
+  expect((await t.query(internal.gmail.prepareRead, { userId, since: 0 })).merchantMap).toBeUndefined();
+  expect(await t.mutation(internal.gmail.claimSync, { userId, startedAt: at })).not.toBeNull();
+  expect((await memory()).map((m) => m.merchantMap)).toEqual([{ swiggy: { note: "Swiggy" }, zomato: { note: "Zomato" } }]);
+  expect((await t.run((ctx) => ctx.db.get(cid)))!.merchantMap).toBeUndefined();
+  // the check's write adds what it learned to the row and leaves the connection without them
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: at, inserts: [], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 0, learnedMerchants: { swiggy: { note: "Swiggy Instamart" } } });
+  expect((await memory()).map((m) => m.merchantMap)).toEqual([{ zomato: { note: "Zomato" }, swiggy: { note: "Swiggy Instamart" } }]);
+  // a check with nothing learned does not touch the row
+  const before = (await memory())[0];
+  await t.mutation(internal.gmail.claimSync, { userId, startedAt: at + 60 * 60 * 1000 });
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: at + 60 * 60 * 1000, inserts: [], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 0 });
+  expect((await memory())[0]).toEqual(before);
+  expect((await t.run((ctx) => ctx.db.get(cid)))!.merchantMap).toBeUndefined();
 });
 
 test("muting a sender takes it off the allowlist and shows in status; unmuting brings it back to the search only", async () => {
@@ -590,6 +619,27 @@ test("a new alert still takes the category its merchant had and finds the entry 
   } finally { g.restore(); }
   const [draft] = await t.run((ctx) => ctx.db.query("drafts").collect());
   expect([draft.proposal.note, draft.proposal.categoryId, draft.matchedTransactionId]).toEqual([note, books, typed]);
+});
+
+test("a check names a merchant as the user taught it, from the row the connection's old memory moved to", async () => {
+  const { t, as, userId, connect } = await setup();
+  process.env.AUTH_GOOGLE_ID = "id";
+  process.env.AUTH_GOOGLE_SECRET = "secret";
+  const { enc, iv } = await encryptText("1//refresh-token");
+  const now = Date.now();
+  const mail = { from: "KVB <alerts@kvb.bank.in>", subject: "Alert", text: "INR 120.00 debited from A/c XX3344 on 21-10-2026. Info: UPI/P2M/529712345602/BOOK HOUSE." };
+  const books = ((await as.query(api.sync.table, { table: "categories" })) as Doc<"categories">[]).find((c) => c.type === "expense" && c.name === "Education")!._id;
+  const taught = { [merchantKey(noteOf(parseMail({ id: "m", threadId: "t", receivedAt: now, ...mail })!))]: { note: "College bookshop", categoryId: books } };
+  // a connection from before gmailMemory, still carrying what it learned
+  const cid = await connect({ refreshTokenEnc: enc, iv, syncedUpTo: now - 60 * 60 * 1000, merchantMap: taught });
+  const g = fakeGoogle(() => ({ messages: [{ id: "m1" }] }), now, mail);
+  try {
+    expect(await t.action(internal.gmail.syncUser, { userId })).toEqual({ ran: true, found: 1 });
+  } finally { g.restore(); }
+  const [draft] = await t.run((ctx) => ctx.db.query("drafts").collect());
+  expect([draft.proposal.note, draft.proposal.categoryId]).toEqual(["College bookshop", books]);
+  expect((await t.run((ctx) => ctx.db.get(cid)))!.merchantMap).toBeUndefined();
+  expect((await t.run((ctx) => ctx.db.query("gmailMemory").collect())).map((m) => m.merchantMap)).toEqual([taught]);
 });
 
 test("a draft saved offline, with an old time on it, is still learned from", async () => {

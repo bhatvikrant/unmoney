@@ -453,6 +453,9 @@ export const removeConnection = internalMutation({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
     for (const c of await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).collect()) await ctx.db.delete(c._id);
+    // what the connection had learned about merchants goes with it, as when the connection held it
+    const memory = await memoryOf(ctx, userId);
+    if (memory) await ctx.db.delete(memory._id);
     for (const d of await ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect()) await deleteSynced(ctx, userId, "drafts", d._id);
     // a new connection fills this again from the drafts left (seenFilled), so the waiting ones just removed are read again
     await ctx.scheduler.runAfter(0, internal.gmail.forgetAllSeen, { userId, before: Date.now() });
@@ -542,10 +545,22 @@ export const claimSync = internalMutation({
       for (const d of await ctx.db.query("drafts").withIndex("by_user", (q) => q.eq("userId", userId)).collect()) rows.push(...seenOfDraft(d));
       await markSeen(ctx, userId, rows);
     }
-    await ctx.db.patch(c._id, { syncingSince: startedAt, ...(c.seenFilled ? {} : { seenFilled: true, processed: undefined }) });
+    // once per connection from before gmailMemory: its merchants move to their own row, so checks stop reading and rewriting them
+    if (c.merchantMap) await rememberMerchants(ctx, c, {});
+    await ctx.db.patch(c._id, { syncingSince: startedAt, ...(c.seenFilled ? {} : { seenFilled: true, processed: undefined }), ...(c.merchantMap ? { merchantMap: undefined } : {}) });
     return prepOf(ctx, c);
   },
 });
+
+/** What the user taught about merchants: a row of its own (schema.ts gmailMemory), read only when there is mail to read. */
+const memoryOf = (ctx: QueryCtx | MutationCtx, userId: Id<"users">) => ctx.db.query("gmailMemory").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
+
+/** Add to what the user taught about merchants. A connection from before gmailMemory still carries its own: the row starts from that. */
+async function rememberMerchants(ctx: MutationCtx, c: Connection, learned: Record<string, MerchantMemory>) {
+  const row = await memoryOf(ctx, c.userId);
+  if (row) await ctx.db.patch(row._id, { merchantMap: mergeMerchants(row.merchantMap, learned) });
+  else await ctx.db.insert("gmailMemory", { userId: c.userId, merchantMap: mergeMerchants(c.merchantMap ?? {}, learned) });
+}
 
 type SeenRow = { messageId: string; receivedAt: number; processed?: boolean };
 
@@ -629,7 +644,7 @@ async function withEntries(ctx: QueryCtx | MutationCtx, drafts: Doc<"drafts">[])
 export const prepareRead = internalQuery({
   args: { userId: v.id("users"), since: v.number() },
   handler: async (ctx, { userId, since }) => {
-    const [settings, accounts, categories, currencies, saved] = await Promise.all([
+    const [settings, accounts, categories, currencies, saved, memory] = await Promise.all([
       ctx.db.query("settings").withIndex("by_user", (q) => q.eq("userId", userId)).unique(),
       ctx.db.query("accounts").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
       Promise.all([
@@ -638,10 +653,11 @@ export const prepareRead = internalQuery({
       ]).then(([e, i]) => [...e, ...i]),
       ctx.db.query("currencies").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
       ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "accepted").gte("_creationTime", since)).collect(),
+      memoryOf(ctx, userId),
     ]);
     return {
       settings: { mainCurrency: settings?.mainCurrency ?? "INR", decimals: settings?.decimals ?? 2 },
-      accounts, categories, currencies, saved: await withEntries(ctx, saved),
+      accounts, categories, currencies, saved: await withEntries(ctx, saved), merchantMap: memory?.merchantMap,
     };
   },
 });
@@ -872,8 +888,10 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
   const saved = new Set(read.currencies.filter((x) => x.rate > 0).map((x) => x.code.toUpperCase()));
   if (reads.some((r) => r.parsed.currency.toUpperCase() !== main && !saved.has(r.parsed.currency.toUpperCase()))) rctx.liveRates = (await latestRates(main)) ?? undefined;
   // what the user taught about a merchant wins over the rules' and the model's guesses; the merchant as read is kept to learn under
+  // a connection from before gmailMemory that no check has claimed yet (the dry run reads without claiming) still carries them
+  const merchants = read.merchantMap ?? c.merchantMap ?? {};
   const remember = (mail: Mail, resolved: ReturnType<typeof resolveParsed>, how: "rule" | "ai", summary?: string) =>
-    candidateOf(mail, { ...resolved, proposal: applyMerchantMemory(resolved.proposal, resolved.proposal.note, c.merchantMap, read.categories) }, how, resolved.proposal.note, summary);
+    candidateOf(mail, { ...resolved, proposal: applyMerchantMemory(resolved.proposal, resolved.proposal.note, merchants, read.categories) }, how, resolved.proposal.note, summary);
   const candidates: DraftCandidate[] = [];
   for (const { mail, parsed, ai } of reads) {
     const resolved = resolveParsed(parsed, mail, rctx);
@@ -909,7 +927,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
     updates,
     matches: [...laterMatches(matchable, transactions, read.accounts)].map(([id, transactionId]) => ({ id, transactionId })),
     learned: learnAccounts(prep, read),
-    learnedMerchants: learnMerchants(prep.learnFrom, c.merchantMap ?? {}, read.categories),
+    learnedMerchants: learnMerchants(prep.learnFrom, merchants, read.categories),
     aiCalls, aiSkipped, aiDropped, notes, processed,
     unread: unread.length, fetched: fresh.length, retryAt: retry.map((m) => m.receivedAt), aiCapped,
     // a check starts the look-back before syncedUpTo: hold it back so the mail skipped this time is in
@@ -1208,18 +1226,18 @@ export const writeSync = internalMutation({
     const entry = { at: startedAt, scanned, found, ...(note ? { note } : {}) };
     await ctx.db.patch(c._id, {
       lastSyncAt: startedAt, lastError: undefined, syncedUpTo, syncingSince: undefined, ...(learnedRev !== undefined ? { learnedRev } : {}),
-      ...learning(c, month, aiCalls, learned, learnedMerchants),
+      ...learning(c, month, aiCalls, learned),
       log: [entry, ...c.log].slice(0, LOG_KEEP),
     });
+    if (Object.keys(learnedMerchants).length) await rememberMerchants(ctx, c, learnedMerchants);
   },
 });
 
-/** What a check or a backfill slice learned, and the AI reads it used, as a patch to the connection. */
-function learning(c: Connection, month: string, aiCalls: number, learned: Record<string, Id<"accounts">>, learnedMerchants: NonNullable<Connection["merchantMap"]>) {
+/** The methods a check or a backfill slice learned, and the AI reads it used, as a patch to the connection. Merchants go to gmailMemory (rememberMerchants). */
+function learning(c: Connection, month: string, aiCalls: number, learned: Record<string, Id<"accounts">>) {
   return {
     aiMonth: month, aiCalls: (c.aiMonth === month ? c.aiCalls : 0) + aiCalls,
     accountMap: { ...c.accountMap, ...learned },
-    ...(Object.keys(learnedMerchants).length ? { merchantMap: mergeMerchants(c.merchantMap ?? {}, learnedMerchants) } : {}),
   };
 }
 
@@ -1249,10 +1267,11 @@ export const writeBackfill = internalMutation({
     const finished = next?.state === "done" ? { at: startedAt, scanned: next.read, found: next.found, note: `Read back to 1 Jan ${next.year}` } : undefined;
     await ctx.db.patch(c._id, {
       syncingSince: undefined, learnedRev,
-      ...learning(c, monthOf(startedAt), aiCalls, learned, learnedMerchants),
+      ...learning(c, monthOf(startedAt), aiCalls, learned),
       ...(next ? { backfill: next } : {}),
       ...(finished ? { log: [finished, ...c.log].slice(0, LOG_KEEP) } : {}),
     });
+    if (Object.keys(learnedMerchants).length) await rememberMerchants(ctx, c, learnedMerchants);
   },
 });
 
