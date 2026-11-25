@@ -14,6 +14,7 @@ export const AI_FEATURES = {
   quick: "Typed entries",
   recap: "Recap insights",
   receipt: "Photo reading",
+  search: "Search questions",
   tidy: "Category tidy-up",
 } as const;
 export type AiFeature = keyof typeof AI_FEATURES;
