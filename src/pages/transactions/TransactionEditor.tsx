@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
 import { bookmarksList, draftGet, draftMatches, draftsOpen, noteSuggestions, recentCategories, txGet, txTags, type TxDetail } from "../../../shared/views";
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
+import { ConvexError } from "convex/values";
 import { api } from "../../../convex/_generated/api";
 import { senderAddress } from "../../../shared/gmail/mail";
 import { gmailUrl } from "@/lib/gmail";
@@ -14,6 +15,8 @@ import { staleLabel, useFxState } from "@/lib/fxRates";
 import { amountInput, localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { addDays, todayISO } from "../../../shared/dates";
 import { evaluateExpression, formatRate, toMinor } from "../../../shared/money";
+import { RECEIPT_MAX_BYTES, RECEIPT_MAX_EDGE, isReceiptMediaType } from "../../../shared/receiptAi";
+import { compressImage } from "@/lib/image";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useLeaveTo, useOpenEntry } from "@/lib/nav";
 import { useColumn } from "@/components/shell/SplitLayout";
@@ -357,6 +360,49 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     toast.success("Amount filled in from the photo", { description: "Check it before you save" });
   }
 
+  /**
+   * With "Read photos with AI" on, the first photo just attached goes to Claude (convex/ai.ts readReceipt),
+   * and what comes back fills only what is still empty when it arrives: the note, the description, a
+   * category nobody picked, and on a new entry a date nobody changed. A failed read fills nothing.
+   */
+  const readReceipt = useAction(api.ai.readReceipt);
+  const [readingPhoto, setReadingPhoto] = useState(false);
+  async function readPhoto(files: File[]) {
+    const type = latest.current.type;
+    if (!settings.receiptAiEnabled || type === "transfer" || !navigator.onLine) return;
+    setReadingPhoto(true);
+    try {
+      const small = await compressImage(files[0], RECEIPT_MAX_EDGE);
+      if (!isReceiptMediaType(small.type) || small.size > RECEIPT_MAX_BYTES) return;
+      const r = await readReceipt({ image: await small.arrayBuffer(), mediaType: small.type, type, today: todayISO() });
+      const p = latest.current;
+      // the type was switched while it was being read: the category would be of the wrong kind
+      if (p.type !== type) return;
+      const patch: Partial<Form> = {};
+      const filled: string[] = [];
+      if (r.note && !p.note.trim()) { patch.note = r.note; filled.push("note"); }
+      if (r.description && !p.description.trim()) { patch.description = r.description; filled.push("description"); }
+      const usable = (c?: string) => !!c && categories.some((x) => x._id === c && !x.deletedAt && !x.archivedAt);
+      if (usable(r.categoryId) && !p.categoryId && !chosen.current.category) {
+        patch.categoryId = r.categoryId;
+        patch.subcategoryId = usable(r.subcategoryId) ? r.subcategoryId : undefined;
+        filled.push("category");
+      }
+      if (r.date && !id && !draft && p.date === initial.date && r.date !== p.date) { patch.date = r.date; filled.push("date"); }
+      if (!filled.length) return;
+      // a note that was just filled in is not being typed: no list of suggestions under it
+      setNotePicked(true);
+      setF((x) => ({ ...x, ...patch }));
+      const list = filled.length > 1 ? `${filled.slice(0, -1).join(", ")} and ${filled.at(-1)}` : filled[0];
+      toast.success(`${list.charAt(0).toUpperCase()}${list.slice(1)} filled in from the photo`, { description: "Check before you save" });
+    } catch (e) {
+      // a sentence meant for the person (the month's limit, not set up); anything else fills nothing, like an unclear photo
+      if (e instanceof ConvexError) toast.error(String(e.data));
+    } finally {
+      setReadingPhoto(false);
+    }
+  }
+
   const isEdit = !!id;
   const inSeries = !!existing?.repeatId;
 
@@ -685,7 +731,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             <Textarea aria-label="Description" value={f.description} onChange={(e) => set("description", e.target.value)} placeholder="Description" className="min-h-16 resize-none" />
           </div>
           <div className="px-4 py-2"><TagInput tags={f.tags} onChange={(t) => set("tags", t)} suggestions={tagList.map((t) => t.tag)} /></div>
-          <div className="px-4 py-3"><PhotoField photoIds={f.photoIds} onChange={(ids) => set("photoIds", ids)} onAmountRead={fillReadAmount} /></div>
+          <div className="px-4 py-3"><PhotoField photoIds={f.photoIds} onChange={(ids) => set("photoIds", ids)} onAmountRead={fillReadAmount} onPhotos={(files) => void readPhoto(files)} readingPhoto={readingPhoto} /></div>
         </div>
 
         {saved?.merged ? <MergedFrom tx={saved} /> : null}
