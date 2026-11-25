@@ -94,4 +94,13 @@ Tests (vitest): header detection on an HDFC-style sheet with preamble rows, an I
 - Pairing transfers between the user's own accounts or card payments within the file (C11 does this for Gmail; a later pass could reuse it here).
 - Several payment methods in one file (an "Account" column). Money Manager's format already covers that case.
 - OFX / QIF.
-- Cleaning bank narrations into merchant names ("UPI-SWIGGY-8812…" → "Swiggy"). That would reuse Gmail's merchant cleaner later.
+- Cleaning bank narrations into merchant names ("UPI-SWIGGY-8812…" → "Swiggy") without AI. That would reuse Gmail's merchant cleaner later.
+
+## 7. Help from Claude (added 2026-11-25)
+
+Only for people AI is turned on for, only when they tap, and the import works without it (shared/statementAi.ts, `suggestImport` and `readLayout` in convex/ai.ts).
+
+- **Review › Suggest categories with AI.** Sends the bank's text (120 characters at most) of each row that is new to UnMoney, each different text once, 40 a call, with the person's categories and most-used notes. No amounts, dates or balances. Claude answers with a note in the person's words and a category. A note is kept only if it is one of theirs or shares a word with the bank's text; a category only if it is theirs and of the row's kind, and only where the row had the fallback "Other". The bank's text stays as the description. At most 400 different texts a file and 100 calls a month.
+- **Review › Rows.** Every row is listed (50 at a time) with what will happen to it: New, In UnMoney, Looks like one you have, Skipped. A statement's notes and categories can be changed there before importing.
+- **Match the columns › Match the columns with AI.** Shown when the header guess finds no date or amount column (other languages, unusual wording). Sends the header row and the 5 rows under it; Claude says which column is the date, the description and the amount (or money out and in), how money out is written, and whether the day or the month comes first. The answer is tried on the file (`mappingReads`), fills the step for the person to check, and is remembered with the layout. The file is read on the device as before.
+- Still out: PDF statements. Reading one needs the whole document sent, a page count the app cannot take without a PDF library, and a balance check that only works when the statement prints both balances.

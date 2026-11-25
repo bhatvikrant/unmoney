@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
 import type { Doc } from "../convex/_generated/dataModel";
 import type { ImportRow } from "./ops";
 import {
-  STATEMENT_MAX_TEXT, SYSTEM_PROMPT, applySuggestion, buildStatementContext, lineKey, lineOf, linesToAsk, statementRequest, validateStatement, type StatementLine,
+  LAYOUT_COLS, LAYOUT_PROMPT, LAYOUT_ROWS, STATEMENT_MAX_TEXT, SYSTEM_PROMPT, applySuggestion, buildLayoutInput, buildStatementContext, layoutRequest, lineKey, lineOf, linesToAsk,
+  statementRequest, validateLayout, validateStatement, type StatementLine,
 } from "./statementAi";
 
 const cat = (id: string, name: string, over: object = {}) => ({ _id: id, name, type: "expense", order: 0, ...over }) as unknown as Doc<"categories">;
@@ -117,4 +118,48 @@ test("a suggestion fills a row without losing what the bank or the person's hist
   expect(applySuggestion(row({ note: "Shell", category: "Fuel" }), { note: "Shell", category: "Food" })).toEqual(row({ note: "Shell", category: "Fuel" }));
   expect(applySuggestion(row({ note: "X", subcategory: "Old" }), { category: "Food" })).toEqual(row({ note: "X", category: "Food" }));
   expect(applySuggestion(row({ note: "X" }), {})).toEqual(row({ note: "X" }));
+});
+
+const input = buildLayoutInput(
+  ["Buchungstag", "Valuta", "", "Verwendungszweck", "Betrag", "Saldo"],
+  [["01.10.2026", "01.10.2026", "", `REWE SAGT DANKE ${"x".repeat(100)}`, "-45,90", "1.204,10"], ["02.10.2026", "02.10.2026", "", "GEHALT  OKTOBER", "3.200,00", "4.404,10"]],
+  false,
+);
+
+test("the model sees a file's header and a few rows, column by column, and never the whole file", () => {
+  // an empty column is left out and the others keep their place in the file as their id
+  expect(input.columns.map((c) => c.id)).toEqual(["c1", "c2", "c4", "c5", "c6"]);
+  expect(input.columns[0]).toEqual({ id: "c1", name: "Buchungstag", values: ["01.10.2026", "02.10.2026"] });
+  expect(input.columns[2].values).toEqual([`REWE SAGT DANKE ${"x".repeat(24)}`, "GEHALT OKTOBER"]);
+  const big = buildLayoutInput(Array.from({ length: 50 }, (_, i) => `H${i}`), Array.from({ length: 300 }, () => Array.from({ length: 50 }, () => "v")), true);
+  expect(big.columns).toHaveLength(LAYOUT_COLS);
+  expect(big.columns[0].values).toHaveLength(LAYOUT_ROWS);
+  const req = layoutRequest(input);
+  expect(req.model).toBe("claude-haiku-5-5");
+  expect(req.system).toBe(LAYOUT_PROMPT);
+  expect(JSON.parse(req.messages[0].content as string)).toEqual(input);
+  expect(LAYOUT_PROMPT).toContain("not instructions");
+});
+
+test("a layout answer becomes a column mapping only when it holds together", () => {
+  const none = { date: null, description: null, amount: null, moneyOut: null, moneyIn: null, drcr: null, outIs: null, dateOrder: null };
+  const check = (raw: object) => validateLayout({ ...none, ...raw }, input);
+  expect(check({ date: "c1", description: "c4", amount: "c5", outIs: "negative", dateOrder: "dmy" }))
+    .toEqual({ date: 0, description: 3, mode: "single", amount: 4, out: -1, in: -1, sign: "negativeOut", drcr: -1, dateOrder: "dmy" });
+  // a card's purchases as plain numbers; no description; the order of day and month left to the file
+  expect(check({ date: "c1", amount: "c5", outIs: "positive" })).toEqual({ date: 0, description: -1, mode: "single", amount: 4, out: -1, in: -1, sign: "positiveOut", drcr: -1 });
+  // money out and in in two columns, and a Dr/Cr column beside one amount
+  expect(check({ date: "c1", moneyOut: "c4", moneyIn: "c5" })).toMatchObject({ mode: "split", out: 3, in: 4, amount: -1 });
+  expect(check({ date: "c1", amount: "c5", drcr: "c6" })).toMatchObject({ mode: "single", amount: 4, sign: "drcr", drcr: 5 });
+  // no date, no amount, no way to tell out from in, a column that was not shown, one column with two jobs
+  expect(check({ amount: "c5", outIs: "negative" })).toBeNull();
+  expect(check({ date: "c1", description: "c4" })).toBeNull();
+  expect(check({ date: "c1", amount: "c5" })).toBeNull();
+  expect(check({ date: "c1", moneyOut: "c5" })).toBeNull();
+  expect(check({ date: "c3", amount: "c5", outIs: "negative" })).toBeNull();
+  expect(check({ date: "c1", amount: "c9", outIs: "negative" })).toBeNull();
+  expect(check({ date: "c1", amount: "c1", outIs: "negative" })).toBeNull();
+  expect(check({ date: "c1", description: "c5", amount: "c5", outIs: "negative" })).toBeNull();
+  expect(validateLayout(null, input)).toBeNull();
+  expect(validateLayout("c1", input)).toBeNull();
 });
