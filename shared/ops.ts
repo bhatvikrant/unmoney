@@ -58,6 +58,20 @@ export function tmpIdsIn(value: unknown, out: Set<string> = new Set()): Set<stri
   return out;
 }
 
+/**
+ * Drop temporary ids from every photoIds list inside a value. Uploads go out ahead of the op that names
+ * them, so a photo still temporary when the op is sent is one whose upload failed: the entry is saved without it.
+ */
+export function dropTmpPhotos<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((v) => dropTmpPhotos(v)) as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = k === "photoIds" && Array.isArray(v) ? v.filter((p) => !isTmpId(p)) : dropTmpPhotos(v);
+    return out as T;
+  }
+  return value;
+}
+
 /** Drop keys whose value is undefined, so documents stay schema-clean and comparable. */
 /** A budget period key: a year, a month or a week's first day. */
 const PERIOD_KEY = /^\d{4}(-\d{2}(-\d{2})?)?$/;

@@ -73,6 +73,21 @@ export const urls = query({
   },
 });
 
+/**
+ * Which of these files are the signed-in user's own. A backup restored into the account it came from
+ * asks this, so photos that are already here keep their ids instead of being uploaded a second time.
+ * Stricter than `urls`: a file with no recorded owner is nobody's.
+ */
+export const owned = query({
+  args: { ids: v.array(v.id("_storage")) },
+  handler: async (ctx, { ids }) => {
+    const userId = await requireUser(ctx);
+    const mine: Id<"_storage">[] = [];
+    for (const id of ids) if ((await ownerOf(ctx, id))?.userId === userId) mine.push(id);
+    return mine;
+  },
+});
+
 export const remove = mutation({
   args: { id: v.id("_storage") },
   handler: async (ctx, { id }) => {

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Id } from "../convex/_generated/dataModel";
-import { applyOp, emptySnapshot, restoreRowsFrom, type BackupData, type RestoreIds, type Snapshot } from "./ops";
+import { applyOp, dropTmpPhotos, emptySnapshot, restoreRowsFrom, rewriteIds, type BackupData, type RestoreIds, type Snapshot } from "./ops";
 import { backupExport } from "./views";
 
 const ctx = { userId: "u" as Id<"users"> };
@@ -203,4 +203,48 @@ test("a restore leaves nothing pointing at what it replaced", () => {
   expect([ids.has(d1.proposal.accountId!), ids.has(d1.proposal.categoryId!)]).toEqual([true, true]);
   expect([d2.proposal.accountId, d2.proposal.categoryId, d2.proposal.note]).toEqual([undefined, undefined, "Swiggy"]);
   expect(after.categoryCleanups).toEqual([]);
+});
+
+/** Both ways a restore is sent (src/lib/bulk.ts): in one op, and as everything-but-entries followed by chunks of rows. */
+function restoreBothWays(data: BackupData) {
+  const target = run(emptySnapshot(), "settings.completeOnboarding", { currency: "USD" }).snap;
+  const oneShot = run(target, "backup.restore", { data }).snap;
+  const restored = run(target, "backup.restore", { data: { ...data, transactions: [] }, entries: false });
+  let chunked = restored.snap;
+  const rows = restoreRowsFrom(data, restored.result as RestoreIds);
+  for (let i = 0; i < rows.length; i += 2) chunked = run(chunked, "transactions.restoreRows", { rows: rows.slice(i, i + 2), bookmarks: (restored.result as RestoreIds).bookmarks }).snap;
+  return { oneShot, chunked };
+}
+const photosByNote = (s: Snapshot) => Object.fromEntries(s.transactions.filter((t) => t.photoIds.length).map((t) => [t.note, t.photoIds]));
+
+test("a backup's photos come back under their new ids, on the one-shot and the chunked restore", () => {
+  const withPhotos = [{ note: "two", photoIds: ["old1", "old2"] }, { note: "one", photoIds: ["old3"] }, { note: "kept", photoIds: ["notInFile"] }];
+  const ledgerNow = ledger();
+  const source = { ...ledgerNow, transactions: ledgerNow.transactions.map((t, i) => ({ ...t, ...withPhotos[i] })) } as Snapshot;
+  const backup = JSON.parse(JSON.stringify(backupExport(source))) as BackupData;
+
+  // what bulk.restore does once each photo in the file is queued for upload: old id -> the upload's temporary id
+  const queued = { old1: "tmp_a_1", old2: "tmp_b_1", old3: "tmp_c_1" };
+  const data = { ...backup, transactions: rewriteIds(backup.transactions, queued) };
+  const want = { two: ["tmp_a_1", "tmp_b_1"], one: ["tmp_c_1"], kept: ["notInFile"] };
+  const { oneShot, chunked } = restoreBothWays(data);
+  expect(photosByNote(oneShot)).toEqual(want);
+  expect(photosByNote(chunked)).toEqual(want);
+
+  // once the uploads are through, the queue swaps in the real ids; a photo whose upload failed is dropped, not the entries with it
+  const uploaded = { tmp_a_1: "new1", tmp_c_1: "new3" };
+  const sent = dropTmpPhotos(rewriteIds({ data, rows: [{ note: "a row of a chunk", photoIds: ["tmp_b_1", "tmp_c_1"] }] }, uploaded));
+  expect(photosByNote({ transactions: sent.data.transactions } as never)).toEqual({ two: ["new1"], one: ["new3"], kept: ["notInFile"] });
+  expect(sent.rows[0].photoIds).toEqual(["new3"]);
+});
+
+test("a backup from before photos were in the file restores as it always did", () => {
+  const source = ledger();
+  const backup = JSON.parse(JSON.stringify(backupExport(source))) as BackupData;
+  // older still: entries with no photoIds at all
+  const data = { ...backup, transactions: backup.transactions!.map((t) => Object.fromEntries(Object.entries(t).filter(([k]) => k !== "photoIds"))) };
+  const { oneShot, chunked } = restoreBothWays(data);
+  expect(describe(oneShot)).toEqual(describe(source));
+  expect(describe(chunked)).toEqual(describe(source));
+  expect([...oneShot.transactions, ...chunked.transactions].every((t) => t.photoIds.length === 0)).toBe(true);
 });
