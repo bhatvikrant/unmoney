@@ -33,7 +33,7 @@ users            // from Convex Auth authTables, extended:
   name?, email?, image?
 settings         userId, mainCurrency (code), symbol, symbolPosition ("before"|"after"), decimals,
                  monthStartDay (1-28), weekStartDay (0-6), carryOver, startScreen ("daily"|"calendar"),
-                 theme ("system"|"light"|"dark"), accent, colorSet ("A"|"B"), tint?, pattern?, corners?, subcategoryEnabled,
+                 theme ("system"|"light"|"dark"), accent, colorSet ("A"|"B"), tint?, pattern?, corners?, trueBlack?, subcategoryEnabled,
                  autocompleteEnabled, timeInputEnabled, repeatDisplay ("onDate"|"firstOfMonth"),
                  cardExpenseDisplay ("atTime"|"lumpSum"), passcodeHash?, lockAfter ("always"|"5m"|"1h"), onboarded
                  index by_user
