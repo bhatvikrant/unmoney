@@ -23,7 +23,8 @@ import { RollingNumber } from "@/components/motion/RollingNumber";
 import { diffDays, MONTH_LONG, MONTH_SHORT, WEEKDAY_SHORT, parts, weekday, type ISODate } from "../../../shared/dates";
 import { monthKeyForDate, monthRange, parseMonthKey, shiftMonthKey as shiftMonth, type MonthKey, type Range } from "../../../shared/period";
 import { pctChange, type RecapBudgetRow, type RecapBudgetYearRow, type RecapCard, type RecapDrill, type RecapStrip } from "../../../shared/recap";
-import { fillMoney, type RecapAiCard, type RecapInsights, type StoryCard } from "../../../shared/recapAi";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { fillMoney, RECAP_ONE_OFFS_MAX, type RecapAiCard, type RecapInsights, type StoryCard } from "../../../shared/recapAi";
 import type { FindingChart, FindingType } from "../../../shared/recapFindings";
 import { statsByCategory, type Tx } from "../../../shared/views";
 import { decodeDrill, useDrill, useHints } from "./drill";
@@ -1115,9 +1116,36 @@ function PaceChart({ chart }: { chart: Extract<FindingChart, { kind: "line" }> }
   );
 }
 
-export function InsightCard({ card }: { card: RecapAiCard }) {
-  const { fmt } = useApp();
+/**
+ * "A one-off?" under a card about a category's jump in a month. Yes leaves that month out of what is
+ * usual for the category in the recaps that follow (their averages, findings and suggested budgets);
+ * no keeps it in. Tapping the answer again takes it back. It is kept in settings, so it syncs.
+ */
+function OneOff({ categoryId, month }: { categoryId: Id<"categories">; month: MonthKey }) {
+  const { settings } = useApp();
+  const update = useOp("settings.update");
+  const all = settings.recapOneOffs ?? [];
+  const answer = all.find((o) => o.categoryId === categoryId && o.month === month)?.yes;
+  const set = (yes: boolean) => {
+    const rest = all.filter((o) => !(o.categoryId === categoryId && o.month === month));
+    void update({ patch: { recapOneOffs: [...rest, ...(answer === yes ? [] : [{ categoryId, month, yes }])].slice(-RECAP_ONE_OFFS_MAX) } });
+  };
+  const choice = (yes: boolean, label: string) => (
+    <button type="button" aria-pressed={answer === yes} onClick={() => set(yes)} className={cn("pointer-events-auto cursor-pointer rounded-full border px-3 py-1 text-xs font-medium", answer === yes ? "border-foreground bg-foreground text-background" : "bg-card text-foreground")}>{label}</button>
+  );
+  return (
+    <div className="mt-3 flex items-center gap-2 text-[13px] text-muted-foreground">
+      <span className="mr-auto">{answer === true ? "Left out of what's usual from now on" : answer === false ? "Counted as usual spending" : "A one-off?"}</span>
+      {choice(true, "Yes")}{choice(false, "No")}
+    </div>
+  );
+}
+
+export function InsightCard({ card, month }: { card: RecapAiCard; month: MonthKey }) {
+  const { fmt, categoryById } = useApp();
   const drill = decodeDrill(card.drill ?? null, undefined);
+  // the question is for a jump in one category in one month: a month's recap, a spike or what was behind it, a category still there
+  const jumped = /^\d{4}-\d{2}$/.test(month) && (card.type === "spike" || card.type === "drivers") && drill?.kind === "category" && categoryById.has(drill.id) ? (drill.id as Id<"categories">) : null;
   return (
     <CardFrame kind="insight">
       <Label>{FINDING_LABEL[card.type] ?? "Worth a look"}</Label>
@@ -1125,6 +1153,7 @@ export function InsightCard({ card }: { card: RecapAiCard }) {
       <Ctx className="line-clamp-4">{fillMoney(card.text, fmt)}</Ctx>
       <Vis>
         {card.chart.kind === "bars" ? <BarsChart chart={card.chart} /> : card.chart.kind === "split" ? <SplitChart chart={card.chart} /> : <PaceChart chart={card.chart} />}
+        {jumped ? <OneOff categoryId={jumped} month={month} /> : null}
       </Vis>
       <Foot>
         <span className="inline-flex items-center gap-1.5"><WandSparkles className="size-3.5 shrink-0" />Found by UnMoney, worded by AI</span>
@@ -1210,7 +1239,7 @@ export function IdeasCard({ budgets, month }: { budgets: RecapInsights["budgets"
 /** The card for a `kind`. */
 export function RecapCardView({ card, month, onClose }: { card: StoryCard; month: MonthKey; onClose: () => void }) {
   switch (card.kind) {
-    case "insight": return <InsightCard card={card.card} />;
+    case "insight": return <InsightCard card={card.card} month={month} />;
     case "ideas": return <IdeasCard budgets={card.budgets} month={month} />;
     case "cover": return <CoverCard card={card} month={month} />;
     case "total": return <TotalCard card={card} month={month} />;

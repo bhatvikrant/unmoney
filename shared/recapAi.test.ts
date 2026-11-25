@@ -268,3 +268,37 @@ test("more out than in is told as the share of income spent, never as a negative
   expect(facts.input.spentOfIncome).toBe(176);
   expect(validateRecap({ insights: ["You spent {spentOfIncome} of what came in.", "You kept {kept}."], budgets: [] }, facts).insights).toEqual(["You spent 176% of what came in."]);
 });
+
+test("a month the person called a one-off is left out of what is usual for that category from then on, and its own recap stays as it was", () => {
+  const f = eventful();
+  // November, after the wedding: an ordinary month, with a little more out on Social Life than before October
+  f.expense("2026-11-02", 2_000_000, "Household", "Rent");
+  f.expense("2026-11-05", 600_000, "Food", "Groceries");
+  for (const d of ["08", "12", "16"]) f.expense(`2026-11-${d}`, 20_000, "Food", "Coffee");
+  f.expense("2026-11-20", 150_000, "Transport", "Fuel");
+  f.expense("2026-11-10", 250_000, "Social Life", "Drinks");
+  const social = (facts: NonNullable<ReturnType<typeof buildRecapFacts>>) => facts.input.categories.find((c) => c.name === "Social Life")!;
+  const answer = (yes: boolean) => { f.snap = run(f.snap, "settings.update", { patch: { recapOneOffs: [{ categoryId: f.cat("Social Life"), month: "2026-10", yes }] } }); };
+
+  // October's 9,000 is in the average, so November's 2,500 looks like a quiet month and a budget may go as high as 9,000
+  const before = buildRecapFacts(f.snap, "2026-11")!;
+  expect(social(before)).toMatchObject({ p0: 2500, p1: 9000, avg: 3000, vsAvg: -500 });
+  expect(social(before).oneOff).toBeUndefined();
+  expect(before.findings.some((x) => x.type === "spike" && x.subject === "Social Life")).toBe(false);
+  expect(before.bounds[social(before).id as string]).toMatchObject({ lo: 145_000, hi: 900_000 });
+  const october = buildRecapFacts(f.snap, "2026-10")!.hash;
+
+  // "Yes, a one-off": October is named as one and left out, November is seen for the jump it is, and budgets fit the other months
+  answer(true);
+  const after = buildRecapFacts(f.snap, "2026-11")!;
+  expect(social(after)).toMatchObject({ p0: 2500, p1: 9000, oneOff: "p1", avg: 1000, vsAvg: 1500 });
+  expect(after.findings.find((x) => x.type === "spike")).toMatchObject({ subject: "Social Life", figures: { now: { v: 250_000 }, usual: { v: 100_000 }, times: { v: 2 } } });
+  expect(after.bounds[social(after).id as string]).toMatchObject({ lo: 68_750, hi: 250_000 });
+  // the recap the answer was given on has the same facts: it is not sent again
+  expect(buildRecapFacts(f.snap, "2026-10")!.hash).toBe(october);
+
+  // "No": kept, so the card shows it was answered, and nothing is left out
+  answer(false);
+  expect(f.snap.settings[0].recapOneOffs).toEqual([{ categoryId: f.cat("Social Life"), month: "2026-10", yes: false }]);
+  expect(buildRecapFacts(f.snap, "2026-11")!.hash).toBe(before.hash);
+});
