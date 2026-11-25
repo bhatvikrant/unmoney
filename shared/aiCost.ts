@@ -11,6 +11,7 @@
  */
 export const AI_FEATURES = {
   gmail: "Gmail reading",
+  recap: "Recap insights",
   receipt: "Photo reading",
   search: "Search questions",
   tidy: "Category tidy-up",

@@ -1,6 +1,7 @@
 import { useApp } from "@/lib/app";
 import { formatMoney } from "../../shared/money";
-import { monthLabel } from "@/lib/format";
+import { dateLabel, monthLabel } from "@/lib/format";
+import { parts, type ISODate } from "../../shared/dates";
 
 type BudgetState = { limit: number; spent: number };
 
@@ -20,4 +21,11 @@ export function useOverText() {
 /** A budget period key as words: "Nov 2026", "week of 2026-11-23", "2026". */
 export function periodKeyLabel(period: "weekly" | "monthly" | "yearly", key: string): string {
   return period === "monthly" ? monthLabel(key) : period === "weekly" ? `week of ${key}` : key;
+}
+
+/** A day in a sentence about a budget's period: "the 24th" in a month (which never holds the same day twice), else "Nov 24". */
+export function dayInPeriod(period: string, date: ISODate): string {
+  if (period !== "monthly") return dateLabel(date);
+  const d = parts(date).d;
+  return `the ${d}${d % 10 === 1 && d !== 11 ? "st" : d % 10 === 2 && d !== 12 ? "nd" : d % 10 === 3 && d !== 13 ? "rd" : "th"}`;
 }
