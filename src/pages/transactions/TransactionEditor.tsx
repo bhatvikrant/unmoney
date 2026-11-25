@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowLeftRight, Calculator, ChevronRight, ExternalLink, Globe, Mail, Repeat, Star, Copy, Trash2, Users, X } from "lucide-react";
+import { ArrowLeftRight, Calculator, ChevronRight, ExternalLink, Globe, Mail, Mic, Repeat, Star, Copy, Trash2, Users, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
@@ -18,6 +18,7 @@ import { evaluateExpression, formatRate, toMinor } from "../../../shared/money";
 import { RECEIPT_MAX_BYTES, RECEIPT_MAX_EDGE, isReceiptMediaType } from "../../../shared/receiptAi";
 import { QUICK_MAX_SENTENCE } from "../../../shared/quickAi";
 import { compressImage } from "@/lib/image";
+import { useDictation } from "@/lib/dictation";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useLeaveTo, useOpenEntry } from "@/lib/nav";
 import { useColumn } from "@/components/shell/SplitLayout";
@@ -414,17 +415,19 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
    * A sentence typed or dictated above a new entry ("450 swiggy dinner hdfc yesterday") goes to Claude
    * when "Fill in" is tapped (convex/ai.ts quickEntry). The person just said it on purpose, so what it
    * says replaces what is in the form, and what it does not say is left alone. Nothing is saved here;
-   * offline or on a failure the form stays as it was.
+   * offline or on a failure the form stays as it was. The mic writes the sentence by voice (the browser's
+   * own speech recognition, lib/dictation.ts) and fills in when the person stops speaking: tapping the mic
+   * and saying the entry is as deliberate as tapping "Fill in".
    */
   const quickEntry = useAction(api.ai.quickEntry);
   const [sentence, setSentence] = useState("");
   const [filling, setFilling] = useState(false);
-  async function fillFromSentence() {
-    if (filling || !sentence.trim()) return;
+  async function fillFromSentence(text = sentence) {
+    if (filling || !text.trim()) return;
     if (!navigator.onLine) { toast.error("You're offline. Fill in the entry yourself."); return; }
     setFilling(true);
     try {
-      const r = await quickEntry({ sentence, today: todayISO() });
+      const r = await quickEntry({ sentence: text, today: todayISO() });
       const p = latest.current;
       const patch: Partial<Form> = {};
       const type = r.type ?? p.type;
@@ -467,6 +470,12 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       setFilling(false);
     }
   }
+  const mic = useDictation({
+    max: QUICK_MAX_SENTENCE,
+    onText: setSentence,
+    onDone: (text) => void fillFromSentence(text),
+    onError: (code) => toast.error(code === "not-allowed" || code === "service-not-allowed" ? "The microphone is blocked. Allow it for UnMoney in your browser, or type the entry." : "Couldn't hear that. Type the entry instead."),
+  });
 
   const isEdit = !!id;
   const inSeries = !!existing?.repeatId;
@@ -647,13 +656,19 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
         {user?.ai && !isEdit && !draft ? (
           <div className="px-4 pt-4">
             <div className="flex gap-2">
-              <Input aria-label="Describe the entry in a sentence" value={sentence} maxLength={QUICK_MAX_SENTENCE} disabled={filling} placeholder="450 swiggy dinner hdfc yesterday" className="h-9"
+              <Input aria-label="Describe the entry in a sentence" value={sentence} maxLength={QUICK_MAX_SENTENCE} disabled={filling} readOnly={mic.listening} placeholder={mic.listening ? "Listening…" : "450 swiggy dinner hdfc yesterday"} className="h-9"
                 onChange={(e) => setSentence(e.target.value)}
                 // Enter here fills the form: stopped before it reaches the form's own Enter, which saves
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void fillFromSentence(); } }} />
-              <Button variant="outline" className="h-9 shrink-0" disabled={filling || !sentence.trim()} onClick={() => void fillFromSentence()}>{filling ? "Filling in…" : "Fill in"}</Button>
+              {mic.supported ? (
+                <Button variant="outline" size="icon" className={cn("size-9 shrink-0", mic.listening && "border-primary text-primary")} disabled={filling} aria-pressed={mic.listening}
+                  aria-label={mic.listening ? "Stop listening" : "Say the entry"} title={mic.listening ? "Stop listening" : "Say the entry"} onClick={mic.toggle}>
+                  <Mic className={cn("size-4", mic.listening && "animate-pulse")} />
+                </Button>
+              ) : null}
+              <Button variant="outline" className="h-9 shrink-0" disabled={filling || mic.listening || !sentence.trim()} onClick={() => void fillFromSentence()}>{filling ? "Filling in…" : "Fill in"}</Button>
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">Type or dictate the entry. "Fill in" sends this sentence to Anthropic's Claude, with the names of your categories and payment methods and the notes you use most. You check the entry before saving. <AiHow feature="quick" /></p>
+            <p className="mt-1.5 text-xs text-muted-foreground">{mic.supported ? "Type the entry, or tap the mic and say it: your browser turns your voice into text, and UnMoney never gets the audio." : "Type or dictate the entry."} {mic.supported ? "When you tap \"Fill in\" or stop speaking, the sentence goes" : "\"Fill in\" sends this sentence"} to Anthropic's Claude, with the names of your categories and payment methods and the notes you use most. You check the entry before saving. <AiHow feature="quick" /></p>
           </div>
         ) : null}
         <div className="grid grid-cols-3 gap-2 p-4">

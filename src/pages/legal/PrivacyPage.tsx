@@ -178,7 +178,10 @@ export default function PrivacyPage() {
           </p>
           <p className="mt-3">
             A new entry can be filled in from a sentence you type or dictate, such as "450 swiggy dinner hdfc yesterday".
-            Nothing is sent until you tap "Fill in". Then that sentence and today's date go to the same API, with the names of
+            Where the browser can listen, a mic button lets you say the sentence instead: the browser's own speech recognition
+            turns your voice into text, on your device or on the servers of the company that makes the browser (Google for
+            Chrome, Apple for Safari), and UnMoney never receives the audio.
+            Nothing is sent until you tap "Fill in", or tap the mic and finish speaking. Then that sentence and today's date go to the same API, with the names of
             your categories and payment methods (with their kind, bank and the last four digits of cards and accounts), the
             codes of your currencies, and the notes you use most with the category each went under. No entries, amounts or
             balances from your ledger are sent. The answer only fills in the form: nothing is saved until you save it.
