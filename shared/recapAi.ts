@@ -8,7 +8,8 @@
  * placeholder it cannot resolve, or with a number of the model's own, is dropped. A suggested budget
  * is the one amount the model picks, and it is held to a range from the person's own history.
  *
- * For a month the code also looks for what stands out against the months before (recapFindings.ts).
+ * The code also looks for what stands out: in a month against the months before, in a year across
+ * its own months (recapFindings.ts).
  * Claude picks the few worth showing and writes a headline and a line for each; the recap shows
  * them as cards, each with the chart the code made for that finding.
  *
@@ -20,9 +21,9 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { Id } from "../convex/_generated/dataModel";
 import type { Snapshot } from "./ops";
 import { MONTH_LONG } from "./dates";
-import { monthRange, parseMonthKey, shiftMonthKey, yearRange } from "./period";
+import { monthKey, monthRange, parseMonthKey, shiftMonthKey, yearRange } from "./period";
 import { monthRecap, yearRecap, type RecapCard } from "./recap";
-import { monthFindings, type Figure, type Finding, type FindingChart, type FindingType } from "./recapFindings";
+import { monthFindings, yearFindings, type Figure, type Finding, type FindingChart, type FindingType } from "./recapFindings";
 import { settingsOf, statsByCategory } from "./views";
 import { cutText } from "./categoryLint";
 
@@ -220,11 +221,14 @@ export function buildRecapFacts(snap: Snapshot, key: string): RecapFacts | null 
   const inout = card("inout");
   const total = budgetOf("total", "budget");
   const income = perPeriod("income", (s) => s.income);
-  const found = year === null ? monthFindings(snap, periods.map((p) => ({ label: p.label.slice(0, 3), range: p.range })), amounts) : [];
+  // a month is set against the months before it; a year is looked at across its own months, the ones the ledger covers
+  const found = year === null
+    ? monthFindings(snap, periods.map((p) => ({ label: p.label.slice(0, 3), range: p.range })), amounts)
+    : yearFindings(snap, Array.from({ length: 12 }, (_, i) => monthKey(year, i + 1)).map((k) => ({ label: monthName(k).slice(0, 3), name: monthName(k), range: monthRange(k, msd) })), amounts);
   const findings = found.map((f, i) => {
     const id = `f${i + 1}`;
     return {
-      id, type: f.type, ...(f.subject ? { about: clip(f.subject) } : {}), ...(f.names ? { notes: f.names.map(clip) } : {}),
+      id, type: f.type, ...(f.subject ? { about: clip(f.subject) } : {}), ...(f.names ? { notes: f.names.map(clip) } : {}), ...(f.when ? { month: f.when } : {}),
       ...Object.fromEntries(Object.entries(f.figures).map(([k, fig]) => [k, fig.u === "money" ? money(`${id}.${k}`, fig.v) : count(`${id}.${k}`, fig.v, fig.u)])),
     };
   });
@@ -255,7 +259,7 @@ export const SYSTEM_PROMPT = `You help one person understand a finished month or
 - "categories": their largest expense categories. Per period what went out (a period left out means nothing did), "change" is p0 minus p1, "avg" the average of the earlier periods, "vsAvg" p0 minus that average, and "limit", "over" and "run" when the category has a budget. In a year, "overMonths" is how many months its monthly budget went over and "overBy" what that added up to.
 - "repeats": the notes they logged most often in p0, how many times, and what those came to. "scheduled": what went out on entries that repeat on a schedule.
 - In a year, "high" and "low": the dearest and the lightest month.
-- "findings", in a month with enough months before it: what the app found by setting p0 against them. Each has an "id", a "type", often "about" (the category, note or weekday it concerns) and "notes" (the notes on the entries behind it), and its figures:
+- "findings": what the app found, in a month by setting p0 against the months before it, in a year by looking across the year's own months. Each has an "id", a "type", often "about" (the category, note or weekday it concerns), "notes" (the notes on the entries behind it) or "month" (the month it turns on), and its figures. In a month:
   - "climb": a category that rose "months" months in a row, from "start" to "now".
   - "spike": a category at "now" against "usual" in a month before, "times" times as much.
   - "low": a category's lightest of the last "months" months, "now" against "usual".
@@ -265,10 +269,17 @@ export const SYSTEM_PROMPT = `You help one person understand a finished month or
   - "habit": a note logged "count" times for "amount", "each" a time; before, about "usualCount" times a month at "usualEach" a time (left out when it is new).
   - "weekday": "share" of the month, "amount", went out on one weekday.
   - "missing": a note that came up in each of the "months" months before, about "usual" a month, and not once in p0.
+  In a year, where a half is the first or the last "months" months of it:
+  - "peak": a category whose "month" took "now" of its "total" for the year, "share" of it.
+  - "shift": a category that cost "start" in the first half and "now" in the second.
+  - "oneoffs": the "entries" largest entries that came once ("notes") came to "top", "share" of the year's "total".
+  - "growing": a note logged "count" times for "amount": "early" times in the first half and "late" in the second, at "eachEarly" then "eachLate" a time (left out when a half has none).
+  - "stopped": a note that ran for "months" months at about "usual" a month, last in "month", and not since.
+  - "weekday": as in a month.
 
 "title": a name for the period in two to five words, taken from what marked it most ("The month of gifts", "A quiet September"). No figures. An empty string when nothing marks it.
 
-"cards": when there are findings, the two to four this person would most want to see, most striking first. Each is shown as a card of its own with a chart the app draws from the finding, so the words say what the chart means and do not list what it shows. Choose what surprises or explains over what restates a total, tell findings that belong together as one story across their cards (a spike, then what drove it) without repeating a figure, and include good news when there is some. "finding" is the finding's id. "headline" says what happened, in at most ${MAX_HEADLINE} characters, the way a friend would put it: "Gifts ran far past a usual month", "Coffee became a daily thing". "text" is one or two plain sentences, at most ${MAX_CARD_TEXT} characters, with the figures that make the point. Say what happened; add what to do about it only when there is one clear move. An empty list for a year, or when there are no findings.
+"cards": when there are findings, the two to four this person would most want to see, most striking first. Each is shown as a card of its own with a chart the app draws from the finding, so the words say what the chart means and do not list what it shows. Choose what surprises or explains over what restates a total, tell findings that belong together as one story across their cards (a spike, then what drove it) without repeating a figure, and include good news when there is some. "finding" is the finding's id. "headline" says what happened, in at most ${MAX_HEADLINE} characters, the way a friend would put it: "Gifts ran far past a usual month", "Coffee became a daily thing". "text" is one or two plain sentences, at most ${MAX_CARD_TEXT} characters, with the figures that make the point. Say what happened; add what to do about it only when there is one clear move. An empty list when there are no findings.
 
 "insights": what is worth this person's attention besides the cards, most important first: a budget that keeps going over, spending that outruns income, something that went well and is worth keeping. With cards, at most three, and none is fine; without, ${MIN_INSIGHTS} to ${MAX_INSIGHTS}. Each is specific to these facts and says why it matters; end on something to do or decide only where there is a clear move, and never give the same advice twice. Leave out anything a card already says or that only restates a total. Each is one or two plain sentences, at most ${MAX_INSIGHT} characters.
 
