@@ -173,9 +173,16 @@ export default function PrivacyPage() {
             itself still runs on your device. Typing in Search without tapping Ask AI sends nothing.
           </p>
           <p className="mt-3">
+            A new entry can be filled in from a sentence you type or dictate, such as "450 swiggy dinner hdfc yesterday".
+            Nothing is sent until you tap "Fill in". Then that sentence and today's date go to the same API, with the names of
+            your categories and payment methods (with their kind, bank and the last four digits of cards and accounts), the
+            codes of your currencies, and the notes you use most with the category each went under. No entries, amounts or
+            balances from your ledger are sent. The answer only fills in the form: nothing is saved until you save it.
+          </p>
+          <p className="mt-3">
             Anthropic processes this only to return the answer to UnMoney. Under Anthropic's commercial terms, data sent
             through its API is not used to train its models, and it is deleted after a limited retention period. UnMoney checks
-            every answer against your real categories and payment methods before it becomes a draft.
+            every answer against your real categories and payment methods before it becomes a draft or fills in a form.
           </p>
         </Section>
 
@@ -185,7 +192,7 @@ export default function PrivacyPage() {
             <li><strong className="font-medium text-foreground">Convex</strong>: the database and server. Everything listed above is stored here.</li>
             <li><strong className="font-medium text-foreground">Vercel</strong>: serves the web app's files. It does not receive your ledger or your mail.</li>
             <li><strong className="font-medium text-foreground">Google</strong>: sign-in, and the Gmail API if you connect Gmail.</li>
-            <li><strong className="font-medium text-foreground">Anthropic</strong>: reads the mail no rule could read and, if you turn it on, the photos you attach, as described above.</li>
+            <li><strong className="font-medium text-foreground">Anthropic</strong>: reads the mail no rule could read and, if you use them, the photos you attach and the sentences you ask it to fill an entry from, as described above.</li>
             <li><strong className="font-medium text-foreground">PostHog</strong>: product analytics and crash reports, with all text masked, as described above. It never receives your ledger or your mail.</li>
           </ul>
           <p className="mt-3">

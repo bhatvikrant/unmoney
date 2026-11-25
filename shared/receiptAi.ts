@@ -59,10 +59,25 @@ export function buildReceiptInput(snap: Snap, type: EntryType, today: string): {
   const ids: Record<string, Id<"categories">> = {};
   const shortOf = new Map<string, string>();
   cats.forEach((c, i) => { ids[`c${i + 1}`] = c._id; shortOf.set(c._id, `c${i + 1}`); });
+  return {
+    input: {
+      type, today, currency: settings?.mainCurrency ?? "",
+      categories: cats.map((c) => ({ id: shortOf.get(c._id)!, name: c.name, parent: c.parentId ? shortOf.get(c.parentId) : undefined })),
+      notes: usedNotes(snap.transactions.filter((t) => t.type === type), shortOf),
+    },
+    ids,
+  };
+}
 
+/**
+ * The notes a person uses, most used first, from the newest of some entries: one per note however it
+ * was typed, as last written, with the category (its short id in `shortOf`) and the description last
+ * used with it. Typed entries (shared/quickAi.ts) send the same list.
+ */
+export function usedNotes(transactions: Doc<"transactions">[], shortOf: Map<string, string>, max = MAX_NOTES): ReceiptNote[] {
   const seen = new Map<string, ReceiptNote>();
-  const recent = snap.transactions
-    .filter((t) => t.type === type && t.note.trim())
+  const recent = transactions
+    .filter((t) => t.note.trim())
     .sort((a, b) => b.date.localeCompare(a.date) || b._creationTime - a._creationTime)
     .slice(0, RECEIPT_RECENT_ENTRIES);
   for (const t of recent) {
@@ -72,15 +87,8 @@ export function buildReceiptInput(snap: Snap, type: EntryType, today: string): {
     if (e) { e.used++; e.description ??= description; continue; }
     seen.set(key, { note: t.note.trim().slice(0, MAX_NOTE), category: shortOf.get(t.subcategoryId ?? "") ?? shortOf.get(t.categoryId ?? ""), description, used: 1 });
   }
-  return {
-    input: {
-      type, today, currency: settings?.mainCurrency ?? "",
-      categories: cats.map((c) => ({ id: shortOf.get(c._id)!, name: c.name, parent: c.parentId ? shortOf.get(c.parentId) : undefined })),
-      // a stable sort: among notes used as often, the one used most recently stays first
-      notes: [...seen.values()].sort((a, b) => b.used - a.used).slice(0, MAX_NOTES),
-    },
-    ids,
-  };
+  // a stable sort: among notes used as often, the one used most recently stays first
+  return [...seen.values()].sort((a, b) => b.used - a.used).slice(0, max);
 }
 
 export const SYSTEM_PROMPT = `You read a photo a person attached to an entry in their expense tracker, usually a receipt, bill, invoice or payment screenshot, and suggest how they would file it. With the photo you get JSON: the entry's type (expense or income), today's date, their currency, their categories (short ids; "parent" marks a subcategory of that category), and the notes they have used before, most used first, each with the category it went under, how many times it was used, and sometimes the description they wrote with it.
