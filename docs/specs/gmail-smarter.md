@@ -19,7 +19,7 @@ Gmail sync reads well, but it forgets. Once a user renames "Paytmqr28…" to "Ch
 ## 3. Data
 
 - `drafts.merchant?: string`: the cleaned merchant as read, before memory replaced the note. It is the key memory learns under, so a corrected note doesn't hide the raw merchant.
-- `gmailConnections.merchantMap?: Record<key, { note, categoryId?, subcategoryId? }>`: the key is `merchantKey` (lower-case letters and digits, since a database field name can't hold just anything), capped at 400, newest last. `gmailConnections.muted?: string[]` holds addresses.
+- `gmailMemory.merchantMap: Record<key, { note, categoryId?, subcategoryId? }>`, one row per user: the key is `merchantKey` (lower-case letters and digits, since a database field name can't hold just anything), capped at 400, newest last. It sits apart from the connection because every check reads and rewrites the connection, and this is only wanted when there is mail to read; `prepareRead` loads it, `rememberMerchants` writes it, and disconnecting removes it. A connection from before the split still carries `gmailConnections.merchantMap`, which its first check moves across (`claimSync`). `gmailConnections.muted?: string[]` holds addresses.
 - `shared/gmail/learn.ts`: `merchantKey`, `learnMerchants` (only income and expense of the draft's own type, live categories, later saves win), `mergeMerchants`, `applyMerchantMemory` (a category of the wrong type is not used).
 - `shared/gmail/dedup.ts`: `transferBetween`, and `foldDrafts(batch, open, accounts)` pairs after folding receipts. A `Fold` can carry `transfer`, which `writeSync` applies to an open draft.
 - `buildQuery({ …, muted })`, the `gmail.muteSender { from, muted }` mutation, and `gmail.status` returns `muted`.
