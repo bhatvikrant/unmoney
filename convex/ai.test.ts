@@ -3,6 +3,7 @@ import { convexTest } from "convex-test";
 import { expect, test } from "vitest";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import { SUPERADMIN_EMAIL } from "../shared/admin";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -36,4 +37,39 @@ test("a tidy-up run is counted before Claude is asked: three a day, and none wit
 
   await t.mutation(internal.ai.record, { userId, lastRunAt: Date.now(), summaryHash: "h", result: [] });
   expect(await claim()).toBe("ran");
+});
+
+test("AI is off for everyone but the superadmin until the superadmin turns it on for them", async () => {
+  const t = convexTest({ schema, modules });
+  const [admin, userId] = await t.run(async (ctx) => {
+    const ids = [await ctx.db.insert("users", { email: SUPERADMIN_EMAIL }), await ctx.db.insert("users", { email: "a@example.com" })] as const;
+    // both asked for photo reading in Preferences
+    for (const userId of ids) await ctx.db.insert("settings", {
+      userId, receiptAiEnabled: true, onboarded: true, mainCurrency: "USD", symbol: "$", symbolPosition: "before", decimals: 2, monthStartDay: 1, weekStartDay: 0,
+      carryOver: false, startScreen: "daily", theme: "system", accent: "neutral", colorSet: "A", subcategoryEnabled: true, autocompleteEnabled: true,
+      timeInputEnabled: false, repeatDisplay: "onDate", cardExpenseDisplay: "atTime", lockAfter: "always",
+    } as never);
+    return ids;
+  });
+  const asAdmin = t.withIdentity({ subject: `${admin}|s` });
+  const asUser = t.withIdentity({ subject: `${userId}|s` });
+  const read = (as: typeof asUser) => as.action(api.ai.readReceipt, { image: new Uint8Array([1, 2, 3]).buffer, mediaType: "image/webp", type: "expense", today: "2026-11-25" });
+  const allowed = async (as: typeof asUser) => (await as.query(api.sync.me, {}))?.user?.ai;
+
+  expect(await allowed(asUser)).toBe(false);
+  await expect(read(asUser)).rejects.toThrow("turned off");
+  await expect(asUser.action(api.ai.suggestCategoryCleanup, { includeNotes: false, today: "2026-11-25" })).rejects.toThrow("turned on for your account");
+  // the superadmin gets past the switch (no key in tests, so it stops at the next check)
+  expect(await allowed(asAdmin)).toBe(true);
+  await expect(read(asAdmin)).rejects.toThrow("set up");
+
+  // nobody else can flip it, themselves included
+  await expect(asUser.mutation(api.admin.setAi, { userIds: [userId], on: true })).rejects.toThrow(/Not allowed/);
+  await asAdmin.mutation(api.admin.setAi, { userIds: [userId], on: true });
+  expect(await allowed(asUser)).toBe(true);
+  await expect(read(asUser)).rejects.toThrow("set up");
+  expect((await asAdmin.query(api.admin.overview, { from: "2026-11-01", to: "2026-11-30" })).users.find((u) => u.id === userId)?.ai).toBe(true);
+
+  await asAdmin.mutation(api.admin.setAi, { userIds: [userId], on: false });
+  await expect(read(asUser)).rejects.toThrow("turned off");
 });
