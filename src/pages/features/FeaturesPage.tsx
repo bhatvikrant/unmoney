@@ -8,10 +8,10 @@
  * Each feature is one bento grid, laid out by the Stageshow skill's rules (github.com/benjitaylor/skills,
  * references/bento.md): one picture of the product, cropped by its tile, and the other tiles of other
  * kinds (steps, what is sent, a statement, one figure). The pictures are drawn with the app's own tokens.
- * Each tile plays once as it scrolls into view and then holds (references/motion.md); with reduced
- * motion it is the finished picture from the start.
+ * Each tile plays once as it scrolls into view and then holds (references/motion.md), and plays again
+ * for a mouse that comes to rest on it; with reduced motion it is the finished picture throughout.
  */
-import { createContext, useContext, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { Link, useLocation } from "react-router";
 import { animate, motion, useInView, useMotionValue, useReducedMotion, useTransform, type Variants } from "framer-motion";
 import { Calculator, Check, ChevronLeft, CircleCheck, EyeOff, FileLock, Mail, MailX, Smartphone, Sparkles, ToggleLeft, Users, WandSparkles, type LucideIcon } from "lucide-react";
@@ -193,37 +193,57 @@ export default function FeaturesPage() {
   );
 }
 
-// ---- Motion: a tile plays once, when most of it has scrolled into view, and then holds ----
+// ---- Motion: a tile plays once, when most of it has scrolled into view, and then holds. Hovering it plays it again. ----
 
 /** Whether the tile around this has started playing. */
 const Playing = createContext(true);
 /** For something arriving from nowhere: slow to settle, never a pop. */
 const arrive = (delay: number, duration = 0.7) => ({ delay, duration, ease: [0.25, 0.8, 0.25, 1] as const });
+/** Back to the start for a replay: what the story added leaves together, quickly, before it is told again. */
+const RESET = { duration: 0.18 };
+/** That, and a breath, before the replay starts. */
+const RESET_MS = 260;
+/** Longer than any tile's story: a hover does not restart one still being told. */
+const STORY_MS = 3200;
 // `custom` on each of these is how many seconds after its tile starts playing it moves.
 /** Arrives whole from just above: a value, a chip, a row of results. */
-const DROP: Variants = { before: { opacity: 0, y: -6 }, after: (t: number) => ({ opacity: 1, y: 0, transition: arrive(t) }) };
+const DROP: Variants = { before: { opacity: 0, y: -6, transition: RESET }, after: (t: number) => ({ opacity: 1, y: 0, transition: arrive(t) }) };
 /** A row that opens its own space, carrying the rows under it down. */
-const OPEN: Variants = { before: { opacity: 0, height: 0 }, after: (t: number) => ({ opacity: 1, height: "auto", transition: arrive(t) }) };
+const OPEN: Variants = { before: { opacity: 0, height: 0, transition: RESET }, after: (t: number) => ({ opacity: 1, height: "auto", transition: arrive(t) }) };
 /** Paper sliding up into the picture: solid things move in, they do not fade through. */
-const RISE: Variants = { before: { y: "75%" }, after: (t: number) => ({ y: 0, transition: arrive(t, 0.9) }) };
+const RISE: Variants = { before: { y: "75%", transition: RESET }, after: (t: number) => ({ y: 0, transition: arrive(t, 0.9) }) };
 /** A button pressed: the small give that comes before its result. */
 const PRESS: Variants = { before: { scale: 1 }, after: (t: number) => ({ scale: [1, 0.94, 1], transition: { delay: t, duration: 0.3 } }) };
 /** A mark set where it already had its place: a tick, a figure, a step's number. */
-const SET: Variants = { before: { opacity: 0 }, after: (t: number) => ({ opacity: 1, transition: { delay: t, duration: 0.3 } }) };
-const DIM: Variants = { before: { opacity: 0.3 }, after: (t: number) => ({ opacity: 1, transition: { delay: t, duration: 0.3 } }) };
+const SET: Variants = { before: { opacity: 0, transition: RESET }, after: (t: number) => ({ opacity: 1, transition: { delay: t, duration: 0.3 } }) };
+const DIM: Variants = { before: { opacity: 0.3, transition: RESET }, after: (t: number) => ({ opacity: 1, transition: { delay: t, duration: 0.3 } }) };
+/** The calm tile's mark under the pointer. */
+const NUDGE: Variants = { hover: { scale: 1.18, rotate: -6, transition: { type: "spring", stiffness: 420, damping: 14 } } };
 /** A line drawn from its start. */
-const DRAW: Variants = { before: { scaleX: 0 }, after: (t: number) => ({ scaleX: 1, transition: { delay: t, duration: 0.5, ease: [0.45, 0, 0.1, 1] as const } }) };
+const DRAW: Variants = { before: { scaleX: 0, transition: RESET }, after: (t: number) => ({ scaleX: 1, transition: { delay: t, duration: 0.5, ease: [0.45, 0, 0.1, 1] as const } }) };
 
 /** A tile of the grid: the one frame for all five, and the trigger for whatever moves inside it. */
 function BentoTile({ className, children }: { className?: string; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const still = useReducedMotion();
   const seen = useInView(ref, { once: true, amount: 0.6 });
-  const play = !!still || seen;
+  // a replay: back to the start, then told again
+  const [rewound, setRewound] = useState(false);
+  const startedAt = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => { if (seen) startedAt.current = performance.now(); }, [seen]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const play = !!still || (seen && !rewound);
+  // A mouse only: a finger that lands on a tile is scrolling the page, not pointing at it.
+  const replay = (e: PointerEvent) => {
+    if (still || !seen || rewound || e.pointerType !== "mouse" || performance.now() - startedAt.current < STORY_MS) return;
+    setRewound(true);
+    timer.current = setTimeout(() => { startedAt.current = performance.now(); setRewound(false); }, RESET_MS);
+  };
   return (
     <Playing.Provider value={play}>
       {/* with reduced motion there is no "before": every part starts where it ends */}
-      <motion.div ref={ref} initial={still ? false : "before"} animate={play ? "after" : "before"} className={cn(TILE, className)}>{children}</motion.div>
+      <motion.div ref={ref} initial={still ? false : "before"} animate={play ? "after" : "before"} onPointerEnter={replay} className={cn(TILE, className)}>{children}</motion.div>
     </Playing.Provider>
   );
 }
@@ -235,8 +255,9 @@ function Typed({ text, at }: { text: string; at: number }) {
   const n = useMotionValue(still ? text.length : 0);
   const shown = useTransform(n, (v) => text.slice(0, Math.round(v)));
   useEffect(() => {
-    if (!play || still) return;
-    const c = animate(n, text.length, { delay: at, duration: text.length * 0.035, ease: "linear" });
+    if (still) return;
+    // typed in; or, for a replay, cleared
+    const c = play ? animate(n, text.length, { delay: at, duration: text.length * 0.035, ease: "linear" }) : animate(n, 0, RESET);
     return () => c.stop();
   }, [play, still, n, text, at]);
   return <motion.span>{shown}</motion.span>;
@@ -286,11 +307,11 @@ function FeatureGrid({ id, feature: f, areas }: { id: AiFeature; feature: Featur
           </ul>
         </BentoTile>
 
-        {/* the calm one: nothing moves */}
-        <div className={cn(TILE, "p-6 @min-[600px]:p-7 @min-[900px]:row-start-2", areas.side)}>
-          <f.kept.icon className="size-5" strokeWidth={1.8} aria-hidden="true" />
+        {/* the calm one: nothing moves as it scrolls in. Under the pointer its mark alone answers: it tips up, and settles back when the pointer leaves. */}
+        <motion.div whileHover="hover" className={cn(TILE, "p-6 @min-[600px]:p-7 @min-[900px]:row-start-2", areas.side)}>
+          <motion.span variants={NUDGE} className="block size-5 origin-bottom-left motion-reduce:transform-none!"><f.kept.icon className="size-5" strokeWidth={1.8} aria-hidden="true" /></motion.span>
           <p className={cn(COPY, "mt-2.5")}><b>{f.kept.lead}</b> {f.kept.rest}</p>
-        </div>
+        </motion.div>
 
         <BentoTile className={cn("p-6 @min-[600px]:p-7 @min-[900px]:row-start-1", areas.side)}>
           <p className={COPY}>{f.stat.lead}</p>
