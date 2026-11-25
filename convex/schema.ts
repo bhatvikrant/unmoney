@@ -130,6 +130,12 @@ export default defineSchema({
     sips: v.optional(v.array(sip)),
     /** The last imports (newest first, at most 10), so one can be undone: its entries carry its id as importId. */
     recentImports: v.optional(v.array(v.object({ id: v.string(), name: v.string(), at: v.number(), count: v.number(), undoneAt: v.optional(v.number()) }))),
+    /**
+     * The answers to a recap card's "A one-off?" about a category's jump in a month ("2026-10"). A month
+     * answered yes is left out of what is usual for that category in later recaps (shared/recapAi.ts);
+     * a no is kept so the card shows it was answered. Newest last, at most RECAP_ONE_OFFS_MAX.
+     */
+    recapOneOffs: v.optional(v.array(v.object({ categoryId: v.id("categories"), month: v.string(), yes: v.boolean() }))),
   }).index("by_user", ["userId"]).index("by_user_rev", ["userId", "rev"]),
 
   /** Folders that organise payment methods. They have no behaviour of their own. */

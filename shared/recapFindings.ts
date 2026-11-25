@@ -177,7 +177,11 @@ export function yearFindings(snap: Snapshot, year: { label: string; name: string
  * newest first, each with a short label ("Oct"); `cats` is what went out under each category in
  * each of them, as Stats counts it.
  */
-export function monthFindings(snap: Snapshot, periods: { label: string; range: Range }[], cats: Map<string, { name: string; per: number[] }>): Finding[] {
+export function monthFindings(
+  snap: Snapshot, periods: { label: string; range: Range }[], cats: Map<string, { name: string; per: number[] }>,
+  /** Whether the person said period `p` was a one-off for category `id`: such a month is not part of what is usual for it. */
+  oneOff: (id: string, p: number) => boolean = () => false,
+): Finding[] {
   const entries = periods.map((p) => statsEntries(snap, p.range.from, p.range.to, "expense"));
   const totals = entries.map((es) => sum(es.map((e) => e.amount)));
   const total = totals[0];
@@ -193,7 +197,7 @@ export function monthFindings(snap: Snapshot, periods: { label: string; range: R
   // a category that keeps climbing, shot past its usual, or had its lightest month
   let jumped: { id: string; score: number } | undefined;
   for (const [id, { name, per }] of cats) {
-    const usual = mean(per.slice(1));
+    const usual = mean(per.slice(1).filter((_, i) => !oneOff(id, i + 1)));
     const diff = per[0] - usual;
     const score = Math.abs(diff) / total;
     // the months in a row it rose, this one included
