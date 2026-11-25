@@ -13,7 +13,7 @@ import type { FunctionReturnType } from "convex/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import schema from "./schema";
-import { requireUser } from "./lib/auth";
+import { aiAllowed, requireUser } from "./lib/auth";
 import { currentRev, deleteSynced, insertSynced, patchSynced } from "./lib/changes";
 import { runOps } from "./lib/snapshot";
 import { decryptText, encryptText, hasTokenKey, sign, verify } from "./lib/gmailCrypto";
@@ -105,6 +105,7 @@ export const status = query({
       log: c?.log ?? [],
       aiCalls: c && c.aiMonth === month ? c.aiCalls : 0,
       aiCap: AI_MONTHLY_CAP,
+      ai: await aiAllowed(ctx, userId),
       backfill: c?.backfill ? {
         year: c.backfill.year, from: c.backfill.from, state: c.backfill.state, startedAt: c.backfill.startedAt, cursor: c.backfill.cursor,
         total: c.backfill.total ?? null, read: c.backfill.read, found: c.backfill.found, finishedAt: c.backfill.finishedAt ?? null,
@@ -585,7 +586,7 @@ export const prepareSync = internalQuery({
     const connection = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
     if (!connection) return null;
     const written = await ctx.db.query("drafts").withIndex("by_user_rev", (q) => q.eq("userId", userId).gt("rev", connection.learnedRev ?? 0)).collect();
-    return { connection, rev: await currentRev(ctx, userId), learnFrom: await withEntries(ctx, written.filter((d) => d.status === "accepted")) };
+    return { connection, ai: await aiAllowed(ctx, userId), rev: await currentRev(ctx, userId), learnFrom: await withEntries(ctx, written.filter((d) => d.status === "accepted")) };
   },
 });
 
@@ -789,10 +790,10 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
   }
 
   let aiCalls = 0, aiSkipped = 0, aiDropped = 0, aiCapped = false;
-  if (forAi.length && !process.env.ANTHROPIC_API_KEY) {
+  if (forAi.length && (!prep.ai || !process.env.ANTHROPIC_API_KEY)) {
     aiSkipped = forAi.length;
     // say how many, so a mail no rule knows does not just vanish
-    notes.push(`${forAi.length} ${forAi.length === 1 ? "mail looked like money but no rule could read it" : "mails looked like money but no rule could read them"} (AI reading is not set up)`);
+    notes.push(`${forAi.length} ${forAi.length === 1 ? "mail looked like money but no rule could read it" : "mails looked like money but no rule could read them"} (AI reading is ${prep.ai ? "not set up" : "off"})`);
   } else if (forAi.length) {
     const used = c.aiMonth === monthOf(startedAt) ? c.aiCalls : 0;
     for (let i = 0; i < forAi.length; i += AI_BATCH) {
