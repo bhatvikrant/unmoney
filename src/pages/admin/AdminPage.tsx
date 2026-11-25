@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { LENGTH_BUCKETS, isSuperadmin } from "../../../shared/admin";
+import { AI_FEATURES, AI_FEATURE_KEYS } from "../../../shared/aiCost";
 import { useStore } from "@/lib/store";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Avatar } from "@/components/shell/Avatar";
@@ -66,7 +67,7 @@ const KINDS: Record<string, string> = {
 const GMAIL_STATUS: Record<string, string> = { ok: "Working", reauth: "Needs reconnecting", paused: "Paused" };
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-const AI_FEATURES = [{ key: "gmail", label: "Gmail reading" }, { key: "receipt", label: "Photo reading" }, { key: "split", label: "Bill splitting" }, { key: "tidy", label: "Category tidy-up" }] as const;
+const AI_LIST = AI_FEATURE_KEYS.map((key) => ({ key, label: AI_FEATURES[key] }));
 
 const SOURCES: { key: "manual" | "gmail" | "imported" | "repeat"; label: string }[] = [
   { key: "manual", label: "Typed in" }, { key: "gmail", label: "From Gmail" }, { key: "imported", label: "Imported" }, { key: "repeat", label: "Repeats" },
@@ -296,10 +297,10 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
         <AiUsersTable rows={m.aiUsers} total={m.ai.costUsd} others={m.view.users.length - m.aiUsers.length} onPick={onPick} period={periodLabel} />
         <div className="grid gap-4 lg:grid-cols-3">
           <Card title="AI cost per day" hint={`What Claude cost per day, last ${periodLabel}`} className="lg:col-span-2" info={aiInfo}>
-            <StackedDayBars data={m.aiDays} series={AI_FEATURES.map((x) => ({ key: x.key, label: x.label }))} format={fmtUsd} />
+            <StackedDayBars data={m.aiDays} series={AI_LIST.map((x) => ({ key: x.key, label: x.label }))} format={fmtUsd} />
           </Card>
           <Card title="AI cost by feature" hint={`Last ${periodLabel}`}>
-            <BarList items={AI_FEATURES.map((x) => ({ label: x.label, value: m.ai[x.key], hint: calls(m.ai[`${x.key}Calls`]) })).filter((x) => x.value)} format={fmtUsd} of={m.ai.costUsd} color={SLOT(3)} empty="No AI calls in the period" />
+            <BarList items={AI_LIST.map((x) => ({ label: x.label, value: m.ai[x.key], hint: calls(m.ai[`${x.key}Calls`]) })).filter((x) => x.value)} format={fmtUsd} of={m.ai.costUsd} color={SLOT(3)} empty="No AI calls in the period" />
           </Card>
         </div>
       </>
@@ -534,7 +535,7 @@ function AiUsersTable({ rows, total, others, onPick, period }: { rows: ReturnTyp
                       <span>last {day(t.lastDay)}</span>
                     </div>
                     <div className="flex flex-wrap gap-x-3 text-xs tabular-nums text-muted-foreground">
-                      {AI_FEATURES.map((x) => (t[`${x.key}Calls`] ? <span key={x.key}>{x.label} {fmtUsd(t[x.key])}</span> : null))}
+                      {AI_LIST.map((x) => (t[`${x.key}Calls`] ? <span key={x.key}>{x.label} {fmtUsd(t[x.key])}</span> : null))}
                     </div>
                   </div>
                 </button>
@@ -549,7 +550,7 @@ function AiUsersTable({ rows, total, others, onPick, period }: { rows: ReturnTyp
                   <th className="px-2 py-2 text-right font-medium text-foreground">Cost ↓</th>
                   <th className="px-2 py-2 text-right font-normal">Share</th>
                   <th className="px-2 py-2 text-right font-normal">Calls</th>
-                  {AI_FEATURES.map((x) => <th key={x.key} className="px-2 py-2 text-right font-normal whitespace-nowrap">{x.label} · calls</th>)}
+                  {AI_LIST.map((x) => <th key={x.key} className="px-2 py-2 text-right font-normal whitespace-nowrap">{x.label} · calls</th>)}
                   <th className="px-2 py-2 text-right font-normal whitespace-nowrap">Tokens in</th>
                   <th className="px-2 py-2 text-right font-normal whitespace-nowrap">Tokens out</th>
                   <th className="px-2 py-2 text-right font-normal whitespace-nowrap">Per call</th>
@@ -571,7 +572,7 @@ function AiUsersTable({ rows, total, others, onPick, period }: { rows: ReturnTyp
                     <td className="px-2 py-2 text-right font-semibold">{fmtUsd(t.costUsd)}</td>
                     <td className="px-2 py-2 text-right text-muted-foreground">{total ? fmtPct(t.costUsd / total) : "–"}</td>
                     <td className="px-2 py-2 text-right">{fmtNum(t.calls)}</td>
-                    {AI_FEATURES.map((x) => <td key={x.key} className="px-2 py-2 text-right whitespace-nowrap">{feature(t[x.key], t[`${x.key}Calls`])}</td>)}
+                    {AI_LIST.map((x) => <td key={x.key} className="px-2 py-2 text-right whitespace-nowrap">{feature(t[x.key], t[`${x.key}Calls`])}</td>)}
                     <td className="px-2 py-2 text-right">{fmtNum(t.inputTokens)}</td>
                     <td className="px-2 py-2 text-right">{fmtNum(t.outputTokens)}</td>
                     <td className="px-2 py-2 text-right">{fmtUsd(t.costUsd / t.calls)}</td>
