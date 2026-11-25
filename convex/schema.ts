@@ -108,6 +108,10 @@ export default defineSchema({
     theme: v.union(v.literal("system"), v.literal("light"), v.literal("dark")),
     accent: v.string(),
     colorSet: v.union(v.literal("A"), v.literal("B")),
+    /** Style page extras, each a key of TINTS / PATTERNS / CORNERS in src/lib/theme.ts. Unset or unknown: the stock look. */
+    tint: v.optional(v.string()),
+    pattern: v.optional(v.string()),
+    corners: v.optional(v.string()),
     subcategoryEnabled: v.boolean(),
     autocompleteEnabled: v.boolean(),
     /** The person asked for attached photos to be read by Claude (shared/receiptAi.ts). Unset: read on the device only. */
