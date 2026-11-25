@@ -364,7 +364,8 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   /**
    * With "Read photos with AI" on, the first photo just attached goes to Claude (convex/ai.ts readReceipt),
    * and what comes back fills only what is still empty when it arrives: the note, the description, a
-   * category nobody picked, and on a new entry a date nobody changed. A failed read fills nothing.
+   * category nobody picked, and on a new entry a date nobody changed. A failed read fills nothing,
+   * and when none of those is open the photo is not sent at all.
    */
   const readReceipt = useAction(api.ai.readReceipt);
   const { user } = useStore();
@@ -372,6 +373,9 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   async function readPhoto(files: File[]) {
     const type = latest.current.type;
     if (!user?.ai || !settings.receiptAiEnabled || type === "transfer" || !navigator.onLine) return;
+    // everything a read could fill is already filled: don't spend a call on it
+    const now = latest.current;
+    if (now.note.trim() && now.description.trim() && (now.categoryId || chosen.current.category) && (id || draft || now.date !== initial.date)) return;
     setReadingPhoto(true);
     try {
       const small = await compressImage(files[0], RECEIPT_MAX_EDGE);
