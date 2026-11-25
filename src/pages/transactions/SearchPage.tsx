@@ -7,7 +7,8 @@ import { api } from "../../../convex/_generated/api";
 import { useStore, useView } from "@/lib/store";
 import { txSearch, txTags } from "../../../shared/views";
 import { todayISO } from "../../../shared/dates";
-import { SEARCH_TIMEOUT_MS } from "../../../shared/searchAi";
+import { SEARCH_TIMEOUT_MS, validateAnswer } from "../../../shared/searchAi";
+import { answerSearch } from "../../../shared/searchAnswer";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { TransactionList } from "@/components/tx/TransactionList";
@@ -26,7 +27,7 @@ const FILTERS = ["from", "to", "type", "account", "category", "tag", "min", "max
 const amountOf = (s: string) => (s.trim() && Number(s) >= 0 ? Number(s) : undefined);
 
 export default function SearchPage() {
-  const { accounts, categories, ledger } = useApp();
+  const { accounts, categories, ledger, fmt } = useApp();
   // Kept in the URL, so opening a result and coming back finds the same search.
   const [sp, setSp] = useSearchParams();
   const param = <T extends string>(key: string, fallback: T) => [
@@ -47,7 +48,10 @@ export default function SearchPage() {
   // driven from there would lose keystrokes and its caret. The URL just mirrors it.
   const [urlQ, setUrlQ] = param("q", "");
   const [q, setQState] = useState<string>(urlQ);
-  const setQ = (v: string) => { setQState(v); setUrlQ(v); setAiNote(""); asked.current = ""; };
+  // How Ask AI said to work out an answer to the question, as "spent.total.category.highest.5" (shared/searchAi.ts
+  // SearchAnswer). It belongs to the question, so typing drops it; the filters below can change and it is worked out again.
+  const [answerParam, setAnswerParam] = param("answer", "");
+  const setQ = (v: string) => { setQState(v); setUrlQ(v); if (answerParam) setAnswerParam(""); setAiNote(""); asked.current = ""; };
   const [showFilters, setShowFilters] = useState(() => FILTERS.some((k) => sp.has(k)));
   const [from, setFrom] = param("from", "");
   const [to, setTo] = param("to", "");
@@ -62,12 +66,21 @@ export default function SearchPage() {
   // Ask AI shows only for someone the superadmin turned AI on for (convex/lib/auth.ts aiAllowed)
   const { user } = useStore();
   const tags = useMemo(() => txTags(view), [view]);
-  const active = !!(q.trim() || from || to || type !== "any" || account !== "any" || category !== "any" || tag !== "any" || min || max);
-  const results = useMemo(() => active ? txSearch(view, {
+  // checked again here: the URL can be typed into
+  const answer = useMemo(() => {
+    const [of, measure, by, order, limit] = answerParam.split(".");
+    return validateAnswer({ of, measure, by, order, limit: Number(limit) });
+  }, [answerParam]);
+  // a question about everything ("how much did I save") has an answer and no filters
+  const active = !!(q.trim() || from || to || type !== "any" || account !== "any" || category !== "any" || tag !== "any" || min || max || answer);
+  const args = useMemo(() => ({
     q: q.trim() || undefined, from: from || undefined, to: to || undefined, type: type === "any" ? undefined : type,
     accountIds: account === "any" ? undefined : account.split(","), categoryIds: category === "any" ? undefined : category.split(","), tag: tag === "any" ? undefined : tag,
     min: amountOf(min), max: amountOf(max),
-  }) : undefined, [view, active, q, from, to, type, account, category, tag, min, max]);
+  }), [q, from, to, type, account, category, tag, min, max]);
+  const results = useMemo(() => (active ? txSearch(view, args) : undefined), [view, active, args]);
+  // The answer is worked out here, from the entries listed under it, so a changed filter changes it too.
+  const answered = useMemo(() => (answer && results ? answerSearch(view, results, answer, args, fmt, todayISO()) : null), [view, results, answer, args, fmt]);
   const bulk = useBulkSelect();
   // every match counts in the totals and Select all; the list renders a page at a time
   const [more, setMore] = useState<{ for: typeof results; n: number }>({ for: undefined, n: PAGE });
@@ -76,7 +89,8 @@ export default function SearchPage() {
 
   /**
    * Ask AI: Claude turns the typed question into the filters above (convex/ai.ts askSearch) and the
-   * search itself still runs here, on the device. Nothing is sent until the button is tapped. Offline,
+   * search itself still runs here, on the device. For a question that wants a figure it also says how
+   * to work one out, and that too is done here. Nothing is sent until the button is tapped. Offline,
    * on a slow or failed answer, or when no filter comes back, the typed text stays as it is and is
    * searched the plain way, with one line saying so.
    */
@@ -102,10 +116,11 @@ export default function SearchPage() {
       put("q", f.text); put("from", f.from); put("to", f.to); put("type", f.type);
       put("account", f.accountIds?.join(",")); put("category", f.categoryIds?.join(",")); put("tag", f.tag);
       put("min", f.min?.toString()); put("max", f.max?.toString());
+      put("answer", f.answer && [f.answer.of, f.answer.measure, f.answer.by, f.answer.order, f.answer.limit].join("."));
       setSp(n, { replace: true });
       setQState(f.text ?? "");
       setShowFilters(true);
-      setAiNote(`Filters set from "${question}". Change any of them below.`);
+      setAiNote(f.answer ? `Answered "${question}" from the entries below. Change any filter and it is worked out again.` : `Filters set from "${question}". Change any of them below.`);
     } catch (e) {
       // a sentence meant for the person (the month's limit, too long, not set up), or the call never got through
       plain(e instanceof ConvexError ? String(e.data) : "AI couldn't be reached");
@@ -150,6 +165,18 @@ export default function SearchPage() {
       <Page className={cn(bulk.active && "pb-40")}>
         {!active ? <div className="p-10 text-center text-sm text-muted-foreground">Type to search, or open the filters.{user?.ai ? ` Or type a question, like "food over 500 last month", and tap Ask AI.` : ""}</div> : null}
         {active && results === undefined ? <div className="p-8 text-center text-sm text-muted-foreground">Searching…</div> : null}
+        {answered ? (
+          <div className="bg-card border-b text-sm">
+            <p role="status" className="px-4 py-3">{answered.text}</p>
+            {/* a single row is already in the sentence */}
+            {answered.rows.length > 1 ? answered.rows.map((r) => (
+              <div key={r.key} className="flex justify-between gap-3 px-4 py-2 border-t">
+                <span className="min-w-0 truncate">{r.label}</span>
+                {answered.kind === "count" ? <span className="tabular">{r.value}</span> : <Money amount={r.value} kind={answered.kind} />}
+              </div>
+            )) : null}
+          </div>
+        ) : null}
         {results ? <TransactionList txs={results.slice(0, shown)} selectable={bulk.active} selected={bulk.selected} onToggle={bulk.toggle} onLongPress={bulk.start} emptyText="No matches" /> : null}
         {results && results.length > shown ? (
           <div className="p-4 text-center"><Button variant="outline" onClick={() => setMore({ for: results, n: shown + PAGE })}>Show more ({results.length - shown} left)</Button></div>
