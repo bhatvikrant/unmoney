@@ -144,7 +144,7 @@ export type AccountFields = {
  */
 const SETTINGS_PATCH_KEYS = [
   "mainCurrency", "symbol", "symbolPosition", "decimals", "monthStartDay", "weekStartDay", "carryOver", "startScreen", "theme", "accent",
-  "colorSet", "subcategoryEnabled", "autocompleteEnabled", "receiptAiEnabled", "timeInputEnabled", "repeatDisplay", "cardExpenseDisplay", "lockAfter", "dismissedRecurring", "dismissedSips", "recentImports",
+  "colorSet", "subcategoryEnabled", "autocompleteEnabled", "receiptAiEnabled", "timeInputEnabled", "repeatDisplay", "cardExpenseDisplay", "lockAfter", "dismissedRecurring", "dismissedSips", "recentImports", "recapOneOffs",
 ] as const;
 export type SettingsPatch = Partial<Pick<Doc<"settings">, (typeof SETTINGS_PATCH_KEYS)[number]>>;
 export type ImportRow = {
