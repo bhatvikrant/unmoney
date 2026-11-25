@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useAction, useConvex } from "convex/react";
 import { ConvexError } from "convex/values";
 import { Copy, ExternalLink, ScanText, X } from "lucide-react";
+import { AiHow } from "@/components/shell/misc";
 import { toast } from "sonner";
 import { api } from "../../../convex/_generated/api";
 import { useApp } from "@/lib/app";
@@ -117,7 +118,7 @@ export function SplitDialog({ open, onOpenChange, txs }: { open: boolean; onOpen
         {canRead && !bill ? (
           <div className="space-y-1.5">
             <Button variant="outline" size="sm" onClick={() => void readItems()} disabled={reading || !status.connected}><ScanText className="size-4" />{reading ? "Reading the bill…" : "Read items from the photo"}</Button>
-            <p className="text-xs text-muted-foreground">To split it by who had what. This sends the entry's photo to Anthropic's Claude, which lists the items on the bill.</p>
+            <p className="text-xs text-muted-foreground">To split it by who had what. This sends the entry's photo to Anthropic's Claude, which lists the items on the bill. <AiHow feature="split" /></p>
             {mine?.problem ? <p role="alert" className="text-sm text-destructive">{mine.problem} You can still split the whole amount.</p> : null}
           </div>
         ) : null}

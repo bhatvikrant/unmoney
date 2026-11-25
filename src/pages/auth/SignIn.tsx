@@ -115,6 +115,8 @@ export default function SignIn() {
           If you like, connect Gmail and UnMoney turns the payment mails from your bank and shops into entries you check and save.
         </motion.p>
         <motion.p {...rise(0.55, 6)} className="mt-3 text-xs text-muted-foreground/80">
+          <Link to="/features" className="underline underline-offset-2 hover:text-foreground">AI features</Link>
+          <span aria-hidden="true" className="mx-2">·</span>
           <Link to="/privacy" className="underline underline-offset-2 hover:text-foreground">Privacy policy</Link>
         </motion.p>
       </div>

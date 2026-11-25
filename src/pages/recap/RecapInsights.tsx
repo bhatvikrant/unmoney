@@ -19,6 +19,7 @@ import { useApp } from "@/lib/app";
 import { useToday } from "@/lib/today";
 import { monthLabel } from "@/lib/format";
 import { BottomSheet } from "@/components/shell/BottomSheet";
+import { AiHow } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 
 export function RecapInsights({ recapKey, stored, open, onOpenChange }: { recapKey: string; stored: StoredInsights | null; open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -88,7 +89,7 @@ export function RecapInsights({ recapKey, stored, open, onOpenChange }: { recapK
                 </ul>
               </div>
             ) : null}
-            <p className="text-xs text-muted-foreground">Written by Claude from this {year ? "year's" : "month's"} totals. The figures are UnMoney's own.</p>
+            <p className="text-xs text-muted-foreground">Written by Claude from this {year ? "year's" : "month's"} totals. The figures are UnMoney's own. <AiHow feature="recap" /></p>
             {changed ? (
               <div className="space-y-2 border-t pt-3">
                 <p className="text-xs text-muted-foreground">{blocked || "Your entries have changed since this was written. Asking again sends the same kind of summary."}</p>
@@ -102,7 +103,7 @@ export function RecapInsights({ recapKey, stored, open, onOpenChange }: { recapK
               To point out what stands out{year ? "" : " and suggest next month's budgets"}, UnMoney sends Anthropic's Claude a summary of this{" "}
               {year ? "year and the two before it" : "month and the five before it"}: totals spent and received, your largest categories by name with
               what went out under each, your budgets and whether they held, and the notes you logged most often. It does not send individual
-              entries, dates, accounts or photos. Nothing changes until you set a budget yourself.
+              entries, dates, accounts or photos. Nothing changes until you set a budget yourself. <AiHow feature="recap" />
             </p>
             {blocked ? <p className="text-xs text-muted-foreground">{blocked}</p> : null}
             <div className="flex gap-2 pt-1">

@@ -1,9 +1,20 @@
 import { useId, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { Link } from "react-router";
 import { cn } from "@/lib/utils";
+import { useLeaveTo } from "@/lib/nav";
+import type { AiFeature } from "../../../shared/aiCost";
 import { Info, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+/** "How it works", beside an AI feature: opens that feature's section of the public features page (pages/features/FeaturesPage.tsx). */
+export function AiHow({ feature, className }: { feature: AiFeature; className?: string }) {
+  const leaveTo = useLeaveTo();
+  const to = `/features#${feature}`;
+  // through the leave guard: a half-filled entry asks before it is dropped
+  return <Link to={to} onClick={(e) => { e.stopPropagation(); leaveTo(to, e); }} className={cn("whitespace-nowrap underline underline-offset-2 hover:text-foreground", className)}>How it works</Link>;
+}
 
 /** Small (i) icon: explains on hover (desktop) and on tap (touch). */
 export function InfoHint({ text, label = "What does this do?" }: { text: ReactNode; label?: string }) {
