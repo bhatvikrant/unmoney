@@ -8,10 +8,11 @@ export function BottomSheet({ open, onOpenChange, title, children, className, de
 }) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className={cn("md:max-w-xl md:mx-auto md:rounded-t-xl", className)}>
+      {/* no description: say so, rather than have a screen reader announce one the sheet does not have */}
+      <DrawerContent {...(description ? {} : { "aria-describedby": undefined })} className={cn("md:max-w-xl md:mx-auto md:rounded-t-xl", className)}>
         <DrawerHeader className="py-2">
           <DrawerTitle className="text-sm">{title}</DrawerTitle>
-          <DrawerDescription className={description ? "" : "sr-only"}>{description ?? "Choose an option"}</DrawerDescription>
+          {description ? <DrawerDescription>{description}</DrawerDescription> : null}
         </DrawerHeader>
         <div className="overflow-y-auto px-2 pb-4 safe-bottom max-h-[70vh]">{children}</div>
       </DrawerContent>
