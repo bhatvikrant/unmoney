@@ -7,6 +7,7 @@ import type { Doc } from "./_generated/dataModel";
 import { SUPERADMIN_EMAIL, dayAt } from "../shared/admin";
 import { QUICK_MAX_SENTENCE, QUICK_MONTHLY_CAP } from "../shared/quickAi";
 import { SEARCH_MAX_QUESTION, SEARCH_MODEL, SEARCH_MONTHLY_CAP, SYSTEM_PROMPT } from "../shared/searchAi";
+import { SPLIT_MONTHLY_CAP } from "../shared/billSplit";
 import { STATEMENT_MAX_LINES, STATEMENT_MODEL } from "../shared/statementAi";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -252,4 +253,46 @@ test("a file's layout is worked out by AI only for someone AI is turned on for",
   await expect(t.withIdentity({ subject: `${admin}|s` }).action(api.ai.readLayout, file)).rejects.toThrow("set up");
   // nothing was counted or sent
   expect(await t.run((ctx) => ctx.db.query("aiDaily").collect())).toEqual([]);
+});
+
+test("bill splitting: only with AI allowed and photo reading turned on, and no more than the month's bills", async () => {
+  const t = convexTest({ schema, modules });
+  const userId = await t.run((ctx) => ctx.db.insert("users", { email: "a@example.com" }));
+  const asUser = t.withIdentity({ subject: `${userId}|s` });
+  const read = (over: object = {}) => asUser.action(api.ai.readBill, { image: new Uint8Array([1, 2, 3]).buffer, mediaType: "image/webp", amount: 110000, ...over });
+  const calls = () => t.run(async (ctx) => (await ctx.db.query("aiDaily").collect()).reduce((n, r) => n + r.calls, 0));
+
+  await expect(t.action(api.ai.readBill, { image: new Uint8Array([1]).buffer, mediaType: "image/webp", amount: 110000 })).rejects.toThrow("Sign in");
+  // the superadmin turned AI on for them, but they never asked for photos to be read
+  await t.run((ctx) => ctx.db.patch(userId, { aiEnabled: true }));
+  await expect(read()).rejects.toThrow("turned off");
+  // they asked, and the superadmin has since turned AI off for them
+  const settingsId = await t.run((ctx) => ctx.db.insert("settings", {
+    userId, receiptAiEnabled: true, onboarded: true, mainCurrency: "INR", symbol: "₹", symbolPosition: "before", decimals: 2, monthStartDay: 1, weekStartDay: 0,
+    carryOver: false, startScreen: "daily", theme: "system", accent: "neutral", colorSet: "A", subcategoryEnabled: true, autocompleteEnabled: true,
+    timeInputEnabled: false, repeatDisplay: "onDate", cardExpenseDisplay: "atTime", lockAfter: "always",
+  } as never));
+  await t.run((ctx) => ctx.db.patch(userId, { aiEnabled: false }));
+  await expect(read()).rejects.toThrow("turned off");
+  await t.run((ctx) => ctx.db.patch(userId, { aiEnabled: true }));
+  // an empty photo, or no amount to check the bill against, is refused whoever asks
+  await expect(read({ image: new ArrayBuffer(0) })).rejects.toThrow("can't be read");
+  await expect(read({ amount: 0 })).rejects.toThrow("can't be read");
+  // both switches on, no key in tests: it stops before anything is counted or sent
+  await expect(read()).rejects.toThrow("set up");
+  expect(await calls()).toBe(0);
+
+  // with a key, a month that is used up refuses before Claude is asked, and counts nothing more
+  for (let i = 0; i < SPLIT_MONTHLY_CAP; i++) expect(await t.mutation(internal.usage.claimAi, { userId, feature: "split", cap: SPLIT_MONTHLY_CAP })).toBe(true);
+  vi.stubEnv("ANTHROPIC_API_KEY", "test");
+  try {
+    await expect(read()).rejects.toThrow(`${SPLIT_MONTHLY_CAP} bills this month`);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  expect(await calls()).toBe(SPLIT_MONTHLY_CAP);
+  // bills do not use up the month's photos
+  expect(await t.mutation(internal.usage.claimAi, { userId, feature: "receipt", cap: 1 })).toBe(true);
+  await t.run((ctx) => ctx.db.patch(settingsId, { receiptAiEnabled: false }));
+  await expect(read()).rejects.toThrow("turned off");
 });

@@ -150,6 +150,13 @@ export default function PrivacyPage() {
             is stored as before. Turn the setting off and photos are again read only on your device.
           </p>
           <p className="mt-3">
+            With that setting on, an expense that has a photo can be split by what each person had. Only when you tap "Read
+            items from the photo" while splitting it, the entry's first photo is sent to the same API, reduced in size, with
+            the code of your currency and nothing else. Claude lists the items, taxes, other charges and total printed on the
+            bill; UnMoney checks that they add up and works out the shares itself. The names of the people you split with are
+            not sent to Anthropic.
+          </p>
+          <p className="mt-3">
             When you tap "Get insights" on a monthly or yearly recap, and only then, a summary of that period is sent to the
             same API: your currency, what you spent and received in the period and in up to five months (or two years) before
             it, the names of your ten largest expense categories with what went out under each, your budgets' limits and
