@@ -18,6 +18,7 @@ import { MONTH_LONG } from "./dates";
 import { monthRange, parseMonthKey, shiftMonthKey, yearRange } from "./period";
 import { monthRecap, yearRecap, type RecapCard } from "./recap";
 import { settingsOf, statsByCategory } from "./views";
+import { cutText } from "./categoryLint";
 
 /** This feature's own model and effort, so they can change without touching the other AI features. */
 export const RECAP_MODEL = "claude-haiku-5-5";
@@ -77,7 +78,7 @@ export type RecapFacts = {
 /** A checked answer. A sentence carries money as {m:<minor units>}, for the app to print in the person's format (fillMoney). */
 export type RecapInsights = { insights: string[]; budgets: { categoryId: Id<"categories">; amount: number; why: string }[] };
 
-const clip = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, MAX_NAME);
+const clip = (s: string) => cutText(s.replace(/\s+/g, " ").trim(), MAX_NAME);
 const sum = (ns: number[]) => ns.reduce((a, n) => a + n, 0);
 
 /** The same small fingerprint Tidy up uses for its summary (shared/tidyAi.ts). */

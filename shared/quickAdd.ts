@@ -6,6 +6,7 @@
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { Snapshot, Template, TxFields } from "./ops";
 import { parseNumber, toMinor } from "./money";
+import { cutText } from "./categoryLint";
 
 type TxType = "income" | "expense" | "transfer";
 
@@ -147,7 +148,7 @@ export function parseEntryLink(sp: URLSearchParams, snap: Snapshot): LinkPrefill
     }
   }
   const note = get("note");
-  if (note) out.note = note.slice(0, 200);
+  if (note) out.note = cutText(note, 200);
   const tags = get("tags");
   if (tags) out.tags = [...new Set(tags.split(",").map((x) => x.trim().replace(/^#/, "")).filter(Boolean))];
   return out;

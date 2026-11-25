@@ -11,7 +11,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import type { ImportRow } from "./ops";
-import { normNote } from "./categoryLint";
+import { cutText, normNote } from "./categoryLint";
 
 export const STATEMENT_MODEL = "claude-haiku-5-5";
 export const STATEMENT_EFFORT = "low";
@@ -41,7 +41,7 @@ export type StatementSuggestion = { note?: string; category?: string; subcategor
 
 type Snap = { settings: Doc<"settings">[]; categories: Doc<"categories">[]; transactions: Doc<"transactions">[] };
 
-const clip = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, STATEMENT_MAX_TEXT);
+const clip = (s: string) => cutText(s.replace(/\s+/g, " ").trim(), STATEMENT_MAX_TEXT);
 
 /** What an import row asks about: its bank text (kept whole in the description when the note was cut) and its direction. Null for a transfer or a row with no text. */
 export function lineOf(row: Pick<ImportRow, "type" | "note" | "description">): StatementLine | null {
@@ -94,7 +94,7 @@ export function buildStatementContext(snap: Snap): { context: StatementContext; 
     const e = seen.get(key);
     if (e) { e.used++; continue; }
     const category = shortOf.get(t.subcategoryId ?? "") ?? shortOf.get(t.categoryId ?? "");
-    seen.set(key, { note: t.note.trim().slice(0, MAX_NOTE), ...(category ? { category } : {}), used: 1 });
+    seen.set(key, { note: cutText(t.note.trim(), MAX_NOTE), ...(category ? { category } : {}), used: 1 });
   }
   return {
     context: {
@@ -174,7 +174,7 @@ export function validateStatement(raw: unknown, lines: StatementLine[], built: R
     const i = typeof r.id === "string" && /^r\d+$/.test(r.id) ? Number(r.id.slice(1)) - 1 : -1;
     if (!(i >= 0 && i < lines.length) || out[i]) continue;
     const s: StatementSuggestion = {};
-    const note = typeof r.note === "string" ? r.note.replace(/\s+/g, " ").trim().slice(0, MAX_NOTE) : "";
+    const note = typeof r.note === "string" ? cutText(r.note.replace(/\s+/g, " ").trim(), MAX_NOTE) : "";
     const text = squash(lines[i].text);
     if (note && (own.has(normNote(note)) || note.split(/[^\p{L}\p{N}]+/u).some((w) => w.length >= 3 && text.includes(squash(w))))) s.note = note;
     const cat = typeof r.category === "string" && Object.hasOwn(built.ids, r.category) ? byId.get(built.ids[r.category]) : undefined;
@@ -232,7 +232,7 @@ export type StatementLayout = {
  * header or the sample are left out; the rest keep their place in the file as their id.
  */
 export function buildLayoutInput(header: string[], rows: string[][], card: boolean): LayoutInput {
-  const cell = (s: string | undefined) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, LAYOUT_CELL);
+  const cell = (s: string | undefined) => cutText((s ?? "").replace(/\s+/g, " ").trim(), LAYOUT_CELL);
   const sample = rows.slice(0, LAYOUT_ROWS);
   const width = Math.min(LAYOUT_COLS, Math.max(header.length, ...sample.map((r) => r.length)));
   const columns = Array.from({ length: width }, (_, c) => ({ id: `c${c + 1}`, name: cell(header[c]), values: sample.map((r) => cell(r[c])) }));

@@ -11,6 +11,7 @@ import { internal } from "./_generated/api";
 import { currentUserId } from "./lib/auth";
 import { dayAt, lengthBucket } from "../shared/admin";
 import { costOf } from "../shared/aiCost";
+import { cutText } from "../shared/categoryLint";
 
 const counts = { activeMs: v.number(), bytesDown: v.number(), bytesUp: v.number(), photoFetches: v.number(), opsSent: v.number() };
 type Counts = { activeMs: number; bytesDown: number; bytesUp: number; photoFetches: number; opsSent: number };
@@ -20,7 +21,7 @@ const COUNT_KEYS = ["activeMs", "bytesDown", "bytesUp", "photoFetches", "opsSent
 const SESSION_TTL_MS = 120 * 24 * 60 * 60 * 1000;
 const PRUNE_BATCH = 500;
 
-const clip = (s: string, n = 40) => s.slice(0, n);
+const clip = (s: string, n = 40) => cutText(s, n);
 const bump = (r: Record<string, number>, k: string, by = 1) => ({ ...r, [k]: (r[k] ?? 0) + by });
 
 export const ping = mutation({

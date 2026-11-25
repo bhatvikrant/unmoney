@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import type { Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "./ops";
-import { lintCategories } from "./categoryLint";
+import { cutText, lintCategories } from "./categoryLint";
+import { buildSummary } from "./tidyAi";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -36,4 +37,18 @@ test("without a starter category among the duplicates, the most-used one still w
   let { s, dup } = withDuplicate("Coffee");
   s = run(s, "categories.create", { type: "expense", name: "coffee" }).snap;
   expect(mergeOf(s).targetId).toBe(dup);
+});
+
+test("text is never cut through the middle of an emoji", () => {
+  expect(cutText("ab😀", 3)).toBe("ab");
+  expect(cutText("ab😀", 4)).toBe("ab😀");
+  expect(cutText("abc", 2)).toBe("ab");
+
+  // the summary sent for AI suggestions: a note whose 40th character is the first half of an emoji
+  const { s, dup } = withDuplicate("food");
+  const cash = s.accounts.find((a) => a.name === "Cash")!._id;
+  const note = `${"a".repeat(39)}😀 lunch`;
+  const snap = run(s, "transactions.create", { type: "expense", accountId: cash, categoryId: dup, amount: 100, note, tags: [], photoIds: [], date: "2026-03-06" }).snap;
+  // JSON.stringify writes half an emoji as an escape, which is what Convex refused to return
+  expect(JSON.stringify(buildSummary(snap, true).summary)).not.toContain("\\ud83d");
 });
