@@ -656,7 +656,7 @@ export default defineSchema({
   aiDaily: defineTable({
     userId: v.id("users"),
     day: v.string(),
-    feature: v.union(v.literal("tidy"), v.literal("gmail"), v.literal("receipt")),
+    feature: v.union(v.literal("tidy"), v.literal("gmail"), v.literal("receipt"), v.literal("quick")),
     calls: v.number(),
     inputTokens: v.number(),
     outputTokens: v.number(),

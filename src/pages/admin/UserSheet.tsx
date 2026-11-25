@@ -16,7 +16,7 @@ const FEATURE_LABELS: Record<string, string> = {
   tidyUp: "Tidy-up", iphoneShortcut: "iPhone shortcut", passcode: "Passcode", subcategories: "Subcategories", carryOver: "Carry-over", timeInput: "Time input",
 };
 
-const AI_LABELS = { gmail: "Gmail reading", receipt: "Photo reading", tidy: "Category tidy-up" } as const;
+const AI_LABELS = { gmail: "Gmail reading", receipt: "Photo reading", quick: "Typed entries",tidy: "Category tidy-up" } as const;
 
 export function UserSheet({ userId, onClose, data, today, days }: { userId: string | null; onClose: () => void; data: Overview; today: string; days: number }) {
   const user = data.users.find((u) => u.id === userId);

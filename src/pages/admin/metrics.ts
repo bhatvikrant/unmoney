@@ -130,7 +130,7 @@ export function totals(daily: Daily[]) {
 
 /** What Claude cost over some rows of aiDaily: in all, per feature (dollars and calls), how many users it was for, and the last day it was asked. */
 export function aiTotals(rows: Ai[]) {
-  const t = { costUsd: 0, calls: 0, inputTokens: 0, outputTokens: 0, tidy: 0, gmail: 0, receipt: 0, tidyCalls: 0, gmailCalls: 0, receiptCalls: 0, lastDay: "" };
+  const t = { costUsd: 0, calls: 0, inputTokens: 0, outputTokens: 0, tidy: 0, gmail: 0, receipt: 0, quick: 0, tidyCalls: 0, gmailCalls: 0, receiptCalls: 0, quickCalls: 0, lastDay: "" };
   const users = new Set<string>();
   for (const r of rows) {
     users.add(r.userId);
@@ -151,8 +151,8 @@ export function aiByUser<U extends { id: string }>(users: U[], rows: Ai[]) {
 }
 
 /** Claude's cost per day from `from` to `to`, split by feature; zeros where nothing was asked. */
-export function aiSeries(rows: Ai[], from: string, to: string): { day: string; tidy: number; gmail: number; receipt: number }[] {
-  const by = new Map(daysBetween(from, to).map((day) => [day, { day, tidy: 0, gmail: 0, receipt: 0 }]));
+export function aiSeries(rows: Ai[], from: string, to: string): { day: string; tidy: number; gmail: number; receipt: number; quick: number }[] {
+  const by = new Map(daysBetween(from, to).map((day) => [day, { day, tidy: 0, gmail: 0, receipt: 0, quick: 0 }]));
   for (const r of rows) { const p = by.get(r.day); if (p) p[r.feature] += r.costUsd; }
   return [...by.values()];
 }

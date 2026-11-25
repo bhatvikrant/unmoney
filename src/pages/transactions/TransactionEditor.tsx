@@ -16,6 +16,7 @@ import { amountInput, localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { addDays, todayISO } from "../../../shared/dates";
 import { evaluateExpression, formatRate, toMinor } from "../../../shared/money";
 import { RECEIPT_MAX_BYTES, RECEIPT_MAX_EDGE, isReceiptMediaType } from "../../../shared/receiptAi";
+import { QUICK_MAX_SENTENCE } from "../../../shared/quickAi";
 import { compressImage } from "@/lib/image";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useLeaveTo, useOpenEntry } from "@/lib/nav";
@@ -404,6 +405,64 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     }
   }
 
+  /**
+   * A sentence typed or dictated above a new entry ("450 swiggy dinner hdfc yesterday") goes to Claude
+   * when "Fill in" is tapped (convex/ai.ts quickEntry). The person just said it on purpose, so what it
+   * says replaces what is in the form, and what it does not say is left alone. Nothing is saved here;
+   * offline or on a failure the form stays as it was.
+   */
+  const quickEntry = useAction(api.ai.quickEntry);
+  const [sentence, setSentence] = useState("");
+  const [filling, setFilling] = useState(false);
+  async function fillFromSentence() {
+    if (filling || !sentence.trim()) return;
+    if (!navigator.onLine) { toast.error("You're offline. Fill in the entry yourself."); return; }
+    setFilling(true);
+    try {
+      const r = await quickEntry({ sentence, today: todayISO() });
+      const p = latest.current;
+      const patch: Partial<Form> = {};
+      const type = r.type ?? p.type;
+      // the category picked so far is of the other kind
+      if (type !== p.type) { chosen.current.category = false; patch.type = type; patch.categoryId = undefined; patch.subcategoryId = undefined; }
+      const live = (c?: string) => !!c && categories.some((x) => x._id === c && !x.deletedAt && !x.archivedAt);
+      if (type !== "transfer" && live(r.categoryId)) {
+        chosen.current.category = true;
+        patch.categoryId = r.categoryId;
+        patch.subcategoryId = live(r.subcategoryId) ? r.subcategoryId : undefined;
+      }
+      const method = (a?: Id<"accounts">) => (accounts.some((x) => x._id === a && !x.archivedAt) ? a : undefined);
+      if (method(r.accountId)) { chosen.current.account = true; patch.accountId = r.accountId; }
+      const to = type === "transfer" ? method(r.toAccountId) : undefined;
+      if (to && to !== (patch.accountId ?? p.accountId)) patch.toAccountId = to;
+      // an amount in another of their currencies picks that currency, as the globe button would; with none named it goes where a typed one would
+      const cur = currencies.find((c) => c.code === (r.currency ?? p.subCurrency));
+      if (r.amount && (cur || !r.currency)) {
+        if (cur && r.currency) {
+          patch.subCurrency = cur.code; patch.rate = cur.rate; patch.rateFromFeed = !cur.isCustom;
+          if (!cur.isCustom) void refreshRates();
+        }
+        const decimals = cur?.decimals ?? settings.decimals;
+        patch[cur ? "subAmount" : "amount"] = localNumber(Math.round(r.amount * 10 ** decimals) / 10 ** decimals);
+      }
+      if (r.date) patch.date = r.date;
+      if (r.time && settings.timeInputEnabled) patch.time = r.time;
+      if (r.note) patch.note = r.note;
+      if (r.description) patch.description = r.description;
+      if (!Object.keys(patch).length) { toast.error("Couldn't make an entry out of that. Fill it in yourself."); return; }
+      // a note that was just filled in is not being typed: no list of suggestions under it
+      setNotePicked(true);
+      setF((x) => ({ ...x, ...patch }));
+      setSentence("");
+      toast.success("Entry filled in", { description: "Check it before you save" });
+    } catch (e) {
+      // a sentence meant for the person (the month's limit, not set up), or a dropped connection
+      toast.error(e instanceof ConvexError ? String(e.data) : "Couldn't fill that in. Enter it yourself this time.");
+    } finally {
+      setFilling(false);
+    }
+  }
+
   const isEdit = !!id;
   const inSeries = !!existing?.repeatId;
 
@@ -580,6 +639,18 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       <PageHeader back={!panel} title={title} right={panel ? <Button variant="ghost" size="icon" aria-label="Close" title="Close (Esc)" onClick={() => closeEntry()}><X className="size-4" /></Button> : undefined} />
       <Page className={panel ? "pb-4" : isEdit ? "pb-36" : "pb-24"}>
         {draft ? <GmailBanner from={draft.from} receivedAt={draft.receivedAt} subject={draft.subject} messageId={draft.messageId} /> : existing?.source ? <GmailBanner messageId={existing.source.messageId} /> : null}
+        {user?.ai && !isEdit && !draft ? (
+          <div className="px-4 pt-4">
+            <div className="flex gap-2">
+              <Input aria-label="Describe the entry in a sentence" value={sentence} maxLength={QUICK_MAX_SENTENCE} disabled={filling} placeholder="450 swiggy dinner hdfc yesterday" className="h-9"
+                onChange={(e) => setSentence(e.target.value)}
+                // Enter here fills the form: stopped before it reaches the form's own Enter, which saves
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void fillFromSentence(); } }} />
+              <Button variant="outline" className="h-9 shrink-0" disabled={filling || !sentence.trim()} onClick={() => void fillFromSentence()}>{filling ? "Filling in…" : "Fill in"}</Button>
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">Type or dictate the entry. "Fill in" sends this sentence to Anthropic's Claude, with the names of your categories and payment methods and the notes you use most. You check the entry before saving.</p>
+          </div>
+        ) : null}
         <div className="grid grid-cols-3 gap-2 p-4">
           {(["income", "expense", "transfer"] as const).map((t) => (
             <button
