@@ -53,6 +53,8 @@ const MAX_CARD_TEXT = 160;
 const MAX_TITLE = 40;
 /** A budget is only suggested from this many months of the person's own spending. */
 const BUDGET_MIN_MONTHS = 3;
+/** How many answers to "A one-off?" are kept (settings.recapOneOffs): five years of one a month. */
+export const RECAP_ONE_OFFS_MAX = 60;
 /** A sentence a little over its limit is better than none; past this it is dropped. */
 const SLACK = 1.5;
 
@@ -151,8 +153,12 @@ export function buildRecapFacts(snap: Snapshot, key: string): RecapFacts | null 
   for (const t of snap.transactions) if (t.date < first) first = t.date;
   const periods = Array.from({ length: year !== null ? HISTORY_YEARS : HISTORY_MONTHS }, (_, i) => {
     const k = year !== null ? String(year - i) : shiftMonthKey(key, -i);
-    return { label: year !== null ? k : `${monthName(k)} ${parseMonthKey(k).y}`, range: year !== null ? yearRange(Number(k), msd) : monthRange(k, msd) };
+    return { key: k, label: year !== null ? k : `${monthName(k)} ${parseMonthKey(k).y}`, range: year !== null ? yearRange(Number(k), msd) : monthRange(k, msd) };
   }).filter((p, i) => i === 0 || p.range.to >= first);
+  // The months the person said were a one-off for a category (the recap's question on a jump): not part of what is
+  // usual for it. Only as a month before this one, so answering on a recap does not change that recap's own facts.
+  const marked = new Set((settings.recapOneOffs ?? []).filter((o) => o.yes).map((o) => `${o.categoryId}:${o.month}`));
+  const oneOff = (id: string, p: number) => marked.has(`${id}:${periods[p].key}`);
   const stats = periods.map((p) => ({
     out: statsByCategory(snap, p.range.from, p.range.to, "expense"),
     income: statsByCategory(snap, p.range.from, p.range.to, "income").total,
@@ -193,18 +199,21 @@ export function buildRecapFacts(snap: Snapshot, key: string): RecapFacts | null 
       const short = `c${i + 1}`;
       const row: Row = { id: short, name: clip(name) };
       per.forEach((a, p) => { if (a) row[`p${p}`] = money(`${short}.p${p}`, a); });
-      const earlier = per.slice(1);
-      if (earlier.length && per[0] !== per[1]) row.change = money(`${short}.change`, per[0] - per[1]);
+      const earlier = per.slice(1).filter((_, p) => !oneOff(id, p + 1));
+      const left = per.flatMap((_, p) => (p > 0 && oneOff(id, p) ? [`p${p}`] : []));
+      if (left.length) row.oneOff = left.join(", ");
+      if (per.length > 1 && per[0] !== per[1]) row.change = money(`${short}.change`, per[0] - per[1]);
       if (earlier.length >= 2) {
         const avg = Math.round(sum(earlier) / earlier.length);
         row.avg = money(`${short}.avg`, avg);
         if (per[0] !== avg) row.vsAvg = money(`${short}.vsAvg`, per[0] - avg);
       }
       Object.assign(row, budgetOf(id, short));
-      // a budget can go on a main expense category still in use, and only from enough of its own history
-      if (year === null && live.has(id) && per.length >= BUDGET_MIN_MONTHS) {
+      // a budget can go on a main expense category still in use, and only from enough of its own history, one-offs aside
+      const kept = per.filter((_, p) => !oneOff(id, p));
+      if (year === null && live.has(id) && kept.length >= BUDGET_MIN_MONTHS) {
         const now = snap.budgets.find((b) => b.period === "monthly" && b.categoryId === id)?.amount;
-        bounds[short] = { id: id as Id<"categories">, lo: Math.round(sum(per) / per.length / 2), hi: Math.max(...per), ...(now !== undefined ? { now } : {}) };
+        bounds[short] = { id: id as Id<"categories">, lo: Math.round(sum(kept) / kept.length / 2), hi: Math.max(...kept), ...(now !== undefined ? { now } : {}) };
       }
       return row;
     });
@@ -223,7 +232,7 @@ export function buildRecapFacts(snap: Snapshot, key: string): RecapFacts | null 
   const income = perPeriod("income", (s) => s.income);
   // a month is set against the months before it; a year is looked at across its own months, the ones the ledger covers
   const found = year === null
-    ? monthFindings(snap, periods.map((p) => ({ label: p.label.slice(0, 3), range: p.range })), amounts)
+    ? monthFindings(snap, periods.map((p) => ({ label: p.label.slice(0, 3), range: p.range })), amounts, oneOff)
     : yearFindings(snap, Array.from({ length: 12 }, (_, i) => monthKey(year, i + 1)).map((k) => ({ label: monthName(k).slice(0, 3), name: monthName(k), range: monthRange(k, msd) })), amounts);
   const findings = found.map((f, i) => {
     const id = `f${i + 1}`;
@@ -256,7 +265,7 @@ export const SYSTEM_PROMPT = `You help one person understand a finished month or
 - "periods": p0 is the period being looked back on, p1 the one before it, and so on.
 - "spent" and "income" per period. "kept" is the percent of p0's income that was not spent; when more went out than came in it is left out and "spentOfIncome" is the percent of that income that was spent.
 - "budget": their overall budget in p0, when they have one. "limit" is what could be spent, "over" how far past it they went (absent when it held), "run" how many periods in a row it has ended that way.
-- "categories": their largest expense categories. Per period what went out (a period left out means nothing did), "change" is p0 minus p1, "avg" the average of the earlier periods, "vsAvg" p0 minus that average, and "limit", "over" and "run" when the category has a budget. In a year, "overMonths" is how many months its monthly budget went over and "overBy" what that added up to.
+- "categories": their largest expense categories. Per period what went out (a period left out means nothing did), "change" is p0 minus p1, "avg" the average of the earlier periods, "vsAvg" p0 minus that average, and "limit", "over" and "run" when the category has a budget. "oneOff" names the earlier periods the person has said were a one-off for that category: they are left out of "avg" and "vsAvg", and a fall from one is no news. In a year, "overMonths" is how many months its monthly budget went over and "overBy" what that added up to.
 - "repeats": the notes they logged most often in p0, how many times, and what those came to. "scheduled": what went out on entries that repeat on a schedule.
 - In a year, "high" and "low": the dearest and the lightest month.
 - "findings": what the app found, in a month by setting p0 against the months before it, in a year by looking across the year's own months. Each has an "id", a "type", often "about" (the category, note or weekday it concerns), "notes" (the notes on the entries behind it) or "month" (the month it turns on), and its figures. In a month:
