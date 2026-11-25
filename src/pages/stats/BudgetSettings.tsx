@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Plus } from "lucide-react";
-import { toast } from "sonner";
 import { useOp, useView } from "@/lib/store";
 import { budgetAverage, budgetsList } from "../../../shared/views";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -64,7 +63,10 @@ export default function BudgetSettings() {
   const typed = (() => { try { return dialog?.amount.trim() ? toMinor(dialog.amount, settings.decimals, LOCALE_DECIMAL) : null; } catch { return null; } })();
   const startsNow = !!editing && typed !== null && typed !== editing.amount && !(editing.since !== undefined && editing.since >= currentKey);
 
+  // Why a save was refused, in the dialog beside what has to change: a toast goes away, and behind an open dialog it is easy to miss.
+  const [error, setError] = useState("");
   async function save() {
+    setError("");
     if (!dialog) return;
     try {
       const amount = toMinor(dialog.amount, settings.decimals, LOCALE_DECIMAL);
@@ -76,7 +78,7 @@ export default function BudgetSettings() {
       const was = !!budgets.find((b) => b._id === id)?.rolloverFrom;
       if (dialog.rollover !== was) await setRollover({ id, from: dialog.rollover ? currentKey : null });
       setDialog(null);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save"); }
   }
 
   return (
@@ -98,7 +100,7 @@ export default function BudgetSettings() {
         </div>
         <p className="px-4 py-3 text-xs text-muted-foreground">A new default amount applies from this {nextWord} on; earlier {nextWord}s keep the amount they had. Set an amount for just {keyLabel} inside a budget to override it for that period only.</p>
       </Page>
-      <Dialog open={!!dialog} onOpenChange={(o) => !o && setDialog(null)}>
+      <Dialog open={!!dialog} onOpenChange={(o) => { if (!o) { setDialog(null); setError(""); } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>{dialog?.id ? "Edit budget" : "New budget"}</DialogTitle></DialogHeader>
           {dialog ? (
@@ -133,6 +135,7 @@ export default function BudgetSettings() {
               </label>
             </div>
           ) : null}
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
           <DialogFooter>
             {dialog?.id ? <Button variant="destructive" onClick={async () => { if (await del(dialog.id!)) setDialog(null); }}>Delete</Button> : null}
             <Button onClick={save} disabled={!dialog?.categoryId || !dialog.amount}>Save</Button>

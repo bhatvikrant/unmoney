@@ -178,3 +178,29 @@ test("a backup leaves the passcode out, and a restore keeps the passcode the acc
   const unlocked = run(old, "settings.setPasscode", {}).snap;
   expect(run(unlocked, "backup.restore", { data }).snap.settings[0].passcodeHash).toBeUndefined();
 });
+
+test("an installment transfer pays its fee once, on the first part", () => {
+  let s = run(emptySnapshot(), "settings.completeOnboarding", { currency: "USD" }).snap;
+  const [cash, bank] = s.accounts;
+  s = run(s, "transactions.create", { type: "transfer", accountId: bank._id, toAccountId: cash._id, amount: 3000, feeAmount: 100, note: "Loan", tags: [], photoIds: [], date: "2026-01-05", installment: { count: 3 } }).snap;
+  expect(s.transactions.map((t) => [t.amount, t.feeAmount])).toEqual([[1000, 100], [1000, undefined], [1000, undefined]]);
+});
+
+test("a restore leaves nothing pointing at what it replaced", () => {
+  const source = ledger();
+  const data = JSON.parse(JSON.stringify(backupExport(source))) as BackupData;
+  const [cash] = source.accounts;
+  const food = source.categories.find((c) => c.name === "Food")!._id;
+  const draft = (id: string, accountId: string, categoryId: string) => ({
+    _id: id, userId: "u", source: "gmail", messageId: id, extraMessageIds: [], threadId: "t", receivedAt: 1, from: "Bank <a@b.c>", subject: "Alert", status: "open", confidence: "high", how: "rule",
+    proposal: { type: "expense", date: "2026-01-02", amount: 500, note: "Swiggy", accountId, categoryId },
+  });
+  // one draft filed under things the backup holds, one under things it does not; and a tidy-up waiting to be undone
+  const before = { ...source, drafts: [draft("d1", cash._id, food), draft("d2", "acc-not-in-backup", "cat-not-in-backup")], categoryCleanups: [{ _id: "c1", userId: "u" }] } as unknown as Snapshot;
+  const after = run(before, "backup.restore", { data }).snap;
+  const ids = new Set([...after.accounts, ...after.categories].map((x) => x._id as string));
+  const [d1, d2] = after.drafts;
+  expect([ids.has(d1.proposal.accountId!), ids.has(d1.proposal.categoryId!)]).toEqual([true, true]);
+  expect([d2.proposal.accountId, d2.proposal.categoryId, d2.proposal.note]).toEqual([undefined, undefined, "Swiggy"]);
+  expect(after.categoryCleanups).toEqual([]);
+});

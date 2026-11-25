@@ -124,9 +124,15 @@ export type AccountFields = {
   /** Credit cards only: true turns off the due date, "Overdue" and the bill reminder. Left out keeps the card's setting. */
   noDueTracking?: boolean;
 };
-export type SettingsPatch = Partial<Pick<Doc<"settings">,
-  "mainCurrency" | "symbol" | "symbolPosition" | "decimals" | "monthStartDay" | "weekStartDay" | "carryOver" | "startScreen" | "theme" | "accent" |
-  "colorSet" | "subcategoryEnabled" | "autocompleteEnabled" | "timeInputEnabled" | "repeatDisplay" | "cardExpenseDisplay" | "lockAfter" | "dismissedRecurring" | "dismissedSips" | "recentImports">>;
+/**
+ * What settings.update may change. The patch arrives from the device as it was sent, so the reducer keeps
+ * these keys and nothing else: the passcode goes through settings.setPasscode, its reset through convex/passcode.ts.
+ */
+const SETTINGS_PATCH_KEYS = [
+  "mainCurrency", "symbol", "symbolPosition", "decimals", "monthStartDay", "weekStartDay", "carryOver", "startScreen", "theme", "accent",
+  "colorSet", "subcategoryEnabled", "autocompleteEnabled", "timeInputEnabled", "repeatDisplay", "cardExpenseDisplay", "lockAfter", "dismissedRecurring", "dismissedSips", "recentImports",
+] as const;
+export type SettingsPatch = Partial<Pick<Doc<"settings">, (typeof SETTINGS_PATCH_KEYS)[number]>>;
 export type ImportRow = {
   date: string; account: string; category: string; subcategory?: string; note?: string; amount: string; type: string;
   description?: string; subAmount?: string; subCurrency?: string;
@@ -1386,7 +1392,7 @@ const handlers: Handlers = {
     if (patch.monthStartDay !== undefined && (patch.monthStartDay < 1 || patch.monthStartDay > 28)) throw new Error("Month start day must be between 1 and 28");
     if (patch.weekStartDay !== undefined && (patch.weekStartDay < 0 || patch.weekStartDay > 6)) throw new Error("Week start day must be between 0 and 6");
     if (patch.decimals !== undefined && (patch.decimals < 0 || patch.decimals > 8)) throw new Error("Decimals must be between 0 and 8");
-    w.patch("settings", s._id, clean(patch));
+    w.patch("settings", s._id, Object.fromEntries(SETTINGS_PATCH_KEYS.flatMap((k) => (patch[k] === undefined ? [] : [[k, patch[k]]]))));
   },
 
   "settings.changeMainCurrency": (w, { code, keepData, entries = true }) => {
@@ -1720,7 +1726,8 @@ const handlers: Handlers = {
       let firstId: Id<"transactions"> | null = null;
       for (let i = 0; i < n; i++) {
         const id = w.insert("transactions", {
-          ...rest, date: addMonths(date, i), amount: i === 0 ? first : per, subAmount: i === 0 ? subFirst : subPer, repeatId, installmentIndex: i + 1, installmentCount: n, installmentTotal: t.amount, photoIds: i === 0 ? t.photoIds : [],
+          // the fee was typed once, for the whole amount: on the first part, not again on every part
+          ...rest, feeAmount: i === 0 ? rest.feeAmount : undefined, date: addMonths(date, i), amount: i === 0 ? first : per, subAmount: i === 0 ? subFirst : subPer, repeatId, installmentIndex: i + 1, installmentCount: n, installmentTotal: t.amount, photoIds: i === 0 ? t.photoIds : [],
         });
         if (i === 0) firstId = id;
       }
@@ -2470,6 +2477,24 @@ const handlers: Handlers = {
     }
     for (const n of data.notes ?? []) w.insert("notes", strip(n) as never);
     for (const c of data.currencies ?? []) w.insert("currencies", strip(c) as never);
+    // What is left pointing at the payment methods, categories and entries just replaced. A tidy-up's undo
+    // record names categories that are gone. A Gmail draft still waiting keeps what it was filed under only
+    // where the backup holds that very thing (a backup of this ledger); otherwise it asks again when opened.
+    w.clear("categoryCleanups");
+    for (const d of [...w.snap.drafts]) {
+      if (d.status !== "open") continue;
+      const p = d.proposal;
+      w.patch("drafts", d._id, {
+        matchedTransactionId: d.matchedTransactionId ? txIds.get(d.matchedTransactionId) : undefined,
+        proposal: clean({
+          ...p,
+          accountId: p.accountId ? accountIds.get(p.accountId) : undefined,
+          toAccountId: p.toAccountId ? accountIds.get(p.toAccountId) : undefined,
+          categoryId: p.categoryId ? catIds.get(p.categoryId) : undefined,
+          subcategoryId: p.subcategoryId ? catIds.get(p.subcategoryId) : undefined,
+        }),
+      });
+    }
     if (data.settings) {
       const existing = w.settings();
       const s = strip(data.settings);

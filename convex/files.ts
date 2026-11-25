@@ -49,8 +49,15 @@ export const claim = mutation({
 });
 
 /**
+ * When uploads began to be recorded with their owner (commit 6710201, 19 Oct 2026, with a day's margin
+ * for the deploy). A file newer than this with no owner is an upload nobody claimed, never a photo of
+ * someone's entry, so it is served to no one.
+ */
+const OWNERS_SINCE = Date.parse("2026-10-21T00:00:00Z");
+
+/**
  * URLs for the signed-in user's files; null for anyone else's. Files uploaded before owners were
- * recorded have no owner until `backfillOwners` has run, and are still served meanwhile.
+ * recorded have no owner until `backfillOwners` has run, and those alone are still served meanwhile.
  */
 export const urls = query({
   args: { ids: v.array(v.id("_storage")) },
@@ -59,7 +66,8 @@ export const urls = query({
     const out: Record<string, string | null> = {};
     for (const id of ids) {
       const owner = await ownerOf(ctx, id);
-      out[id] = owner && owner.userId !== userId ? null : await ctx.storage.getUrl(id);
+      const mine = owner ? owner.userId === userId : ((await ctx.db.system.get(id))?._creationTime ?? Infinity) < OWNERS_SINCE;
+      out[id] = mine ? await ctx.storage.getUrl(id) : null;
     }
     return out;
   },
