@@ -366,10 +366,11 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
    * category nobody picked, and on a new entry a date nobody changed. A failed read fills nothing.
    */
   const readReceipt = useAction(api.ai.readReceipt);
+  const { user } = useStore();
   const [readingPhoto, setReadingPhoto] = useState(false);
   async function readPhoto(files: File[]) {
     const type = latest.current.type;
-    if (!settings.receiptAiEnabled || type === "transfer" || !navigator.onLine) return;
+    if (!user?.ai || !settings.receiptAiEnabled || type === "transfer" || !navigator.onLine) return;
     setReadingPhoto(true);
     try {
       const small = await compressImage(files[0], RECEIPT_MAX_EDGE);
