@@ -98,3 +98,15 @@ test("statement suggestions: only for someone AI is turned on for, a capped numb
   await t.mutation(internal.usage.recordAi, { userId, feature: "statement", model: STATEMENT_MODEL, tokens: { input: 900, output: 700, cacheWrite: 0, cacheRead: 2500 }, counted: true });
   expect(await t.run((ctx) => ctx.db.query("aiDaily").collect())).toMatchObject([{ feature: "statement", calls: 2, inputTokens: 900, cacheReadTokens: 2500 }]);
 });
+
+test("a file's layout is worked out by AI only for someone AI is turned on for", async () => {
+  const t = convexTest({ schema, modules });
+  const [admin, userId] = await t.run(async (ctx) => [await ctx.db.insert("users", { email: SUPERADMIN_EMAIL }), await ctx.db.insert("users", { email: "a@example.com" })] as const);
+  const file = { header: ["Buchungstag", "Verwendungszweck", "Betrag"], rows: [["01.10.2026", "REWE SAGT DANKE", "-45,90"]], card: false };
+  await expect(t.action(api.ai.readLayout, file)).rejects.toThrow("Sign in");
+  await expect(t.withIdentity({ subject: `${userId}|s` }).action(api.ai.readLayout, file)).rejects.toThrow("turned on for your account");
+  // the superadmin gets past the switch (no key in tests, so it stops at the next check)
+  await expect(t.withIdentity({ subject: `${admin}|s` }).action(api.ai.readLayout, file)).rejects.toThrow("set up");
+  // nothing was counted or sent
+  expect(await t.run((ctx) => ctx.db.query("aiDaily").collect())).toEqual([]);
+});

@@ -23,7 +23,8 @@ import {
   RECEIPT_MAX_BYTES, RECEIPT_MEDIA_TYPES, RECEIPT_MONTHLY_CAP, RECEIPT_RECENT_ENTRIES, buildReceiptInput, receiptRequest, validateReceipt, type ReceiptRead,
 } from "../shared/receiptAi";
 import {
-  STATEMENT_BATCH, STATEMENT_MAX_LINES, STATEMENT_MONTHLY_CAP, STATEMENT_RECENT_ENTRIES, buildStatementContext, statementRequest, validateStatement, type StatementSuggestion,
+  STATEMENT_BATCH, STATEMENT_MAX_LINES, STATEMENT_MONTHLY_CAP, STATEMENT_RECENT_ENTRIES, buildLayoutInput, buildStatementContext, layoutRequest, statementRequest, validateLayout, validateStatement,
+  type StatementLayout, type StatementSuggestion,
 } from "../shared/statementAi";
 
 type Usage = Doc<"aiUsage">;
@@ -253,5 +254,48 @@ export const suggestImport = action({
       throw new ConvexError(missed === "cap" ? "AI has made as many suggestions as it does in a month. It starts again next month." : "Couldn't get AI suggestions. You can still import the file as it is.");
     }
     return missed ? { suggestions, missed } : { suggestions };
+  },
+});
+
+/** Whether a user may use AI, for an action that needs nothing else from the database. */
+export const allowed = internalQuery({
+  args: { userId: v.id("users") },
+  handler: (ctx, { userId }) => aiAllowed(ctx, userId),
+});
+
+/**
+ * Ask Claude which column of a statement is which, for a file whose header the importer could not
+ * work out: it sees the header row and a few rows under it, never the whole file, and does no sums.
+ * The answer is a column mapping; the import page tries it on the file, fills the "Match the
+ * columns" step with it for the person to check, and reads the file on the device as before.
+ */
+export const readLayout = action({
+  args: { header: v.array(v.string()), rows: v.array(v.array(v.string())), card: v.boolean() },
+  handler: async (ctx, { header, rows, card }): Promise<StatementLayout> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new ConvexError("Sign in first");
+    if (!(await ctx.runQuery(internal.ai.allowed, { userId }))) throw new ConvexError("AI suggestions aren't turned on for your account");
+    if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("AI suggestions aren't set up yet");
+    const input = buildLayoutInput(header, rows, card);
+    if (input.columns.length < 2) throw new ConvexError("That file has no columns to match");
+    if (!(await ctx.runMutation(internal.usage.claimAi, { userId, feature: "statement", cap: STATEMENT_MONTHLY_CAP }))) {
+      throw new ConvexError("AI has made as many suggestions as it does in a month. It starts again next month.");
+    }
+    const client = new Anthropic({ timeout: 45_000, maxRetries: 1 });
+    let layout: StatementLayout | null;
+    try {
+      const res = await client.messages.create(layoutRequest(input));
+      console.log("statement-layout-ai", { userId, columns: input.columns.length, stop: res.stop_reason, input: res.usage.input_tokens, output: res.usage.output_tokens });
+      await recordSpend(ctx, userId, "statement", res, true);
+      if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`stopped: ${res.stop_reason}`);
+      const text = res.content.find((b) => b.type === "text");
+      layout = validateLayout(JSON.parse(text && text.type === "text" ? text.text : "{}"), input);
+    } catch (e) {
+      console.error("statement-layout-ai failed", e instanceof Error ? e.message : e);
+      await reportServerError("ai.readLayout", e, { userId });
+      throw new ConvexError("Couldn't ask AI about this file. Match the columns yourself.");
+    }
+    if (!layout) throw new ConvexError("AI couldn't work out this file's columns. Match them yourself.");
+    return layout;
   },
 });

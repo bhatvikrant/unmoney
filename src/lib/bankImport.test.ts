@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import type { Id } from "../../convex/_generated/dataModel";
 import { applyOp, detectImportFormat, emptySnapshot, type Snapshot } from "../../shared/ops";
-import { findHeaderRow, guessMapping, guessSign, isMoneyManagerHeader, layoutKey, mappingReady, normaliseBankDate, recallMapping, toImportRows, type Grid } from "./bankImport";
+import { buildLayoutInput, validateLayout } from "../../shared/statementAi";
+import { findHeaderRow, guessMapping, guessSign, isMoneyManagerHeader, layoutKey, mappingReady, mappingReads, normaliseBankDate, recallMapping, toImportRows, type Grid } from "./bankImport";
 import { readImportFile } from "./importFile";
 
 const ctx = { userId: "u" as Id<"users"> };
@@ -170,4 +171,38 @@ test("Deposit and Withdrawal words, and a Dr/Cr after the amount, decide the dir
   ];
   const rows = toImportRows(suffixed, guessMapping(suffixed, 0), { account: "Bank" }).rows;
   expect(rows.map((r) => [r.type, r.amount])).toEqual([["Income", "1,20,000.00"], ["Expenses", "485.00"]]);
+});
+
+test("a layout worked out by AI is tried on the file, then reads it on the device like any other mapping", () => {
+  // a German current account: no header the importer's English wording knows, decimal commas, a balance column
+  const DE: Grid = [
+    ["Buchungstag", "Valuta", "Verwendungszweck", "Betrag", "Saldo"],
+    ["01.10.2026", "01.10.2026", "REWE SAGT DANKE 4711", "-45,90", "1.204,10"],
+    ["02.10.2026", "02.10.2026", "GEHALT OKTOBER ACME GMBH", "3.200,00", "4.404,10"],
+    ["", "", "Endsaldo", "", "4.404,10"],
+  ];
+  const guess = guessMapping(DE, 0);
+  expect(mappingReady(guess)).toBe(false);
+  const answer = { date: "c1", description: "c3", amount: "c4", moneyOut: null, moneyIn: null, drcr: null, outIs: "negative", dateOrder: "dmy" };
+  const { dateOrder, ...columns } = validateLayout(answer, buildLayoutInput(DE[0], DE.slice(1), false))!;
+  const m = { ...guess, ...columns };
+  expect(mappingReads(DE, m)).toBe(true);
+  const { rows, noAmount } = toImportRows(DE, m, { account: "Bank" });
+  expect(noAmount).toBe(1); // Endsaldo
+  expect(rows.map((r) => [r.date, r.type, r.amount, r.note])).toEqual([
+    ["01.10.2026", "Expenses", "45,90", "REWE SAGT DANKE 4711"],
+    ["02.10.2026", "Income", "3.200,00", "GEHALT OKTOBER ACME GMBH"],
+  ]);
+  // the review reads the amounts with the file's decimal comma: 45.90, not 4,590
+  const format = detectImportFormat(rows, { dateOrder: dateOrder!, decimal: "." });
+  expect(format).toEqual({ dateOrder: "dmy", decimal: "," });
+  const s = run(emptySnapshot(), "settings.completeOnboarding", { currency: "EUR" }).snap;
+  const r = run(s, "transactions.importRows", { rows, format, createMissing: true, skipInvalid: true });
+  expect(r.result).toMatchObject({ inserted: 2, errors: [] });
+  expect(r.snap.transactions.map((t) => [t.date, t.type, t.amount]).sort()).toEqual([["2026-10-01", "expense", 4590], ["2026-10-02", "income", 320000]]);
+
+  // an answer that points the date at the description, or the amount at a text column, does not read the file
+  expect(mappingReads(DE, { ...m, date: 2, description: 0 })).toBe(false);
+  expect(mappingReads(DE, { ...m, amount: 2, description: 3 })).toBe(false);
+  expect(mappingReads(DE, { ...m, date: -1 })).toBe(false);
 });

@@ -42,7 +42,7 @@ const SHORTCUT_FILE = "/send-to-unmoney.shortcut";
 
 type Origin = { kind: "pick" } | { kind: "share" } | { kind: "pending"; id: Id<"pendingImports"> };
 /** mapped: a bank statement whose columns are matched, so the review shows (Back to columns clears it). */
-type Loaded = ParsedImport & { name: string; origin: Origin; mapped?: boolean };
+type Loaded = ParsedImport & { name: string; origin: Origin; mapped?: boolean; /** Day or month first, where the column step knows (a layout worked out by AI) and the file's own dates cannot tell. */ dateOrder?: ImportFormat["dateOrder"] };
 type DryRun = OpResult<"transactions.importRows">;
 /** A category a row can be filed under, by name as an import row carries it. */
 type CategoryChoice = Pick<ImportRow, "category" | "subcategory">;
@@ -139,7 +139,7 @@ export default function ImportPage() {
           <div hidden={loaded.mapped}>
             <ColumnMapping name={loaded.name} grid={loaded.bank.grid} headerRow={loaded.bank.headerRow}
               onCancel={async () => { if (loaded.origin.kind === "share") await finish(loaded.origin); closeReview(); }}
-              onContinue={(rows, noAmount) => setLoaded({ ...loaded, rows, noAmount, mapped: true })} />
+              onContinue={(rows, noAmount, dateOrder) => setLoaded({ ...loaded, rows, noAmount, mapped: true, dateOrder })} />
           </div>
         ) : null}
         {loaded?.bank && !loaded.mapped ? null : loaded ? (
@@ -401,7 +401,7 @@ function Review({ loaded, answers, onBack, onCancel, onDone }: { loaded: Loaded;
   if (!busy) frozen.current = view;
   const base = frozen.current;
   // How the file writes dates and numbers, read from all its rows; the user can correct it below.
-  const [format, setFormat] = useState<ImportFormat>(() => detectImportFormat(loaded.rows, LOCALE_FORMAT));
+  const [format, setFormat] = useState<ImportFormat>(() => detectImportFormat(loaded.rows, { ...LOCALE_FORMAT, dateOrder: loaded.dateOrder ?? LOCALE_FORMAT.dateOrder }));
   const hasSlashDates = useMemo(() => loaded.rows.some((r) => /^\d{1,2}[/-]\d{1,2}[/-]\d{4}/.test((r.date ?? "").trim())), [loaded.rows]);
   // Accounts the file names that do not exist yet, each with a type the user can correct, so cards keep a billing cycle.
   const newNames = useMemo(() => {
