@@ -63,17 +63,17 @@ export default function SearchPage() {
       } sub={
         <div className="mx-auto max-w-3xl px-3 pb-2 space-y-2">
           <div className="flex gap-2">
-            <Input autoFocus placeholder="Search notes, tags, categories, accounts" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input autoFocus placeholder="Search notes, tags, categories, payment methods" value={q} onChange={(e) => setQ(e.target.value)} />
             <Button variant={showFilters ? "secondary" : "outline"} size="icon" aria-label="Filters" onClick={() => setShowFilters(!showFilters)}><SlidersHorizontal className="size-4" /></Button>
           </div>
           {showFilters ? (
             <div className="grid grid-cols-2 gap-2 text-sm">
               <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From" />
               <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To" />
-              <Select value={type} onValueChange={(v) => setType(v as typeof type)}><SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger><SelectContent><SelectItem value="any">Any type</SelectItem><SelectItem value="income">Income</SelectItem><SelectItem value="expense">Expense</SelectItem><SelectItem value="transfer">Transfer</SelectItem></SelectContent></Select>
-              <Select value={account} onValueChange={setAccount}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="any">Any payment method</SelectItem>{accounts.map((a) => <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>)}</SelectContent></Select>
-              <Select value={category} onValueChange={setCategory}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="any">Any category</SelectItem>{categories.filter((c) => !c.deletedAt).map((c) => <SelectItem key={c._id} value={c._id}>{c.parentId ? "  ↳ " : ""}{c.name}{c.parentId ? "" : ` (${c.type})`}</SelectItem>)}</SelectContent></Select>
-              <Select value={tag} onValueChange={setTag}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="any">Any tag</SelectItem>{tags.map((t) => <SelectItem key={t.tag} value={t.tag}>#{t.tag} ({t.count})</SelectItem>)}</SelectContent></Select>
+              <Select value={type} onValueChange={(v) => setType(v as typeof type)}><SelectTrigger aria-label="Type"><SelectValue placeholder="Type" /></SelectTrigger><SelectContent><SelectItem value="any">Any type</SelectItem><SelectItem value="income">Income</SelectItem><SelectItem value="expense">Expense</SelectItem><SelectItem value="transfer">Transfer</SelectItem></SelectContent></Select>
+              <Select value={account} onValueChange={setAccount}><SelectTrigger aria-label="Payment method"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="any">Any payment method</SelectItem>{accounts.map((a) => <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>)}</SelectContent></Select>
+              <Select value={category} onValueChange={setCategory}><SelectTrigger aria-label="Category"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="any">Any category</SelectItem>{categories.filter((c) => !c.deletedAt).map((c) => <SelectItem key={c._id} value={c._id}>{c.parentId ? "  ↳ " : ""}{c.name}{c.parentId ? "" : ` (${c.type})`}</SelectItem>)}</SelectContent></Select>
+              <Select value={tag} onValueChange={setTag}><SelectTrigger aria-label="Tag"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="any">Any tag</SelectItem>{tags.map((t) => <SelectItem key={t.tag} value={t.tag}>#{t.tag} ({t.count})</SelectItem>)}</SelectContent></Select>
             </div>
           ) : null}
           {results ? <div className="text-xs text-muted-foreground flex gap-3"><span>{results.length} {results.length === 1 ? "result" : "results"}</span><Money amount={totals.income} kind="income" /><Money amount={totals.expense} kind="expense" /></div> : null}

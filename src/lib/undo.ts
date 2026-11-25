@@ -4,7 +4,7 @@
  * account, category, schedule and installment details; they get new ids).
  */
 import { toast } from "sonner";
-import { useStore } from "@/lib/store";
+import { useDispatch, useView } from "@/lib/store";
 import { play } from "@/lib/sound";
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 
@@ -17,7 +17,8 @@ export function offerUndo(message: string, undo: () => Promise<unknown>) {
 }
 
 export function useUndoableDelete() {
-  const { view, dispatch } = useStore();
+  const view = useView();
+  const dispatch = useDispatch();
   // restoreRows gives the entries new ids: each says which one it was, so a bookmark made from it points at the copy
   const restore = (gone: Doc<"transactions">[]) => {
     const ids = new Set<string>(gone.map((t) => t._id));

@@ -101,11 +101,50 @@ export function evaluateExpression(expr: string, decimal: DecimalMark = "."): nu
   if (bad) return null;
   const clean = numbers.replace(/[×x]/g, "*").replace(/÷/g, "/").replace(/[^0-9+\-*/.()e]/g, "");
   if (!clean) return null;
-  try {
-    // Only digits and operators survive the regex above, so this is a safe arithmetic evaluation.
-    const value = Function(`"use strict"; return (${clean});`)() as number;
-    return Number.isFinite(value) ? value : null;
-  } catch {
-    return null;
-  }
+  const value = arithmetic(clean);
+  return value !== null && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The value of + - * / and brackets over plain numbers, or null when it is not a whole expression ("5+").
+ * Worked out here rather than handed to `Function(...)`: the site's Content-Security-Policy does not allow
+ * code made from text, so that way every typed amount came back as nothing and no entry could be saved.
+ */
+function arithmetic(src: string): number | null {
+  let i = 0;
+  const number = (): number | null => {
+    const m = /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/.exec(src.slice(i));
+    if (!m) return null;
+    i += m[0].length;
+    return Number(m[0]);
+  };
+  // a sign, a bracketed sum, or a number
+  const factor = (): number | null => {
+    const c = src[i];
+    if (c === "+" || c === "-") { i++; const v = factor(); return v === null ? null : c === "-" ? -v : v; }
+    if (c !== "(") return number();
+    i++;
+    const v = sum();
+    if (v === null || src[i] !== ")") return null;
+    i++;
+    return v;
+  };
+  const product = (): number | null => {
+    let v = factor();
+    while (v !== null && (src[i] === "*" || src[i] === "/")) {
+      const op = src[i++], r = factor();
+      v = r === null ? null : op === "*" ? v * r : v / r;
+    }
+    return v;
+  };
+  const sum = (): number | null => {
+    let v = product();
+    while (v !== null && (src[i] === "+" || src[i] === "-")) {
+      const op = src[i++], r = product();
+      v = r === null ? null : op === "+" ? v + r : v - r;
+    }
+    return v;
+  };
+  const v = sum();
+  return i === src.length ? v : null;
 }

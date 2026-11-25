@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { htmlToText } from "./mail";
+import { htmlToText, senderAddress, senderDomain } from "./mail";
 
 test("an HTML mail becomes readable text with its amounts intact", () => {
   const html = `<html><head><style>.x{color:red}</style><title>Receipt</title></head><body>
@@ -17,4 +17,12 @@ test("an HTML mail becomes readable text with its amounts intact", () => {
 
 test("unknown entities are left alone and blank lines are collapsed", () => {
   expect(htmlToText("a&zzz;b<p></p><p></p><p>c</p>")).toBe("a&zzz;b\n\nc");
+});
+
+test("the sender is the address in the brackets, never one written into the display name", () => {
+  const spoof = '"alerts@hdfcbank.net" <mallory@evil.example>';
+  expect(senderDomain(spoof)).toBe("evil.example");
+  expect(senderAddress(spoof)).toBe("mallory@evil.example");
+  expect(senderDomain("HDFC Bank <Alerts@HDFCBank.net>")).toBe("hdfcbank.net");
+  expect(senderAddress("alerts@hdfcbank.net")).toBe("alerts@hdfcbank.net");
 });

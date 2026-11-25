@@ -7,11 +7,14 @@
  */
 import { useLayoutEffect, useRef } from "react";
 import { toast } from "sonner";
+import { useConvex } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { useStore } from "@/lib/store";
 import { currencyInfo } from "../../shared/currencies";
-import { restoreRowsFrom, scaleAmount, type BackupData } from "../../shared/ops";
+import { restoreRowsFrom, rewriteIds, scaleAmount, type BackupData } from "../../shared/ops";
 import { backupExport } from "../../shared/views";
 import { saveSafetyCopy, type SafetyReason } from "./safetyCopy";
+import { orGiveUp, type BackupPhotos } from "./backupFile";
 import type { Id } from "../../convex/_generated/dataModel";
 
 const CHUNK = 500;
@@ -20,9 +23,10 @@ const CHUNK = 500;
  * device has not seen yet (made on another device, or by the hourly repeats job). Beyond it the
  * entries go in chunks by id; for a wipe or restore the server then sweeps away any older entries
  * the chunks did not name (sync.sweepEntries). A currency change past it can miss an entry that
- * arrives meanwhile.
+ * arrives meanwhile. Each delete writes the entry and a tombstone for the other devices, so this stays
+ * well under half of Convex's 16,000 writes a transaction (8,000 failed, and the wipe was "undone").
  */
-const ONE_OP = 8_000;
+const ONE_OP = 5_000;
 
 function chunks<T>(items: T[]): T[][] {
   const out: T[][] = [];
@@ -31,7 +35,8 @@ function chunks<T>(items: T[]): T[][] {
 }
 
 export function useBulkOps() {
-  const { view, userId, dispatchTracked, whenSynced } = useStore();
+  const { view, userId, status, dispatchTracked, whenSynced, enqueueUpload } = useStore();
+  const convex = useConvex();
   // the data as of the last render, for an action started later from a toast (Undo after an import)
   const latest = useRef(view);
   useLayoutEffect(() => { latest.current = view; });
@@ -48,6 +53,45 @@ export function useBulkOps() {
     } catch {
       toast.warning("Couldn't keep a safety copy on this device. Download a backup first if you may want this data back.");
     }
+  }
+
+  /**
+   * The photos of a backup that this account already has, as the server tells it: the backup was made here,
+   * so they keep their ids. Uploading them again doubled the account's storage on every restore and left
+   * the first copies with nothing pointing at them. Offline (or once an answer does not come) nothing more
+   * is known, so the rest are uploaded: wasteful, but no photo is left out on a guess.
+   */
+  async function alreadyHere(ids: string[]): Promise<Set<string>> {
+    const here = new Set<string>();
+    for (let i = 0; status.connected && i < ids.length; i += 200) {
+      const got = await orGiveUp(convex.query(api.files.owned, { ids: ids.slice(i, i + 200) as Id<"_storage">[] }).catch(() => [] as string[]));
+      // no answer: the connection went after the restore began, and the batches left would each wait as long
+      if (!got) break;
+      for (const id of got) here.add(id);
+    }
+    return here;
+  }
+
+  /**
+   * Queue the photos a backup file carries for upload, and point its entries at the new copies. The uploads
+   * sit in the queue ahead of the restore, so this works offline too. A photo this account already has, one
+   * the file does not carry, or one this device can't queue (storage full) keeps its old id.
+   */
+  async function withPhotos(data: BackupData, photos?: BackupPhotos): Promise<{ data: BackupData; uploading: number }> {
+    if (!photos?.size) return { data, uploading: 0 };
+    const named = (data.transactions ?? []).flatMap((t) => (Array.isArray(t.photoIds) ? (t.photoIds as string[]) : []));
+    const here = await alreadyHere([...new Set(named.filter((id) => photos.has(id)))]);
+    const ids: Record<string, string> = {};
+    let failed = 0;
+    for (const t of data.transactions ?? []) {
+      for (const id of Array.isArray(t.photoIds) ? (t.photoIds as string[]) : []) {
+        const read = photos.get(id);
+        if (!read || ids[id] || here.has(id)) continue;
+        try { ids[id] = await enqueueUpload(await read()); } catch { failed++; }
+      }
+    }
+    if (failed) toast.warning(`${failed.toLocaleString()} ${failed === 1 ? "photo" : "photos"} in the backup could not be read or kept on this device, so ${failed === 1 ? "it was" : "they were"} not restored.`);
+    return { data: { ...data, transactions: rewriteIds(data.transactions, ids) }, uploading: Object.keys(ids).length };
   }
 
   async function removeEntries(ifPresent?: boolean): Promise<string[]> {
@@ -110,23 +154,35 @@ export function useBulkOps() {
       return track(ids, { loading: "Deleting entries… keep UnMoney open until it is saved", success: "Entries deleted" });
     },
 
-    async restore(data: BackupData) {
+    /** `photos`: the receipt photos the backup file carries, re-uploaded for this account. */
+    async restore(backup: BackupData, photos?: BackupPhotos) {
       await safetyCopy("restore");
+      const { data, uploading } = await withPhotos(backup, photos);
+      // The photos are in the queue ahead of the restore, and it is sent only once they are up: with a few
+      // hundred of them that is minutes, during which nothing else syncs either. So the toast says what it is waiting for.
+      const loading = uploading
+        ? `Restoring… ${uploading.toLocaleString()} ${uploading === 1 ? "photo uploads" : "photos upload"} first. Keep UnMoney open until it is saved`
+        : null;
       if (view.transactions.length + (data.transactions?.length ?? 0) <= ONE_OP) {
         const { id } = await dispatchTracked("backup.restore", { data });
-        return track([id], { loading: "Restoring…", success: "Restored" });
+        return track([id], { loading: loading ?? "Restoring…", success: "Restored" });
       }
-      // Everything but the entries goes first, and alone: only once the server has taken it are the
-      // old entries removed, so a refused restore leaves the ledger as it was. (The server also
-      // sweeps the old entries itself after this op, hence ifPresent.)
+      // Everything but the entries goes first, and alone. The backup's entries are queued right behind it,
+      // not once the server has answered: a reload or a closed tab in between (easy when offline) left the
+      // restore applied, the old entries swept by the server and the new ones never sent, i.e. an empty
+      // ledger. They name the payment methods the restore made, so the queue drops them if it is refused.
       const restored = await dispatchTracked("backup.restore", { data: { ...data, transactions: [] }, entries: false });
+      const ids: string[] = [];
+      for (const rows of chunks(restoreRowsFrom(data, restored.result))) ids.push((await dispatchTracked("transactions.restoreRows", { rows, bookmarks: restored.result.bookmarks })).id);
       return track((async () => {
         const { rejected } = await whenSynced([restored.id]);
         if (rejected.length) throw new Error(`Nothing was restored: ${rejected[0].error}`);
-        const ids = await removeEntries(true);
-        for (const rows of chunks(restoreRowsFrom(data, restored.result))) ids.push((await dispatchTracked("transactions.restoreRows", { rows, bookmarks: restored.result.bookmarks })).id);
+        // Only now do the old entries go from this device, so a refused restore leaves the ledger as it
+        // was. The server sweeps them itself after the restore (hence ifPresent); if the app is closed
+        // before this runs, that sweep reaches this device as ordinary changes.
+        ids.push(...await removeEntries(true));
         await confirmed(ids);
-      })(), { loading: "Restoring… keep UnMoney open until it is saved", success: "Restored" });
+      })(), { loading: loading ?? "Restoring… keep UnMoney open until it is saved", success: "Restored" });
     },
 
     async changeDecimals(decimals: number) {

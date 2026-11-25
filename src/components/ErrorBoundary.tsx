@@ -21,6 +21,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
         <p className="text-sm font-medium">Something went wrong.</p>
         <p className="text-sm text-muted-foreground max-w-sm">Your changes on this device are kept. Reloading usually fixes it.</p>
         <Button onClick={() => window.location.reload()}>Reload</Button>
+        {/* a screen that crashes on render would reload into itself */}
+        {window.location.pathname !== "/" ? <Button variant="ghost" onClick={() => window.location.assign("/")}>Go to the start</Button> : null}
       </div>
     );
   }

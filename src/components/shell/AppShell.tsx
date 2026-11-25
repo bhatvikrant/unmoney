@@ -9,6 +9,7 @@ import { SyncLine } from "./SyncStatus";
 import { useIosInstallHint } from "@/lib/pwa";
 import { MoneyManagerPrompt, usePendingImportToasts } from "@/components/MoneyManagerPrompt";
 import { useBudgetAlerts } from "@/lib/budgetAlerts";
+import { useLeaveTo } from "@/lib/nav";
 
 /** A small dot on the Stats tab while a budget of the current period is over. */
 function OverDot({ className }: { className?: string }) {
@@ -54,6 +55,7 @@ export default function AppShell() {
   useAdoptAccountKinds();
   useAutoRefreshRates();
   const nav = useNavigate();
+  const leaveTo = useLeaveTo();
   useIosInstallHint(useCallback(() => nav("/settings"), [nav]));
   usePendingImportToasts();
   const budgetOver = useBudgetAlerts();
@@ -75,6 +77,7 @@ export default function AppShell() {
           <NavLink
             key={t.to}
             to={t.to}
+            onClick={(e) => leaveTo(t.to, e)}
             className={cn(
               "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
               isActive(pathname, t.to) ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/60",
@@ -87,7 +90,7 @@ export default function AppShell() {
         ))}
         <div className="mt-4 px-3 pb-1 text-xs uppercase tracking-wide text-muted-foreground">Shortcuts</div>
         {shortcuts.map((t) => (
-          <NavLink key={t.to} to={t.to}
+          <NavLink key={t.to} to={t.to} onClick={(e) => leaveTo(t.to, e)}
             className={cn("flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors", under(pathname, [t.to]) ? "text-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/60")}>
             <t.icon className="size-4" />
             {t.label}
@@ -96,7 +99,7 @@ export default function AppShell() {
         ))}
         </nav>
         <SyncLine className="mt-auto" />
-        <NavLink to="/settings" className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-sidebar-accent/60">
+        <NavLink to="/settings" onClick={(e) => leaveTo("/settings", e)} className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-sidebar-accent/60">
           <Avatar seed={user?.email || user?.name || ""} src={user?.image} size={32} />
           <span className="min-w-0 truncate text-muted-foreground">{user?.name || user?.email || "Account"}</span>
         </NavLink>
@@ -111,7 +114,7 @@ export default function AppShell() {
           {tabs.map((t) => {
             const active = isActive(pathname, t.to);
             return (
-              <NavLink key={t.to} to={t.to} aria-label={t.to === "/" ? "Transactions" : undefined} className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", active ? "text-primary" : "text-muted-foreground")}>
+              <NavLink key={t.to} to={t.to} onClick={(e) => leaveTo(t.to, e)} aria-label={t.to === "/" ? "Transactions" : undefined} className={cn("flex flex-col items-center justify-center gap-0.5 text-[11px]", active ? "text-primary" : "text-muted-foreground")}>
                 <span className="relative"><t.icon className="size-5" strokeWidth={active ? 2.4 : 1.8} />{t.to === "/settings" && toReview ? <ReviewCount n={toReview} /> : null}{t.to === "/stats" && budgetOver ? <OverDot /> : null}</span>
                 {/* one line even at 320px, where "Payment methods" is a few pixels wider than its column: wrapping pushed its icon out of line */}
                 <span className="whitespace-nowrap">{t.to === "/" ? today : t.label}</span>

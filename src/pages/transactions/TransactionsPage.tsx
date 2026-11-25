@@ -353,7 +353,7 @@ function SummaryView({ txs, month, range }: { txs: Tx[]; month: string; range: {
           <div className="text-xs text-muted-foreground">Budget remaining</div>
           <div className="text-xl font-semibold tabular">{status?.total ? <Money amount={status.total.remaining} kind={status.total.remaining < 0 ? "expense" : "plain"} /> : "—"}</div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => nav("/budget/settings")}>Budget setting ›</Button>
+        <Button variant="outline" size="sm" onClick={() => nav("/budget/settings")}>Budget settings ›</Button>
       </div>
       {status?.total ? <div className="border-y bg-card"><BudgetBar item={status.total} label="Monthly" elapsed={status.elapsed} onClick={() => nav("/budget")} /></div> : null}
       {status?.perCategory.length ? (

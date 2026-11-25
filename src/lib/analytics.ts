@@ -22,6 +22,23 @@ const UI_HOST = (import.meta.env.VITE_POSTHOG_UI_HOST as string | undefined) ?? 
 
 let loading: Promise<PostHog | null> | null = null;
 
+/** Whether this build reports anything at all; the switch in Preferences is only shown when it does. */
+export const analyticsConfigured = !!KEY;
+const OFF_KEY = "unmoney:analyticsOff";
+/** The Preferences switch, kept on this device like the sounds one. Off means PostHog is never loaded. */
+export function analyticsEnabled(): boolean {
+  try { return localStorage.getItem(OFF_KEY) !== "1"; } catch { return true; }
+}
+export function setAnalyticsEnabled(on: boolean) {
+  try {
+    if (on) localStorage.removeItem(OFF_KEY);
+    else localStorage.setItem(OFF_KEY, "1");
+  } catch { /* storage unavailable: the choice lasts until the tab closes */ }
+  // already running: stop (or resume) events and recordings now, not at the next start
+  if (on) void startAnalytics().then((ph) => ph?.opt_in_capturing());
+  else void loading?.then((ph) => ph?.opt_out_capturing());
+}
+
 /** The URL without its query string or hash: search text and filters live there. */
 export function stripQuery(url: string): string {
   const cut = url.search(/[?#]/);
@@ -62,9 +79,18 @@ export function beforeSend(event: CaptureResult | null): CaptureResult | null {
   return event;
 }
 
+/**
+ * Resolved by the first startAnalytics() (main.tsx calls it once the page is idle). Everything reported
+ * before then waits on it, so identifying the user right after the first render no longer fetches and
+ * parses the SDK (as big as the app's own entry chunk) in the middle of startup.
+ */
+let begin: () => void = () => {};
+const begun = new Promise<void>((r) => { begin = r; });
+
 /** Starts PostHog once, after the first render. Safe to call more than once. */
 export function startAnalytics(): Promise<PostHog | null> {
-  if (!KEY) return Promise.resolve(null);
+  begin();
+  if (!KEY || !analyticsEnabled()) return Promise.resolve(null);
   return (loading ??= import("posthog-js").then(({ default: posthog }) => {
     posthog.init(KEY, {
       api_host: HOST,
@@ -84,6 +110,8 @@ export function startAnalytics(): Promise<PostHog | null> {
       session_recording: {
         maskAllInputs: true,
         maskTextSelector: "*",
+        // aria-labels and titles carry payees, notes and amounts; the option above this block is for clicks only
+        maskAllElementAttributes: true,
         // receipt photos, the photo viewer and anything drawn
         blockSelector: "img, video, canvas, picture, input[type=file]",
       },
@@ -109,7 +137,7 @@ export function deviceProperties(d = device()) {
 
 function withPostHog(fn: (ph: PostHog) => void) {
   if (!KEY) return;
-  void startAnalytics().then((ph) => { if (ph) fn(ph); });
+  void begun.then(startAnalytics).then((ph) => { if (ph) fn(ph); });
 }
 
 /** Ties this device's events to the signed-in user, by id only. */

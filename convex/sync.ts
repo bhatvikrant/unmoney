@@ -6,7 +6,7 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { loadTable, runOps, type OpOutcome } from "./lib/snapshot";
 import { currentRev, deleteSynced } from "./lib/changes";
-import { TABLES, type Op, type OpKind, type Table } from "../shared/ops";
+import { TABLES, rewriteIds, type Op, type OpKind, type Table } from "../shared/ops";
 import type { ChangedDocs, Changes } from "../shared/changes";
 
 const tableArg = v.union(...TABLES.map((t) => v.literal(t)));
@@ -101,13 +101,21 @@ export const apply = mutation({
   handler: async (ctx, { ops }) => {
     const userId = await currentUserId(ctx);
     if (!userId) throw new Error("Not signed in");
+    // the app sends 25 at a time with a UUID each (src/lib/store.tsx); anything far past that is not the app
+    if (ops.length > 100 || ops.some((o) => o.id.length > 100 || o.kind.length > 100)) throw new Error("Too many changes at once");
     const results: OpOutcome[] = [];
     const fresh: Op[] = [];
     const recorded = new Map<string, OpOutcome>();
+    // Ids made by ops in this batch that were applied on an earlier send whose reply never arrived. The
+    // device still names them by temporary id in the ops behind (a new category, then an entry in it),
+    // and without this those were refused ("Pick a category") and undone.
+    const known: Record<string, string> = {};
     for (const op of ops) {
       const prev = await ctx.db.query("syncOps").withIndex("by_user_op", (q) => q.eq("userId", userId).eq("opId", op.id)).unique();
-      if (prev) recorded.set(op.id, prev.status === "applied" ? { id: op.id, status: "applied", idMap: prev.idMap ?? {} } : { id: op.id, status: "rejected", error: prev.error ?? "Rejected" });
-      else fresh.push({ id: op.id, kind: op.kind as OpKind, args: op.args, at: op.at });
+      if (prev) {
+        recorded.set(op.id, prev.status === "applied" ? { id: op.id, status: "applied", idMap: prev.idMap ?? {} } : { id: op.id, status: "rejected", error: prev.error ?? "Rejected" });
+        if (prev.status === "applied") Object.assign(known, prev.idMap);
+      } else fresh.push({ id: op.id, kind: op.kind as OpKind, args: rewriteIds(op.args, known), at: op.at });
     }
     const outcomes = fresh.length ? await runOps(ctx, userId, fresh) : [];
     const byId = new Map(outcomes.map((o) => [o.id, o]));

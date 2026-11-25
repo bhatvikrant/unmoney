@@ -273,7 +273,8 @@ async function saveConnectionFor(ctx: MutationCtx, { userId, email, refreshToken
     const same = old.email.toLowerCase() === email.toLowerCase();
     const backfill = backfillFrom ? newBackfill(backfillFrom, now) : same ? old.backfill : undefined;
     await ctx.db.patch(old._id, {
-      email, refreshTokenEnc, iv, lookbackDays, readsFrom: backfill && !backfillFrom ? backfill.from : readsFrom, status: "ok", lastError: undefined,
+      // the same mailbox again (its grant had died): never later than before, or the mail from the days it was down is skipped
+      email, refreshTokenEnc, iv, lookbackDays, readsFrom: backfill && !backfillFrom ? backfill.from : same && old.readsFrom !== undefined ? Math.min(old.readsFrom, readsFrom) : readsFrom, status: "ok", lastError: undefined,
       syncedUpTo: same ? old.syncedUpTo : undefined, accountMap: same ? old.accountMap : {}, backfill,
     });
     // after the first check (scheduled by the caller), so the newest mail shows up first
@@ -281,9 +282,14 @@ async function saveConnectionFor(ctx: MutationCtx, { userId, email, refreshToken
     return;
   }
   const backfill = backfillFrom ? newBackfill(backfillFrom, now) : undefined;
+  // Disconnecting removes the row that counts the month's Claude calls: a new one starts from what was
+  // already spent this month (usage.recordAi), so reconnecting does not reset the cap.
+  const month = monthOf(now);
+  const spent = await ctx.db.query("aiDaily").withIndex("by_user_day", (q) => q.eq("userId", userId).gte("day", `${month}-01`).lte("day", `${month}-31`)).collect();
+  const aiCalls = spent.reduce((n, r) => n + (r.feature === "gmail" ? r.calls : 0), 0);
   const id = await ctx.db.insert("gmailConnections", {
     userId, email, refreshTokenEnc, iv, status: "ok", lookbackDays, readsFrom, senders: DEFAULT_SENDERS, scanPurchases: true, accountMap: {},
-    aiMonth: monthOf(now), aiCalls: 0, log: [], ...(backfill ? { backfill } : {}),
+    aiMonth: month, aiCalls, log: [], ...(backfill ? { backfill } : {}),
   });
   await kickBackfill(ctx, { _id: id, userId, backfill }, 30_000);
 }
@@ -468,19 +474,23 @@ export const revokeForUser = internalAction({
  * whose chain broke starts again, and one waiting for AI reads carries on once a new month gives some.
  */
 export const syncAll = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const all = await ctx.db.query("gmailConnections").collect();
+  args: { cursor: v.optional(v.union(v.string(), v.null())), started: v.optional(v.number()) },
+  handler: async (ctx, { cursor = null, started = 0 }) => {
+    // A page at a time, like repeats.materialiseAll: one mutation reading every connection (each carries its
+    // log and what it has learned) stops fitting in a transaction long before there are thousands of them.
+    const res = await ctx.db.query("gmailConnections").paginate({ numItems: 100, cursor });
     const now = Date.now();
-    let i = 0;
-    for (const c of all) {
+    let i = started;
+    for (const c of res.page) {
       if (c.status !== "ok") continue;
-      const delay = i++ * 3000;
+      // three seconds apart, starting over after 45 minutes' worth so the last ones still run inside the hour
+      const delay = (i++ % 900) * 3000;
       await ctx.scheduler.runAfter(delay, internal.gmail.syncUser, { userId: c.userId });
       const b = c.backfill;
       const used = c.aiMonth === monthOf(now) ? c.aiCalls : 0;
       if (b && ((b.state === "running" && now - (b.lastStepAt ?? b.startedAt) > STALL_MS) || (b.state === "waiting-ai" && used < BACKFILL_AI_CAP))) await kickBackfill(ctx, c, delay + 60_000);
     }
+    if (!res.isDone) await ctx.scheduler.runAfter(0, internal.gmail.syncAll, { cursor: res.continueCursor, started: i });
   },
 });
 
@@ -1211,6 +1221,10 @@ async function writeDrafts(ctx: MutationCtx, userId: Id<"users">, startedAt: num
   for (const d of inserts) {
     const dup = await ctx.db.query("drafts").withIndex("by_user_message", (q) => q.eq("userId", userId).eq("messageId", d.messageId)).first();
     if (dup) continue;
+    // Already an entry. Its draft is pruned 90 days after it was saved and its seen row not long after, so
+    // without this, reading the same year again would offer the mail a second time and double the entry.
+    const saved = await ctx.db.query("transactions").withIndex("by_user_source", (q) => q.eq("userId", userId).eq("source.messageId", d.messageId)).first();
+    if (saved) { seen.push(...seenOfDraft(d)); continue; }
     const id = await insertSynced(ctx, userId, "drafts", { ...d, status: "open" });
     if (d.proposal.type === "expense" && !d.matchedTransactionId) fresh.push({ id, date: d.proposal.date });
     seen.push(...seenOfDraft(d));

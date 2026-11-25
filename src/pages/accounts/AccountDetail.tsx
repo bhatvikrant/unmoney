@@ -56,6 +56,7 @@ export default function AccountDetail() {
     await setArchived({ ids: [id], archived: false }).catch((e) => toast.error(e instanceof Error ? e.message : "Failed"));
   };
   const [pay, setPay] = useState<{ amount: string; date: string; from: string } | null>(null);
+  const [paying, setPaying] = useState(false);
   const payFromRef = useRef<HTMLDivElement>(null);
   const payToRef = useRef<HTMLSpanElement>(null);
   // a statement picked below: the entry list shows that cycle instead of the month
@@ -84,7 +85,7 @@ export default function AccountDetail() {
   return (
     <>
       <PageHeader back="/payment-methods" title={a.name} right={<><Button variant="ghost" size="icon" aria-label="Edit" onClick={() => nav(`/payment-methods/${a._id}/edit`)}><Pencil className="size-4" /></Button>
-        <Select value={gran} onValueChange={(v) => setGran(v as typeof gran)}><SelectTrigger className="h-8 w-16"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">D</SelectItem><SelectItem value="monthly">M</SelectItem><SelectItem value="yearly">Y</SelectItem></SelectContent></Select></>}
+        <Select value={gran} onValueChange={(v) => setGran(v as typeof gran)}><SelectTrigger className="h-8 w-16" aria-label="Group by day, month or year"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">D</SelectItem><SelectItem value="monthly">M</SelectItem><SelectItem value="yearly">Y</SelectItem></SelectContent></Select></>}
         sub={<div className="mx-auto max-w-3xl"><MonthNav label={yearly ? String(parseMonthKey(month).y) : monthLabel(month)} onPrev={nb.prev ? () => go(nb.prev!) : undefined} onNext={nb.next ? () => go(nb.next!) : undefined} month={month} onPick={setMonth} withData={monthsWithData.months} spent={monthsWithData.spent} /></div>} />
       <Page className="pb-8">
         {a.archivedAt ? (
@@ -190,7 +191,9 @@ export default function AccountDetail() {
               </div>
             </div>
           ) : null}
-          <DialogFooter><Button disabled={!pay?.from || !pay?.amount} onClick={async () => {
+          <DialogFooter><Button disabled={!pay?.from || !pay?.amount || paying} onClick={async () => {
+            // the money's flight takes a second: a second tap in that time would record the payment twice
+            setPaying(true);
             const amount = toMinor(pay!.amount, settings.decimals, LOCALE_DECIMAL);
             const payable = data.card?.payable ?? 0;
             // bills drift from the paying account to the card; paying the whole bill rings the bell
@@ -200,7 +203,7 @@ export default function AccountDetail() {
               await Promise.all([payCard({ id: a._id, amount, date: pay!.date, fromAccountId: pay!.from as Id<"accounts"> }), new Promise((r) => window.setTimeout(r, flight))]);
               play(payable > 0 && amount >= payable ? "bell" : "ding");
               setPay(null);
-            } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); }
+            } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } finally { setPaying(false); }
           }}>Record payment</Button></DialogFooter>
         </DialogContent>
       </Dialog>

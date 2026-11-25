@@ -68,11 +68,11 @@ export default function StatsPage() {
   const yearRow = useMemo(() => (finishedYear ? (recapIndex(view, todayISO()).find((r) => r.kind === "year" && r.year === yearKey) as RecapIndexYearRow | undefined) ?? null : null), [view, finishedYear, yearKey]);
   return (
     <>
-      <PageHeader title={null} className="border-b-0" sub={<StatsHeaderBar />} />
+      <PageHeader title="Stats" hideTitle className="border-b-0" sub={<StatsHeaderBar />} />
       <Page className="pb-8">
         <div className="grid grid-cols-2 border-y text-sm">
           {(["income", "expense"] as const).map((t) => (
-            <button key={t} type="button" onClick={() => setType(t)} className={cn("py-2.5 border-b-2 flex items-center justify-center gap-2", type === t ? "border-primary font-medium" : "border-transparent text-muted-foreground")}>
+            <button key={t} type="button" aria-pressed={type === t} onClick={() => setType(t)} className={cn("py-2.5 border-b-2 flex items-center justify-center gap-2", type === t ? "border-primary font-medium" : "border-transparent text-muted-foreground")}>
               <span>{t === "income" ? "Income" : "Expenses"}</span>
               <Money amount={(t === "income" ? income : expense)?.total ?? 0} kind={t} />
             </button>
@@ -92,7 +92,7 @@ export default function StatsPage() {
         ) : null}
         <div className="flex justify-end px-3 pt-2">
           <div className="flex rounded-md bg-muted p-0.5 text-xs">
-            {(["list", "trend"] as const).map((m) => <button key={m} type="button" onClick={() => setMode(m)} className={cn("px-3 py-1 rounded-[5px] capitalize", mode === m ? "bg-background shadow-sm font-medium" : "text-muted-foreground")}>{m}</button>)}
+            {(["list", "trend"] as const).map((m) => <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)} className={cn("px-3 py-1 rounded-[5px] capitalize", mode === m ? "bg-background shadow-sm font-medium" : "text-muted-foreground")}>{m}</button>)}
           </div>
         </div>
         {mode === "list" ? (

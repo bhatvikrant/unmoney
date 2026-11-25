@@ -21,6 +21,22 @@ function leave(go: () => void) {
 }
 
 /**
+ * Go to another screen from outside the form's own Back and Close (the tab bar, the sidebar, a link in a
+ * sheet), asking first while a form has unsaved changes. On a link, pass its click event.
+ */
+export function useLeaveTo() {
+  const nav = useNavigate();
+  return useCallback((to: string, e?: { preventDefault(): void; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean }) => {
+    if (e) {
+      // nothing unsaved, or opening in a new tab: the link does what links do
+      if (!leaveGuard || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      e.preventDefault();
+    }
+    leave(() => nav(to));
+  }, [nav]);
+}
+
+/**
  * Back to the previous screen, or to `fallback` when UnMoney was opened straight on this one
  * (the home-screen "Add" shortcut, a link): going back from there would leave the app.
  */

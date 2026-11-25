@@ -4,7 +4,10 @@ import type { ImportRow, NewImportAccount } from "../../shared/ops";
 export function downloadText(filename: string, text: string, mime = "text/plain") {
   // a byte-order mark, so Excel on Windows opens a CSV as UTF-8 (₹, accents, Hindi notes) rather than ANSI; readers drop it
   const bom = /^text\/(csv|tab-separated-values)/.test(mime) ? "\uFEFF" : "";
-  const blob = new Blob([bom + text], { type: `${mime};charset=utf-8` });
+  downloadBlob(filename, new Blob([bom + text], { type: `${mime};charset=utf-8` }));
+}
+
+export function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

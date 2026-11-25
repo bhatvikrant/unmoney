@@ -65,6 +65,8 @@ export default function SubCurrencySettings() {
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState("");
   const [custom, setCustom] = useState<null | { code: string; name: string; symbol: string; rate: string; flip: boolean; decimals: string }>(null);
+  // why the open dialog's save was refused, shown in it rather than in a toast behind it
+  const [error, setError] = useState("");
   const [edit, setEdit] = useState<null | { id: Id<"currencies">; code: string; rate: string; flip: boolean; savedRate: number; symbolPosition: "before" | "after"; symbol: string; isCustom: boolean }>(null);
   const [busy, setBusy] = useState(false);
   const options = useMemo(() => { const l = q.toLowerCase(); return CURRENCIES.filter((c) => c.code !== s.mainCurrency && !currencies.some((x) => x.code === c.code) && (!l || c.code.toLowerCase().includes(l) || c.name.toLowerCase().includes(l))); }, [q, currencies, s.mainCurrency]);
@@ -91,11 +93,12 @@ export default function SubCurrencySettings() {
     setBusy(false);
   }
   async function saveEdit() {
+    setError("");
     const e = edit!;
     // Untouched, the rate is saved as it was, not rounded through the other direction.
     const rate = e.rate === toShown(e.savedRate, e.flip) ? e.savedRate : toStored(e.rate, e.flip);
     try { await update({ id: e.id, rate, symbolPosition: e.symbolPosition, symbol: e.symbol }); setEdit(null); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not save"); }
   }
   const move = (i: number, dir: -1 | 1) => { const ids = currencies.map((c) => c._id); const j = i + dir; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; reorder({ ids }); };
   const swipe = useSwipedRow();
@@ -132,7 +135,7 @@ export default function SubCurrencySettings() {
           <Button variant="outline" className="w-full" onClick={() => { setAdding(false); setCustom({ code: "", name: "", symbol: "", rate: localNumber(1), flip: true, decimals: "2" }); }}>Custom currency (gold, points, crypto…)</Button>
         </div>
       </BottomSheet>
-      <Dialog open={!!custom} onOpenChange={(o) => !o && setCustom(null)}>
+      <Dialog open={!!custom} onOpenChange={(o) => { if (!o) { setCustom(null); setError(""); } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Custom currency</DialogTitle></DialogHeader>
           {custom ? (
@@ -144,10 +147,11 @@ export default function SubCurrencySettings() {
               <div className="space-y-1.5 col-span-2"><Label>Smallest amount</Label><Select value={custom.decimals} onValueChange={(v) => setCustom({ ...custom, decimals: v })}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{SMALLEST.map((o) => <SelectItem key={o.decimals} value={String(o.decimals)}>{o.amount} <span className="text-muted-foreground">· {o.hint}</span></SelectItem>)}</SelectContent></Select></div>
             </div>
           ) : null}
-          <DialogFooter><Button disabled={!custom?.code || !custom.name || !readRate(custom.rate)} onClick={async () => { try { await add({ code: custom!.code, name: custom!.name, symbol: custom!.symbol || custom!.code, rate: toStored(custom!.rate, custom!.flip), decimals: Number(custom!.decimals), symbolPosition: "after", isCustom: true }); setCustom(null); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } }}>Add</Button></DialogFooter>
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+          <DialogFooter><Button disabled={!custom?.code || !custom.name || !readRate(custom.rate)} onClick={async () => { setError(""); try { await add({ code: custom!.code, name: custom!.name, symbol: custom!.symbol || custom!.code, rate: toStored(custom!.rate, custom!.flip), decimals: Number(custom!.decimals), symbolPosition: "after", isCustom: true }); setCustom(null); } catch (e) { setError(e instanceof Error ? e.message : "Could not add it"); } }}>Add</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
+      <Dialog open={!!edit} onOpenChange={(o) => { if (!o) { setEdit(null); setError(""); } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Edit currency</DialogTitle></DialogHeader>
           {edit ? (
@@ -157,6 +161,7 @@ export default function SubCurrencySettings() {
               <div className="space-y-1.5"><Label>Symbol position</Label><Select value={edit.symbolPosition} onValueChange={(v) => setEdit({ ...edit, symbolPosition: v as "before" | "after" })}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="before">Before</SelectItem><SelectItem value="after">After</SelectItem></SelectContent></Select></div>
             </div>
           ) : null}
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
           <DialogFooter><Button disabled={!edit || !readRate(edit.rate)} onClick={saveEdit}>Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>

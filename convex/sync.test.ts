@@ -188,6 +188,37 @@ describe("scoped ops behave as before", () => {
     expect(await all()).toEqual([]);
   });
 
+  test("a resent batch still applies the op behind one whose reply was lost", async () => {
+    const { as, accounts, all } = await setup();
+    const create = { id: "x", kind: "categories.create", args: { type: "expense", name: "Pets" }, at: 1 };
+    const [made] = await as.mutation(api.sync.apply, { ops: [create] });
+    expect(made.status).toBe("applied");
+    // the reply never reached the device: it resends the create, with the entry that names the new category by its temporary id
+    const entry = { type: "expense", accountId: accounts[0]._id, categoryId: "tmp_x_1", amount: 500, note: "Vet", tags: [], photoIds: [], date: "2026-01-10" };
+    const res = await as.mutation(api.sync.apply, { ops: [create, { id: "y", kind: "transactions.create", args: entry, at: 2 }] });
+    expect(res.map((r) => r.status)).toEqual(["applied", "applied"]);
+    const real = (made as { idMap: Record<string, string> }).idMap.tmp_x_1;
+    expect((await all()).map((d) => [d.note, d.categoryId])).toEqual([["Vet", real]]);
+  });
+
+  test("the server's catch-up does not add an entry a schedule already has for that date", async () => {
+    const { t, apply, accounts, food, all } = await setup();
+    await apply("transactions.create", { type: "expense", accountId: accounts[0]._id, categoryId: food._id, amount: 1599, note: "Spotify", tags: [], photoIds: [], date: "2026-01-20", repeat: { frequency: "monthly" } });
+    // its next date moved back onto the date it already has an entry for
+    await t.run(async (ctx) => { for (const r of await ctx.db.query("repeats").collect()) await ctx.db.patch(r._id, { nextDate: "2026-01-20" }); });
+    expect((await apply("repeats.catchUp", { today: "2026-01-20" })).status).toBe("applied");
+    expect((await all()).map((d) => d.date)).toEqual(["2026-01-20"]);
+  });
+
+  test("a rescale chunk skips an entry deleted meanwhile", async () => {
+    const { apply, seed, all } = await setup();
+    await seed(2);
+    const [a, b] = await all();
+    await apply("transactions.remove", { id: b._id, scope: "one" });
+    expect((await apply("transactions.rescale", { ids: [a._id, b._id], factor: 10 })).status).toBe("applied");
+    expect((await all()).map((d) => d.amount)).toEqual([1000]);
+  });
+
   test("deleting an account for good removes entries to and from it", async () => {
     const { apply, accounts, food, all } = await setup();
     const [cash, bank] = accounts;

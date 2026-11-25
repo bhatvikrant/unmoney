@@ -6,7 +6,7 @@ import { currencyInfo } from "../../shared/currencies";
 import { dueRepeats, emptySnapshot } from "../../shared/ops";
 import { todayISO } from "../../shared/dates";
 import { accountsList, categoriesList, currenciesList, groupsList, ledgerOf, type AccountRow, type AccountGroupRow } from "../../shared/views";
-import { useOp, useStore, useView } from "./store";
+import { useDispatch, useOp, useView } from "./store";
 import { getRates } from "./fxRates";
 import { useToday } from "@/lib/today";
 import { applyTheme } from "./theme";
@@ -111,7 +111,8 @@ export function useApp(): AppData {
 
 /** Add today's scheduled entries on load, locally, so they show even before the server's cron runs. */
 export function useCatchUpRepeats() {
-  const { dispatch, view } = useStore();
+  const dispatch = useDispatch();
+  const view = useView();
   const today = todayISO();
   const due = dueRepeats(view, today).length > 0;
   useEffect(() => {
@@ -125,7 +126,8 @@ export function useCatchUpRepeats() {
  * one, once, as an ordinary op: it works offline and the server runs the same change.
  */
 export function useAdoptAccountKinds() {
-  const { dispatch, view } = useStore();
+  const dispatch = useDispatch();
+  const view = useView();
   const needed = view.accounts.some((a) => !a.kind);
   useEffect(() => {
     if (needed) dispatch("accounts.adoptKinds", {}).catch(() => {});

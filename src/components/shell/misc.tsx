@@ -78,6 +78,7 @@ export function SegmentedTabs<T extends string>({ value, onChange, items, classN
         <button
           key={it.value}
           type="button"
+          aria-pressed={value === it.value}
           onClick={() => onChange(it.value)}
           className={cn(
             "px-4 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors",
@@ -126,7 +127,7 @@ export function Row({ label, value, onClick, right, className, hint, info, activ
     if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); }
   };
-  return <div role="button" tabIndex={0} aria-current={active || undefined} className={cn(cls, "focus-visible:outline-none focus-visible:bg-accent/50")} onClick={onClick} onKeyDown={onKey}>{inner}</div>;
+  return <div role="button" tabIndex={0} aria-current={active || undefined} className={cn(cls, "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring")} onClick={onClick} onKeyDown={onKey}>{inner}</div>;
 }
 
 export function Section({ title, children, className }: { title?: ReactNode; children: ReactNode; className?: string }) {

@@ -69,7 +69,7 @@ test("the stats job counts each user's documents and files, not their contents",
     await ctx.db.insert("transactions", { ...tx, date: "2024-01-05", photoIds: [photo] });
     await ctx.db.insert("transactions", { ...tx, importId: "imp1" });
   });
-  await t.action(internal.admin.refreshStats, {});
+  await t.action(internal.admin.refreshUser, { userId: user });
   const o = await asAdmin.query(api.admin.overview, { from: "2026-11-01", to: "2026-11-30" });
   const s = o.stats.find((r) => r.userId === user)!;
   expect(s.tables.transactions.count).toBe(3);
@@ -87,7 +87,7 @@ test("deleting an account removes its usage rows", async () => {
   const { t, user, asUser } = await setup();
   await asUser.mutation(api.usage.ping, ping());
   await t.mutation(internal.usage.recordAi, { userId: user, feature: "gmail", model: "claude-haiku-5-5", tokens: { input: 10, output: 10, cacheWrite: 0, cacheRead: 0 } });
-  await t.action(internal.admin.refreshStats, {});
+  await t.action(internal.admin.refreshUser, { userId: user });
   await asUser.mutation(api.account.deleteMyAccount, { confirm: "DELETE" });
   await t.finishAllScheduledFunctions(vi.runAllTimers);
   const left = await t.run(async (ctx) => ({
@@ -118,5 +118,16 @@ test("each Claude call adds its tokens and cost to the user's day, per feature",
   expect(o.ai.find((r) => r.feature === "tidy")).toMatchObject({ calls: 1, inputTokens: 2247, outputTokens: 1113 });
   // outside the asked-for days: left out
   expect((await asAdmin.query(api.admin.overview, { from: "2026-10-01", to: "2026-10-31" })).ai).toEqual([]);
+  vi.useRealTimers();
+});
+
+test("the stats job hands each user to a count of their own", async () => {
+  vi.useFakeTimers();
+  const { t, user } = await setup();
+  await t.action(internal.admin.refreshStats, {});
+  await t.finishAllScheduledFunctions(vi.runAllTimers);
+  const counted = await t.run((ctx) => ctx.db.query("adminStats").collect());
+  expect(counted.map((r) => r.userId)).toContain(user);
+  expect(counted).toHaveLength(2);
   vi.useRealTimers();
 });

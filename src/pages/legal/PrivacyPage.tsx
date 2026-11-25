@@ -89,7 +89,8 @@ export default function PrivacyPage() {
             text and every field on screen is masked before it leaves your device, and photos are left out, so PostHog never
             receives your amounts, notes, merchant, category or payment-method names, receipt photos or anything read from
             your mail. Web addresses are sent without their search terms or filters. You are known to PostHog by an account
-            id, not your name or email. Your browser's Do Not Track setting turns this off.
+            id, not your name or email. You can turn this off in More › Preferences › Usage reports;
+            your browser's Do Not Track setting turns it off too.
           </Sub>
         </Section>
 

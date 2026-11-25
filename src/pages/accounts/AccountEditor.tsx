@@ -52,6 +52,8 @@ export default function AccountEditor() {
   }), [existing, settings.decimals]);
   const [f, setF] = useState(initial);
   const [confirm, setConfirm] = useState(false);
+  // why Save was refused, kept on the form until the next try (a toast is gone before the field is found)
+  const [error, setError] = useState("");
   const create = useOp("accounts.create");
   const update = useOp("accounts.update");
   const kind = f.kind;
@@ -76,6 +78,7 @@ export default function AccountEditor() {
   }
 
   async function save() {
+    setError("");
     try {
       const args = {
         name: f.name, kind, groupId: f.groupId === NO_GROUP ? undefined : (f.groupId as Id<"accountGroups">), initialBalance: toMinor(f.amount, settings.decimals, LOCALE_DECIMAL), includeInTotals: f.includeInTotals, hidden: f.hidden,
@@ -92,7 +95,7 @@ export default function AccountEditor() {
       if (args.last4 && args.last4.length !== 4) throw new Error("Enter all 4 last digits, or leave them empty");
       if (id) await update({ id: id as Id<"accounts">, ...args }); else await create(args);
       if (id) goBack("/payment-methods"); else nav("/payment-methods");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save"); }
   }
 
   if (id && !existing) return <><PageHeader back="/payment-methods" title="" /><div className="p-8 text-center text-sm text-muted-foreground">Loading…</div></>;
@@ -100,6 +103,7 @@ export default function AccountEditor() {
     <>
       <PageHeader back title={id ? "Edit payment method" : "New payment method"} right={<Button size="sm" onClick={save} disabled={!f.name.trim()}>Save</Button>} />
       <Page className="p-4 space-y-4 pb-10">
+        {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5"><Label>Type</Label>
             <Select value={f.kind} onValueChange={(v) => setF({ ...f, kind: v as AccountKind })}><SelectTrigger className="w-full" aria-label="Type"><SelectValue /></SelectTrigger><SelectContent>{ACCOUNT_KINDS.map((k) => <SelectItem key={k.kind} value={k.kind}>{k.label}</SelectItem>)}</SelectContent></Select>

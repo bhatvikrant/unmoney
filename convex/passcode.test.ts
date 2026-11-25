@@ -41,3 +41,16 @@ test("unlocking normally cancels a pending request", async () => {
   await as.mutation(api.passcode.cancelReset, {});
   expect(await t.run(async (ctx) => (await ctx.db.query("settings").first())!.passcodeResetRequestedAt)).toBeFalsy();
 });
+
+test("settings.update cannot touch the passcode or anything else outside its list", async () => {
+  const t = convexTest({ schema, modules });
+  const userId = await t.run((ctx) => ctx.db.insert("users", { email: "a@example.com" }));
+  const as = t.withIdentity({ subject: `${userId}|session` });
+  const apply = (id: string, kind: string, args: unknown) => as.mutation(api.sync.apply, { ops: [{ id, kind, args, at: Date.now() }] });
+  await apply("a", "settings.completeOnboarding", { currency: "INR" });
+  await apply("b", "settings.setPasscode", { hash: "h", salt: "s" });
+  const [r] = await apply("c", "settings.update", { patch: { theme: "dark", passcodeHash: undefined, passcodeSalt: "x", onboarded: false, userId: "someone" } });
+  expect(r.status).toBe("applied");
+  const s = (await t.run((ctx) => ctx.db.query("settings").unique()))!;
+  expect([s.theme, s.passcodeHash, s.passcodeSalt, s.onboarded, s.userId]).toEqual(["dark", "h", "s", true, userId]);
+});

@@ -333,6 +333,36 @@ test("connecting records where reading may start: now for \"from now on\", the l
   expect(again.readsFrom).toBeLessThanOrEqual(Date.now() - 7 * 24 * 60 * 60 * 1000);
 });
 
+test("mail that is already an entry is not drafted again, however long ago it was saved", async () => {
+  const { t, userId, accounts, connect, insert } = await setup();
+  await connect();
+  // saved long ago: its draft and its seen row have been pruned, only the entry remembers the mail
+  await t.run((ctx) => ctx.db.insert("transactions", { userId, type: "expense", date: "2025-03-02", accountId: accounts[0]._id, amount: 48500, note: "Swiggy", tags: [], photoIds: [], source: { app: "gmail", messageId: "old1" } }));
+  await t.mutation(internal.gmail.writeSync, { userId, startedAt: Date.now(), inserts: [insert("old1"), insert("new1")], updates: [], matches: [], learned: {}, aiCalls: 0, scanned: 2 });
+  expect((await t.run((ctx) => ctx.db.query("drafts").collect())).map((d) => d.messageId)).toEqual(["new1"]);
+});
+
+test("reconnecting a mailbox whose grant had died still reads the mail from the days it was down", async () => {
+  const { t, userId, connect } = await setup();
+  const monday = Date.now() - 3 * 24 * 60 * 60 * 1000;
+  const cid = await connect({ lookbackDays: 0, readsFrom: monday - 1000, syncedUpTo: monday, status: "reauth" });
+  await t.mutation(internal.gmail.saveConnection, { userId, email: "me@gmail.com", refreshTokenEnc: "e2", iv: "i2", lookbackDays: 0 });
+  const c = (await t.run((ctx) => ctx.db.get(cid)))!;
+  expect([c.status, c.readsFrom, c.syncedUpTo]).toEqual(["ok", monday - 1000, monday]);
+});
+
+test("reconnecting does not reset the month's Claude calls", async () => {
+  const { t, userId } = await setup();
+  const day = new Date().toISOString().slice(0, 10);
+  const spend = { inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, costUsd: 0 };
+  await t.run(async (ctx) => {
+    await ctx.db.insert("aiDaily", { userId, day, feature: "gmail", calls: 40, ...spend });
+    await ctx.db.insert("aiDaily", { userId, day, feature: "tidy", calls: 2, ...spend });
+  });
+  await t.mutation(internal.gmail.saveConnection, { userId, email: "me@gmail.com", refreshTokenEnc: "e", iv: "i", lookbackDays: 0 });
+  expect((await t.run((ctx) => ctx.db.query("gmailConnections").unique()))!.aiCalls).toBe(40);
+});
+
 test("a callback whose Gmail call is refused for setup reasons says which, instead of a bare error", async () => {
   const { t, userId } = await setup();
   process.env.AUTH_GOOGLE_ID = "id";

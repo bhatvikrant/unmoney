@@ -15,7 +15,7 @@ import { amountInput, localNumber, LOCALE_DECIMAL } from "@/lib/format";
 import { addDays, todayISO } from "../../../shared/dates";
 import { evaluateExpression, formatRate, toMinor } from "../../../shared/money";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
-import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useOpenEntry } from "@/lib/nav";
+import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useLeaveTo, useOpenEntry } from "@/lib/nav";
 import { useColumn } from "@/components/shell/SplitLayout";
 import { offerUndo, useUndoableDelete } from "@/lib/undo";
 import { AccountPicker, CategoryPicker } from "@/components/tx/pickers";
@@ -56,6 +56,9 @@ function defaultAccount(accounts: { _id: Id<"accounts">; hidden?: boolean; archi
 }
 
 const PICK_CATEGORY = "Pick a category";
+const PICK_METHOD = "Pick a payment method";
+const PICK_TO = "Pick a payment method to transfer to";
+const ENTER_AMOUNT = "Enter an amount";
 
 type Form = {
   type: TxType;
@@ -251,7 +254,7 @@ function useSaveFromLink(link: ReturnType<typeof parseEntryLink> | null, bookmar
 type Existing = TxDetail;
 
 function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: Id<"transactions">; existing?: Existing; draft?: Doc<"drafts">; panel: boolean }) {
-  const nav = useNavigate();
+  const leaveTo = useLeaveTo();
   const closeEntry = useCloseEntry();
   const openEntry = useOpenEntry();
   const undoable = useUndoableDelete();
@@ -381,6 +384,8 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   // New entries start with the cursor in the amount, and go back there after "Continue". The tap
   // that opened this screen primed the iOS keyboard (primeKeyboard); take focus over before paint.
   const amountRef = useRef<HTMLInputElement>(null);
+  // what the amount field held when Save found no amount in it: marked invalid until it is changed
+  const [noAmount, setNoAmount] = useState<string | null>(null);
   // a draft already has its amount: no keyboard popping up over a review
   useLayoutEffect(() => {
     if (!isEdit && !draft) amountRef.current?.focus();
@@ -409,16 +414,16 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
 
   function buildArgs() {
     const amountMajor = evaluateExpression(f.amount, LOCALE_DECIMAL);
-    if (amountMajor === null) throw new Error("Enter an amount");
+    if (amountMajor === null) throw new Error(ENTER_AMOUNT);
     const typed = toMinor(amountMajor, settings.decimals);
-    if (typed === 0) throw new Error("Enter an amount");
+    if (typed === 0) throw new Error(ENTER_AMOUNT);
     // a refund is stored below zero, so every total nets it against the category
     const refund = f.type === "expense" && f.refund;
     const amount = refund ? -Math.abs(typed) : typed;
     const subTyped = sub ? toMinor(evaluateExpression(f.subAmount, LOCALE_DECIMAL) ?? 0, sub.decimals) : undefined;
-    if (!f.accountId) throw new Error("Pick an account");
+    if (!f.accountId) throw new Error(PICK_METHOD);
     if (f.type !== "transfer" && !f.categoryId) throw new Error(PICK_CATEGORY);
-    if (f.type === "transfer" && !f.toAccountId) throw new Error("Pick a payment method to transfer to");
+    if (f.type === "transfer" && !f.toAccountId) throw new Error(PICK_TO);
     const fee = f.type === "transfer" && f.feeOn ? toMinor(evaluateExpression(f.fee, LOCALE_DECIMAL) ?? 0, settings.decimals) : undefined;
     return {
       type: f.type,
@@ -477,9 +482,15 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
         }
       }
     } catch (e) {
-      // the one thing missing is the category: offer the picker rather than an error
-      if (e instanceof Error && e.message === PICK_CATEGORY) setSheet("category");
-      else toast.error(e instanceof Error ? e.message : "Could not save");
+      // something is missing: open its picker, or put the cursor in the amount and mark it, rather than only saying so
+      const msg = e instanceof Error ? e.message : "Could not save";
+      if (msg === PICK_CATEGORY) setSheet("category");
+      else if (msg === PICK_METHOD) setSheet("account");
+      else if (msg === PICK_TO) setSheet("to");
+      else {
+        if (msg === ENTER_AMOUNT) { setNoAmount(sub ? f.subAmount : f.amount); amountRef.current?.focus(); }
+        toast.error(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -548,7 +559,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
                   <span className="max-w-24 truncate">{f.repeat.kind === "none" ? "Repeat" : repeatLabel(f.repeat)}</span>
                 </button>
               ) : inSeries ? (
-                <button type="button" onClick={() => nav("/settings/repeats")} className="text-[10px] text-primary flex items-center gap-1"><Repeat className="size-3" />{existing?.installmentIndex ? `${existing.installmentIndex}/${existing.installmentCount}` : "In a series"}</button>
+                <button type="button" onClick={() => leaveTo("/settings/repeats")} className="text-[10px] text-primary flex items-center gap-1"><Repeat className="size-3" />{existing?.installmentIndex ? `${existing.installmentIndex}/${existing.installmentCount}` : "In a series"}</button>
               ) : null}
             </div>
             <div className="mt-1.5 flex gap-1.5">
@@ -593,11 +604,11 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
             <div className="flex-1 flex items-center gap-2">
               {sub ? (
                 <>
-                  <PrefixedInput ref={amountRef} aria-label={`Amount in ${sub.code}`} prefix={sub.code} inputMode="decimal" value={f.subAmount} onChange={(e) => set("subAmount", e.target.value)} placeholder="0" />
+                  <PrefixedInput ref={amountRef} aria-label={`Amount in ${sub.code}`} aria-invalid={noAmount === f.subAmount || undefined} prefix={sub.code} inputMode="decimal" value={f.subAmount} onChange={(e) => set("subAmount", e.target.value)} placeholder="0" />
                 </>
               ) : (
                 <>
-                  <PrefixedInput ref={amountRef} aria-label="Amount" prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount, LOCALE_DECIMAL); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", localNumber(v)); }} />
+                  <PrefixedInput ref={amountRef} aria-label="Amount" aria-invalid={noAmount === f.amount || undefined} prefix={settings.symbol} inputMode="decimal" value={f.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" onBlur={() => { const v = evaluateExpression(f.amount, LOCALE_DECIMAL); if (v !== null && /[+\-*/×÷]/.test(f.amount.slice(1))) set("amount", localNumber(v)); }} />
                 </>
               )}
               <Button variant="ghost" size="icon" className="size-8" aria-label="Calculator" onClick={() => setSheet("keypad")}><Calculator className="size-4" /></Button>
@@ -740,15 +751,15 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       {saved ? <SplitDialog open={sheet === "split"} onOpenChange={(o) => !o && setSheet(null)} txs={[saved]} /> : null}
       <BottomSheet open={sheet === "currency"} onOpenChange={(o) => !o && setSheet(null)} title="Currency">
         <div className="grid grid-cols-2 gap-1.5 px-2">
-          <button type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", !sub && "bg-accent")} onClick={() => { setF((p) => ({ ...p, subCurrency: "", subAmount: "", rate: undefined, rateFromFeed: false })); setSheet(null); }}>{settings.mainCurrency} <span className="text-muted-foreground text-xs">main</span></button>
+          <button type="button" aria-pressed={!sub} className={cn("rounded-md border px-3 py-2 text-sm text-left", !sub && "bg-accent")} onClick={() => { setF((p) => ({ ...p, subCurrency: "", subAmount: "", rate: undefined, rateFromFeed: false })); setSheet(null); }}>{settings.mainCurrency} <span className="text-muted-foreground text-xs">main</span></button>
           {currencies.map((c) => (
-            <button key={c._id} type="button" className={cn("rounded-md border px-3 py-2 text-sm text-left", sub?.code === c.code && "bg-accent")} onClick={() => pickCurrency(c)}>
+            <button key={c._id} type="button" aria-pressed={sub?.code === c.code} className={cn("rounded-md border px-3 py-2 text-sm text-left", sub?.code === c.code && "bg-accent")} onClick={() => pickCurrency(c)}>
               {c.code} <span className="text-muted-foreground text-xs">{formatRate(mainSide, c, c.rate)}</span>
             </button>
           ))}
         </div>
         {ratesAge ? <p className="text-xs text-muted-foreground mt-3 px-2">{ratesAge}</p> : null}
-        <button type="button" className="text-xs text-muted-foreground underline mt-3 px-2" onClick={() => { setSheet(null); nav("/settings/sub-currencies"); }}>Manage sub-currencies and rates</button>
+        <button type="button" className="text-xs text-muted-foreground underline mt-3 px-2" onClick={() => { setSheet(null); leaveTo("/settings/sub-currencies"); }}>Manage sub-currencies and rates</button>
       </BottomSheet>
 
       <DeleteSeriesEntryDialog open={confirm === "delete"} onOpenChange={(o) => !o && setConfirm(null)} onPick={(scope) => void undoable.entry(id!, scope).then(() => done(closeEntry))} />

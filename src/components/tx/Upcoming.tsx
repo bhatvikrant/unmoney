@@ -3,7 +3,7 @@ import { Repeat } from "lucide-react";
 import { toast } from "sonner";
 import type { Occurrence } from "../../../shared/upcoming";
 import { useApp } from "@/lib/app";
-import { useStore } from "@/lib/store";
+import { useDispatch } from "@/lib/store";
 import { useOpenEntry } from "@/lib/nav";
 import { useToday } from "@/lib/today";
 import { dateLabel } from "@/lib/format";
@@ -51,7 +51,7 @@ export function UpcomingRow({ occ, onClick, showDate, className }: { occ: Occurr
 
 /** Add the next date now (paying early) or skip it, each with Undo. */
 export function useUpcomingActions() {
-  const { dispatch } = useStore();
+  const dispatch = useDispatch();
   const openEntry = useOpenEntry();
   const today = useToday();
   const confirm = useConfirm();
