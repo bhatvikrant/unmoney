@@ -11,10 +11,10 @@ const modules = import.meta.glob("./**/*.ts");
 // these tests never reach Claude, even on a machine that has a key
 vi.stubEnv("ANTHROPIC_API_KEY", "");
 
-/** A user with six expense entries in each of August, September and October 2026: enough for a recap of each. */
+/** A user with AI turned on and six expense entries in each of August, September and October 2026: enough for a recap of each. */
 async function setup() {
   const t = convexTest({ schema, modules });
-  const userId = await t.run((ctx) => ctx.db.insert("users", { email: "a@example.com" }));
+  const userId = await t.run((ctx) => ctx.db.insert("users", { email: "a@example.com", aiEnabled: true }));
   const as = t.withIdentity({ subject: `${userId}|session` });
   const op: Op = { id: "op1", kind: "settings.completeOnboarding", args: { currency: "INR" }, at: 1 };
   await as.mutation(api.sync.apply, { ops: [op] });
@@ -30,8 +30,12 @@ async function setup() {
 }
 
 test("recap insights: only when asked for by someone signed in, for a finished period with a recap, and nothing is counted before that", async () => {
-  const { t, as, calls } = await setup();
+  const { t, userId, as, calls } = await setup();
   await expect(t.action(api.recapAi.ask, { key: "2026-10" })).rejects.toThrow("Sign in first");
+  // AI is off until the superadmin turns it on for the person
+  await t.run((ctx) => ctx.db.patch(userId, { aiEnabled: false }));
+  await expect(as.action(api.recapAi.ask, { key: "2026-10" })).rejects.toThrow("turned on for your account");
+  await t.run((ctx) => ctx.db.patch(userId, { aiEnabled: true }));
   await expect(as.action(api.recapAi.ask, { key: "2026-13" })).rejects.toThrow("can't be read");
   // a month with nothing in it, and one that has not ended yet
   await expect(as.action(api.recapAi.ask, { key: "2026-07" })).rejects.toThrow("isn't a recap");

@@ -13,6 +13,7 @@ import { action, internalMutation, internalQuery, query } from "./_generated/ser
 import { internal } from "./_generated/api";
 import schema from "./schema";
 import { loadSnapshot } from "./lib/snapshot";
+import { aiAllowed } from "./lib/auth";
 import { recordSpend } from "./lib/aiSpend";
 import { reportServerError } from "./lib/posthog";
 import { addDays } from "../shared/dates";
@@ -44,7 +45,7 @@ export const prepare = internalQuery({
     // a period still running has no recap. Somewhere it is already tomorrow, so the server's day plus one is the latest "today".
     const finished = to < addDays(new Date().toISOString().slice(0, 10), 1);
     const stored = await ctx.db.query("recapInsights").withIndex("by_user_key", (q) => q.eq("userId", userId).eq("key", key)).unique();
-    return { facts: finished ? buildRecapFacts(snap, key) : null, stored };
+    return { allowed: await aiAllowed(ctx, userId), facts: finished ? buildRecapFacts(snap, key) : null, stored };
   },
 });
 
@@ -70,7 +71,9 @@ export const ask = action({
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new ConvexError("Sign in first");
     if (!KEY.test(key)) throw new ConvexError("That recap can't be read");
-    const { facts, stored } = await ctx.runQuery(internal.recapAi.prepare, { userId, key });
+    const { allowed, facts, stored } = await ctx.runQuery(internal.recapAi.prepare, { userId, key });
+    // off for everyone until the superadmin turns it on for them (lib/auth.ts aiAllowed)
+    if (!allowed) throw new ConvexError("AI insights aren't turned on for your account");
     if (!facts) throw new ConvexError("There isn't a recap for this period yet");
     // nothing changed since the last run: show its answer again, free
     if (stored && stored.hash === facts.hash) return { insights: stored.insights, budgets: stored.budgets, hash: stored.hash, at: stored.at };
