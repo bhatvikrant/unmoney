@@ -13,7 +13,7 @@ import { applyTheme } from "@/lib/theme";
 
 /** Also the support and developer contact on Google's consent screen (docs/google-verification.md). */
 const CONTACT_EMAIL = "vik.bhat223@gmail.com";
-const UPDATED = "12 November 2026";
+const UPDATED = "25 November 2026";
 const USER_DATA_POLICY = "https://developers.google.com/terms/api-services-user-data-policy";
 const LIMITED_USE = "https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes";
 
@@ -68,7 +68,8 @@ export default function PrivacyPage() {
           </Sub>
           <Sub title="Reading the amount off a photo">
             When you attach a photo to an entry with no amount yet, UnMoney reads the total off it on your device, with the
-            open-source Tesseract engine. The photo is not sent anywhere to be read. The first time, your browser downloads the
+            open-source Tesseract engine. The photo is not sent anywhere to be read, unless you turn on "Read photos with AI"
+            (see "Reading mail and photos with Claude" below). The first time, your browser downloads the
             engine and its English model (about 5 MB) from the jsDelivr CDN, which sees only that request, like any other download.
           </Sub>
           <Sub title="If you connect Gmail">
@@ -130,7 +131,7 @@ export default function PrivacyPage() {
           </p>
         </Section>
 
-        <Section title="Reading mail with Claude">
+        <Section title="Reading mail and photos with Claude">
           <p>
             Most bank and shop mail is read by rules that run on UnMoney's server. When a mail looks like a payment but no rule
             can read it, its sender, subject, date received and up to 2,500 characters of its text are sent to Anthropic's API,
@@ -138,6 +139,13 @@ export default function PrivacyPage() {
             payment methods (with the last four digits of cards and accounts), so the answer uses your own names. The same API
             suggests category clean-ups in More › Categories › Tidy up, when you ask for it, from your category names, how
             much each is used and its most common notes.
+          </p>
+          <p className="mt-3">
+            If you turn on "Read photos with AI" in More › Preferences (it is off until you do), a photo you attach to an
+            entry is sent to the same API, reduced in size, to suggest the entry's note, description, category and date. With it
+            go the names of your categories and the notes and descriptions you use most, so the suggestion is in your own
+            words. The photo is passed through to Anthropic and not kept by UnMoney for this; the copy saved with your entry
+            is stored as before. Turn the setting off and photos are again read only on your device.
           </p>
           <p className="mt-3">
             Anthropic processes this only to return the answer to UnMoney. Under Anthropic's commercial terms, data sent
@@ -152,7 +160,7 @@ export default function PrivacyPage() {
             <li><strong className="font-medium text-foreground">Convex</strong>: the database and server. Everything listed above is stored here.</li>
             <li><strong className="font-medium text-foreground">Vercel</strong>: serves the web app's files. It does not receive your ledger or your mail.</li>
             <li><strong className="font-medium text-foreground">Google</strong>: sign-in, and the Gmail API if you connect Gmail.</li>
-            <li><strong className="font-medium text-foreground">Anthropic</strong>: reads the mail no rule could read, as described above.</li>
+            <li><strong className="font-medium text-foreground">Anthropic</strong>: reads the mail no rule could read and, if you turn it on, the photos you attach, as described above.</li>
             <li><strong className="font-medium text-foreground">PostHog</strong>: product analytics and crash reports, with all text masked, as described above. It never receives your ledger or your mail.</li>
           </ul>
           <p className="mt-3">

@@ -13,12 +13,15 @@ import { PhotoViewer } from "@/components/PhotoViewer";
 /**
  * Photos are queued locally and uploaded when online; the entry keeps a temporary id until then.
  * With onAmountRead, newly attached photos are read on the device for the amount paid, and it is
- * handed over only when the reading is clear (see src/lib/receiptAmount.ts).
+ * handed over only when the reading is clear (see src/lib/receiptAmount.ts). onPhotos gets the photos
+ * just attached, for a form that reads more off them; readingPhoto shows that it is still at it.
  */
-export function PhotoField({ photoIds, onChange, onAmountRead }: {
+export function PhotoField({ photoIds, onChange, onAmountRead, onPhotos, readingPhoto }: {
   photoIds: Id<"_storage">[];
   onChange: (ids: Id<"_storage">[]) => void;
   onAmountRead?: (major: number) => void;
+  onPhotos?: (files: File[]) => void;
+  readingPhoto?: boolean;
 }) {
   const { enqueueUpload, photoUrl, rememberPhotoUrls, resolveId, status } = useStore();
   const realIds = useMemo(() => photoIds.map((id) => resolveId(id)).filter((id) => !isTmpId(id)), [photoIds, resolveId]);
@@ -47,6 +50,7 @@ export function PhotoField({ photoIds, onChange, onAmountRead }: {
       }
       onChange([...photoIds, ...ids]);
       if (onAmountRead && added.length) void readFirst(added, onAmountRead);
+      if (added.length) onPhotos?.(added);
     } catch {
       toast.error("Could not attach the photo");
     } finally {
@@ -85,7 +89,7 @@ export function PhotoField({ photoIds, onChange, onAmountRead }: {
           <Camera className="size-5" />
         </button>
       ) : null}
-      {reading ? <span className="text-xs text-muted-foreground animate-pulse">Reading the amount…</span> : null}
+      {reading || readingPhoto ? <span className="text-xs text-muted-foreground animate-pulse">{readingPhoto ? "Reading the photo…" : "Reading the amount…"}</span> : null}
       <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => upload(e.target.files)} />
       <PhotoViewer
         urls={photoIds.map(urlOf)}

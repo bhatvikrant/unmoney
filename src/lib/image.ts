@@ -13,9 +13,9 @@ function encode(canvas: HTMLCanvasElement, type: string): Promise<Blob | null> {
 /**
  * Shrinks a photo before it is queued for upload: corrects its orientation, caps its size and re-encodes it as WebP
  * (JPEG where the browser can't write WebP). Hands back the original whenever that would not make it smaller,
- * or when the browser can't decode it.
+ * or when the browser can't decode it. `maxEdge`: a smaller cap, for a copy that is only read (shared/receiptAi.ts).
  */
-export async function compressImage(file: File): Promise<File> {
+export async function compressImage(file: File, maxEdge = MAX_EDGE): Promise<File> {
   if (!COMPRESSIBLE.test(file.type)) return file;
   let bitmap: ImageBitmap;
   try {
@@ -24,7 +24,7 @@ export async function compressImage(file: File): Promise<File> {
     return file;
   }
   try {
-    const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(bitmap.width * scale);
     canvas.height = Math.round(bitmap.height * scale);
