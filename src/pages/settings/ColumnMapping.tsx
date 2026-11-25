@@ -4,14 +4,19 @@
  * preview. Continue hands the rows to the same review a Money Manager file gets.
  */
 import { useMemo, useState } from "react";
-import { FileSpreadsheet } from "lucide-react";
-import type { ImportRow } from "../../../shared/ops";
+import { useAction } from "convex/react";
+import { ConvexError } from "convex/values";
+import { FileSpreadsheet, Loader2, WandSparkles } from "lucide-react";
+import { api } from "../../../convex/_generated/api";
+import type { ImportFormat, ImportRow } from "../../../shared/ops";
 import { normNote } from "../../../shared/categoryLint";
 import { parseNumber, toMinor } from "../../../shared/money";
-import { useView } from "@/lib/store";
+import { LAYOUT_COLS, LAYOUT_ROWS } from "../../../shared/statementAi";
+import { useStore, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { guessKind } from "@/lib/csv";
-import { guessMapping, guessSign, headerNames, layoutKey, mappingReady, recallMapping, toImportRows, type BankMapping, type Grid } from "@/lib/bankImport";
+import { cn } from "@/lib/utils";
+import { guessMapping, guessSign, headerNames, layoutKey, mappingReady, mappingReads, recallMapping, toImportRows, type BankMapping, type Grid } from "@/lib/bankImport";
 import { Section } from "@/components/shell/misc";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
@@ -21,7 +26,8 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const MEMORY_KEY = "unmoney.bankMapping";
-type Remembered = { mapping: BankMapping; accountId: string };
+/** dateOrder: day or month first, when AI worked the layout out and the file's own dates cannot tell. */
+type Remembered = { mapping: BankMapping; accountId: string; dateOrder?: ImportFormat["dateOrder"] };
 function stored(): Record<string, Remembered> {
   try { return JSON.parse(localStorage.getItem(MEMORY_KEY) ?? "{}") as Record<string, Remembered>; } catch { return {}; }
 }
@@ -38,9 +44,10 @@ const NEW = "new";
 export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onContinue }: {
   name: string; grid: Grid; headerRow: number;
   onCancel: () => void;
-  onContinue: (rows: ImportRow[], noAmount: number) => void;
+  onContinue: (rows: ImportRow[], noAmount: number, dateOrder?: ImportFormat["dateOrder"]) => void;
 }) {
   const view = useView();
+  const { user, status } = useStore();
   const { accounts, settings, categoryById } = useApp();
   const methods = accounts.filter((a) => !a.archivedAt && !a.hidden);
   // a method whose name (or card's bank) is in the file name, else the default one
@@ -49,7 +56,7 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
     const saved = recallMapping(grid, stored());
     const accountId = saved && methods.some((a) => a._id === saved.accountId) ? saved.accountId : (fromName ?? methods.find((a) => a._id === settings.defaultAccountId) ?? methods[0])?._id ?? NEW;
     const kind = methods.find((a) => a._id === accountId)?.kind;
-    return { mapping: saved?.mapping ?? guessMapping(grid, foundRow, kind), accountId, saved: !!saved };
+    return { mapping: saved?.mapping ?? guessMapping(grid, foundRow, kind), accountId, saved: !!saved, dateOrder: saved?.dateOrder };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grid, foundRow]);
   const [m, setM] = useState<BankMapping>(initial.mapping);
@@ -66,6 +73,30 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
     if (!signTouched) set({ sign: guessSign(m.drcr, kindOf(id, name)) });
   }
   const headers = headerNames(grid[m.headerRow] ?? []);
+
+  // ---- a layout the guess could not work out, asked of Claude (shared/statementAi.ts), only when the person taps ----
+  const readLayout = useAction(api.ai.readLayout);
+  const [ai, setAi] = useState<{ kind: "idle" | "running" | "done" | "error"; text?: string }>({ kind: "idle" });
+  const [dateOrder, setDateOrder] = useState(initial.dateOrder);
+  async function askLayout() {
+    setAi({ kind: "running" });
+    try {
+      // the header row and the first rows under it: the rest of the file never leaves the device
+      const sample = grid.slice(m.headerRow + 1).filter((r) => r.some((c) => c.trim())).slice(0, LAYOUT_ROWS);
+      const { dateOrder: order, ...columns } = await readLayout({
+        header: (grid[m.headerRow] ?? []).slice(0, LAYOUT_COLS), rows: sample.map((r) => r.slice(0, LAYOUT_COLS)), card: kindOf(accountId, newName) === "card",
+      });
+      const next = { ...m, ...columns };
+      // tried on the whole file before it is believed
+      if (!mappingReads(grid, next)) throw new ConvexError("AI couldn't work out this file's columns. Match them yourself.");
+      setM(next);
+      setSignTouched(true);
+      setDateOrder(order);
+      setAi({ kind: "done", text: "Matched by AI. Check the columns and the preview below." });
+    } catch (e) {
+      setAi({ kind: "error", text: e instanceof ConvexError ? String(e.data) : "Couldn't ask AI about this file. Match the columns yourself." });
+    }
+  }
 
   // what the user's history files a note under, for rows without a category column
   const history = useMemo(() => {
@@ -106,8 +137,8 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
   const headerChoices = grid.slice(0, 30).map((r, i) => ({ i, cells: r.filter((c) => c.trim()) })).filter((x) => x.cells.length >= 2);
 
   function cont() {
-    remember(layoutKey(grid[m.headerRow] ?? []), { mapping: m, accountId });
-    onContinue(result.rows, result.noAmount);
+    remember(layoutKey(grid[m.headerRow] ?? []), { mapping: m, accountId, dateOrder });
+    onContinue(result.rows, result.noAmount, dateOrder);
   }
 
   return (
@@ -120,8 +151,23 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
             <div className="text-xs text-muted-foreground">{initial.saved ? "Matched the way you did last time for this layout. Check it, then continue." : "Not a Money Manager file: say which column is which. The preview below updates as you go."}</div>
           </div>
         </div>
+        {user?.ai && (!mappingReady(m) || ai.kind !== "idle") ? (
+          <div className="flex items-center gap-3 px-4 py-3 border-b">
+            {ai.kind === "running" ? <Loader2 className="size-4 shrink-0 animate-spin text-primary" /> : <WandSparkles className="size-4 shrink-0 text-primary" />}
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">Match the columns with AI</div>
+              <div className={cn("text-xs", ai.kind === "error" ? "text-destructive" : "text-muted-foreground")}>
+                {ai.kind === "running" ? "Reading the first rows…" : ai.text
+                  ?? (status.connected
+                    ? `UnMoney couldn't tell which column is which. This sends the header row below and the ${LAYOUT_ROWS} rows under it to Anthropic's Claude to work it out. The rest of the file stays on your device.`
+                    : "Matching with AI needs a connection. You can match the columns yourself.")}
+              </div>
+            </div>
+            {ai.kind !== "running" && ai.kind !== "done" && status.connected ? <Button size="sm" className="h-8" onClick={() => void askLayout()}>{ai.kind === "error" ? "Try again" : "Match"}</Button> : null}
+          </div>
+        ) : null}
         <MapRow label="Header row">
-          <Select value={String(m.headerRow)} onValueChange={(v) => { setM(guessMapping(grid, Number(v), kindOf(accountId, newName))); setSignTouched(false); }}>
+          <Select value={String(m.headerRow)} onValueChange={(v) => { setM(guessMapping(grid, Number(v), kindOf(accountId, newName))); setSignTouched(false); setAi({ kind: "idle" }); }}>
             <SelectTrigger className="w-full" aria-label="Header row"><SelectValue /></SelectTrigger>
             <SelectContent>{headerChoices.map((x) => <SelectItem key={x.i} value={String(x.i)}>{`Row ${x.i + 1} · ${x.cells.slice(0, 3).join(", ")}`.slice(0, 60)}</SelectItem>)}</SelectContent>
           </Select>

@@ -7,11 +7,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
+import { ConvexError } from "convex/values";
 import { toast } from "sonner";
-import { Check, Copy, Download, FileSpreadsheet, Share2, Smartphone } from "lucide-react";
+import { Check, Copy, Download, FileSpreadsheet, Loader2, Share2, Smartphone, WandSparkles } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { applyOp, detectImportFormat, type ImportFormat, type NewImportAccount, type OpResult } from "../../../shared/ops";
+import { applyOp, detectImportFormat, type ImportFormat, type ImportRow, type NewImportAccount, type OpResult } from "../../../shared/ops";
+import { STATEMENT_MAX_LINES, applySuggestion, lineKey, lineOf, linesToAsk, type StatementSuggestion } from "../../../shared/statementAi";
 import { accountNamesIn, guessKind } from "@/lib/csv";
 import { ACCOUNT_KINDS } from "../../../shared/defaults";
 import { CURRENCIES } from "../../../shared/currencies";
@@ -31,14 +33,21 @@ import { ColumnMapping } from "./ColumnMapping";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 const CHUNK = 400;
+/** Rows the review lists at first, and more with each "Show more". */
+const PAGE = 50;
 const SHORTCUT_FILE = "/send-to-unmoney.shortcut";
 
 type Origin = { kind: "pick" } | { kind: "share" } | { kind: "pending"; id: Id<"pendingImports"> };
 /** mapped: a bank statement whose columns are matched, so the review shows (Back to columns clears it). */
-type Loaded = ParsedImport & { name: string; origin: Origin; mapped?: boolean };
+type Loaded = ParsedImport & { name: string; origin: Origin; mapped?: boolean; /** Day or month first, where the column step knows (a layout worked out by AI) and the file's own dates cannot tell. */ dateOrder?: ImportFormat["dateOrder"] };
 type DryRun = OpResult<"transactions.importRows">;
+/** A category a row can be filed under, by name as an import row carries it. */
+type CategoryChoice = Pick<ImportRow, "category" | "subcategory">;
+const categoryLabel = (c: CategoryChoice) => `${c.category}${c.subcategory ? ` › ${c.subcategory}` : ""}`;
+const sameCategory = (a: CategoryChoice, b: CategoryChoice) => categoryLabel(a).toLowerCase() === categoryLabel(b).toLowerCase();
 
 const isAndroid = () => /Android/i.test(navigator.userAgent);
 const kb = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
@@ -57,12 +66,16 @@ export default function ImportPage() {
   const [reading, setReading] = useState(false);
   const pickRef = useRef<HTMLInputElement>(null);
   const handled = useRef<string | null>(null);
+  // What AI suggested for this file's descriptions. Kept here, above the review, so going back to the
+  // columns and on again fills the rows from it instead of sending them a second time.
+  const aiAnswers = useRef(new Map<string, StatementSuggestion>());
 
   async function load(file: Blob, name: string, origin: Origin) {
     setReading(true);
     try {
       const parsed = await readImportFile(file, name);
       if (!parsed.rows.length && !parsed.bank) throw new Error("No entries found in that file.");
+      aiAnswers.current = new Map();
       setLoaded({ ...parsed, name, origin });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not read that file");
@@ -126,12 +139,13 @@ export default function ImportPage() {
           <div hidden={loaded.mapped}>
             <ColumnMapping name={loaded.name} grid={loaded.bank.grid} headerRow={loaded.bank.headerRow}
               onCancel={async () => { if (loaded.origin.kind === "share") await finish(loaded.origin); closeReview(); }}
-              onContinue={(rows, noAmount) => setLoaded({ ...loaded, rows, noAmount, mapped: true })} />
+              onContinue={(rows, noAmount, dateOrder) => setLoaded({ ...loaded, rows, noAmount, mapped: true, dateOrder })} />
           </div>
         ) : null}
         {loaded?.bank && !loaded.mapped ? null : loaded ? (
           <Review
             loaded={loaded}
+            answers={aiAnswers.current}
             onBack={loaded.bank ? () => setLoaded({ ...loaded, mapped: false }) : undefined}
             onCancel={async () => { if (loaded.origin.kind === "share") await finish(loaded.origin); closeReview(); }}
             onDone={async () => { await finish(loaded.origin); nav("/", { replace: true }); }}
@@ -365,9 +379,11 @@ function IosSteps() {
   );
 }
 
-function Review({ loaded, onBack, onCancel, onDone }: { loaded: Loaded; onBack?: () => void; onCancel: () => void | Promise<void>; onDone: () => void | Promise<void> }) {
+function Review({ loaded, answers, onBack, onCancel, onDone }: { loaded: Loaded; answers: Map<string, StatementSuggestion>; onBack?: () => void; onCancel: () => void | Promise<void>; onDone: () => void | Promise<void> }) {
   const view = useView();
-  const { userId, status, dispatchTracked, whenSynced } = useStore();
+  const { userId, user, status, dispatchTracked, whenSynced } = useStore();
+  // the rows as they will be imported: a statement's notes and categories can be changed below, by hand or by AI
+  const [rows, setRows] = useState(loaded.rows);
   const { settings } = useApp();
   const bulk = useBulkOps();
   // while the server takes the parts: entries confirmed so far, of those sent
@@ -385,7 +401,7 @@ function Review({ loaded, onBack, onCancel, onDone }: { loaded: Loaded; onBack?:
   if (!busy) frozen.current = view;
   const base = frozen.current;
   // How the file writes dates and numbers, read from all its rows; the user can correct it below.
-  const [format, setFormat] = useState<ImportFormat>(() => detectImportFormat(loaded.rows, LOCALE_FORMAT));
+  const [format, setFormat] = useState<ImportFormat>(() => detectImportFormat(loaded.rows, { ...LOCALE_FORMAT, dateOrder: loaded.dateOrder ?? LOCALE_FORMAT.dateOrder }));
   const hasSlashDates = useMemo(() => loaded.rows.some((r) => /^\d{1,2}[/-]\d{1,2}[/-]\d{4}/.test((r.date ?? "").trim())), [loaded.rows]);
   // Accounts the file names that do not exist yet, each with a type the user can correct, so cards keep a billing cycle.
   const newNames = useMemo(() => {
@@ -402,12 +418,84 @@ function Review({ loaded, onBack, onCancel, onDone }: { loaded: Loaded; onBack?:
   // Dry run against the local data: what would be imported, created and skipped.
   const dry = useMemo<DryRun | { error: string }>(() => {
     try {
-      const op = { id: "dryrun", kind: "transactions.importRows" as const, args: { rows: loaded.rows, format, newAccounts, createMissing, createAccounts, skipInvalid: true, skipDuplicates: true }, at: 0 };
+      const op = { id: "dryrun", kind: "transactions.importRows" as const, args: { rows, format, newAccounts, createMissing, createAccounts, skipInvalid: true, skipDuplicates: true }, at: 0 };
       return applyOp(base, op, { userId: (userId ?? "") as Id<"users"> }).result as DryRun;
     } catch (e) {
       return { error: e instanceof Error ? e.message : "This file cannot be imported" };
     }
-  }, [loaded.rows, base, userId, format, newAccounts, createMissing, createAccounts]);
+  }, [rows, base, userId, format, newAccounts, createMissing, createAccounts]);
+
+  // Why a row will not be imported, by its number; a row that is not here is new.
+  const left = useMemo(() => {
+    const m = new Map<number, { label: string; why?: string }>();
+    if ("error" in dry) return m;
+    for (const n of dry.duplicates) m.set(n, { label: "In UnMoney" });
+    for (const n of dry.likelyDuplicates) m.set(n, { label: "Looks like one you have" });
+    for (const e of dry.errors) m.set(e.row, { label: "Skipped", why: e.reason });
+    return m;
+  }, [dry]);
+  const [onlyNew, setOnlyNew] = useState(false);
+  const [shown, setShown] = useState(PAGE);
+  const listed = useMemo(() => rows.map((_, i) => i).filter((i) => !onlyNew || !left.has(i + 1)), [rows, onlyNew, left]);
+  const categoryChoices = useMemo(() => {
+    const live = view.categories.filter((c) => !c.deletedAt && !c.archivedAt).sort((a, b) => a.order - b.order);
+    const choices = { expense: [] as CategoryChoice[], income: [] as CategoryChoice[] };
+    for (const c of live) {
+      const parent = c.parentId ? live.find((p) => p._id === c.parentId) : undefined;
+      if (!c.parentId) choices[c.type].push({ category: c.name });
+      else if (parent) choices[c.type].push({ category: parent.name, subcategory: c.name });
+    }
+    return choices;
+  }, [view.categories]);
+  const change = (i: number, patch: Partial<ImportRow>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  function changeCategory(i: number, c: CategoryChoice) {
+    setRows((rs) => rs.map((r, j) => {
+      if (j !== i) return r;
+      // the old subcategory goes with the old category
+      const { subcategory: _old, ...rest } = r;
+      void _old;
+      return { ...rest, ...c };
+    }));
+  }
+
+  // ---- notes and categories suggested by Claude (shared/statementAi.ts), only when asked ----
+  const suggestImport = useAction(api.ai.suggestImport);
+  const [ai, setAi] = useState<{ kind: "idle" | "running" | "done" | "error"; text?: string }>({ kind: "idle" });
+  // A statement's rows can be changed in the list below (a Money Manager file already has the person's
+  // own notes and categories), but not while they are being imported or filled in.
+  const editable = !!loaded.bank && !busy && ai.kind !== "running";
+  // what each row asks about, from the file as it was read: an edited note does not change the question
+  const lines = useMemo(() => loaded.rows.map(lineOf), [loaded.rows]);
+  // rows already filled from an answer: asking again (after "Leave these out too" is unticked, say) leaves them and any edits alone
+  const [filled, setFilled] = useState<ReadonlySet<number>>(new Set());
+  // only rows that will be imported: what is already in UnMoney stays as it is, and is not sent
+  const want = "error" in dry ? [] : rows.map((_, i) => i).filter((i) => lines[i] && !filled.has(i) && (!left.has(i + 1) || (!skipLikely && dry.likelyDuplicates.includes(i + 1))));
+  async function suggest() {
+    const ask = linesToAsk(want.map((i) => lines[i]), answers, STATEMENT_MAX_LINES - answers.size);
+    setAi({ kind: "running" });
+    let missed: "cap" | "failed" | undefined;
+    try {
+      if (ask.size) {
+        const res = await suggestImport({ lines: [...ask.values()] });
+        [...ask.keys()].forEach((key, j) => { const s = res.suggestions[j]; if (s) answers.set(key, s); });
+        missed = res.missed;
+      }
+    } catch (e) {
+      setAi({ kind: "error", text: e instanceof ConvexError ? String(e.data) : "Couldn't get AI suggestions. You can still import the file as it is." });
+      return;
+    }
+    const got = want.filter((i) => answers.has(lineKey(lines[i]!)));
+    setFilled(new Set([...filled, ...got]));
+    const fill = new Set(got);
+    setRows((rs) => rs.map((r, i) => (fill.has(i) ? applySuggestion(r, answers.get(lineKey(lines[i]!))!) : r)));
+    const changed = got.filter((i) => { const s = answers.get(lineKey(lines[i]!))!; return s.note || s.category; }).length;
+    const rest = want.length - got.length;
+    setAi({
+      kind: "done",
+      text: `${changed} of ${want.length} ${want.length === 1 ? "row" : "rows"} filled in. Check them below.`
+        + (!rest ? "" : missed === "cap" ? ` AI has reached its limit for the month, so ${rest} got nothing.` : missed === "failed" ? ` ${rest} got nothing: tap again to retry them.` : ` AI suggests for the first ${STATEMENT_MAX_LINES} different descriptions of a file, so ${rest} got nothing.`),
+    });
+  }
 
   const fileCurrency = loaded.currency && loaded.currency !== settings.mainCurrency && CURRENCIES.some((c) => c.code === loaded.currency) ? loaded.currency : null;
   const noEntriesYet = base.transactions.length === 0;
@@ -419,16 +507,16 @@ function Review({ loaded, onBack, onCancel, onDone }: { loaded: Loaded; onBack?:
     // Duplicates were found over the whole file in the dry run; checking per chunk would also
     // catch identical entries the file itself has in two different chunks.
     const dup = new Set([...dry.duplicates, ...(skipLikely ? dry.likelyDuplicates : [])]);
-    const rows = loaded.rows.filter((_, i) => !dup.has(i + 1));
+    const todo = rows.filter((_, i) => !dup.has(i + 1));
     const parts: { id: string; inserted: number }[] = [];
     // every chunk carries the same batch, so the whole file can be undone at once
     const batch = { id: `imp_${crypto.randomUUID?.() ?? Date.now().toString(36)}`, name: loaded.name };
     try {
-      for (let i = 0; i < rows.length; i += CHUNK) {
-        const { id, result } = await dispatchTracked("transactions.importRows", { rows: rows.slice(i, i + CHUNK), format, newAccounts, createMissing, createAccounts, skipInvalid: true, rowOffset: i, batch });
+      for (let i = 0; i < todo.length; i += CHUNK) {
+        const { id, result } = await dispatchTracked("transactions.importRows", { rows: todo.slice(i, i + CHUNK), format, newAccounts, createMissing, createAccounts, skipInvalid: true, rowOffset: i, batch });
         parts.push({ id, inserted: result.inserted });
         inserted += result.inserted;
-        setProgress(Math.min(1, (i + CHUNK) / rows.length));
+        setProgress(Math.min(1, (i + CHUNK) / todo.length));
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Import failed");
@@ -497,6 +585,21 @@ function Review({ loaded, onBack, onCancel, onDone }: { loaded: Loaded; onBack?:
             ) : null}
           </div>
         )}
+        {loaded.bank && user?.ai && (want.length || ai.kind !== "idle") ? (
+          <div className="flex items-center gap-3 px-4 py-3 border-t">
+            {ai.kind === "running" ? <Loader2 className="size-4 shrink-0 animate-spin text-primary" /> : <WandSparkles className="size-4 shrink-0 text-primary" />}
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">Suggest categories with AI</div>
+              <div className={cn("text-xs", ai.kind === "error" ? "text-destructive" : "text-muted-foreground")}>
+                {ai.kind === "running" ? "Reading the descriptions…" : ai.text
+                  ?? (status.connected
+                    ? "Sends the bank's description of each new row, with your category names and the notes you use most, to Anthropic's Claude. No amounts or dates. Nothing is imported until you confirm."
+                    : "AI suggestions need a connection. You can import without them.")}
+              </div>
+            </div>
+            {want.length && ai.kind !== "running" && status.connected && !busy ? <Button size="sm" className="h-8" onClick={() => void suggest()}>{ai.kind === "idle" ? "Suggest" : "Try again"}</Button> : null}
+          </div>
+        ) : null}
         {fileCurrency ? (
           <div className="flex items-center gap-3 px-4 py-3 border-t text-sm">
             <div className="min-w-0 flex-1">
@@ -540,26 +643,62 @@ function Review({ loaded, onBack, onCancel, onDone }: { loaded: Loaded; onBack?:
           } />
         ) : null}
       </Section>
-      <Section title="First rows">
-        <div className="overflow-x-auto max-h-64">
+      <Section title="Rows">
+        {left.size ? (
+          <label className="flex items-center gap-3 px-4 py-2.5 border-b text-sm">
+            <Checkbox checked={onlyNew} onCheckedChange={(v) => { setOnlyNew(!!v); setShown(PAGE); }} />Show only rows that are new to UnMoney ({rows.length - left.size})
+          </label>
+        ) : null}
+        <div className="overflow-x-auto max-h-96">
           <table className="text-xs w-full">
-            <thead className="bg-muted sticky top-0">
-              <tr>{["Date", "Payment method", "Category", "Note", "Amount", "Type"].map((h) => <th key={h} className="text-left px-2 py-1 font-medium">{h}</th>)}</tr>
+            <thead className="bg-muted sticky top-0 z-10">
+              <tr>{["Date", "", "Payment method", "Category", "Note", "Amount", "Type"].map((h, k) => <th key={k} className="text-left px-2 py-1 font-medium">{h}</th>)}</tr>
             </thead>
             <tbody>
-              {loaded.rows.slice(0, 50).map((r, i) => (
-                <tr key={i} className="border-t">
-                  <td className="px-2 py-1 whitespace-nowrap">{r.date}</td>
-                  <td className="px-2 py-1">{r.account}</td>
-                  <td className="px-2 py-1">{r.category}{r.subcategory ? ` › ${r.subcategory}` : ""}</td>
-                  <td className="px-2 py-1 max-w-32 truncate">{r.note}</td>
-                  <td className="px-2 py-1 tabular">{r.amount}</td>
-                  <td className="px-2 py-1">{r.type}</td>
-                </tr>
-              ))}
+              {listed.slice(0, shown).map((i) => {
+                const r = rows[i];
+                const out = left.get(i + 1);
+                const choices = categoryChoices[/^in/i.test(r.type.trim()) ? "income" : "expense"];
+                const at = choices.findIndex((c) => sameCategory(c, r));
+                return (
+                  // a row that is not going in is dimmed, so the new ones stand out
+                  <tr key={i} className={cn("border-t", out && "text-muted-foreground")}>
+                    <td className="px-2 py-1 whitespace-nowrap">{r.date}</td>
+                    <td className="px-2 py-1 whitespace-nowrap" title={out?.why}>
+                      {out ? out.label : <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">New</span>}
+                    </td>
+                    <td className="px-2 py-1">{r.account}</td>
+                    <td className="px-2 py-1">
+                      {editable ? (
+                        <Select value={String(at)} onValueChange={(v) => changeCategory(i, choices[Number(v)])}>
+                          <SelectTrigger className="h-7 w-40 text-xs" aria-label={`Category of row ${i + 1}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {at < 0 ? <SelectItem value="-1">{categoryLabel(r)} (new)</SelectItem> : null}
+                            {choices.map((c, k) => <SelectItem key={k} value={String(k)}>{categoryLabel(c)}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      ) : categoryLabel(r)}
+                    </td>
+                    <td className="px-2 py-1 max-w-48 truncate">
+                      {editable ? (
+                        // saved when the field is left: every change re-runs the dry run over the whole file
+                        <Input key={r.note} defaultValue={r.note ?? ""} className="h-7 w-44 text-xs" aria-label={`Note of row ${i + 1}`}
+                          onBlur={(e) => { const note = e.target.value.trim(); if (note !== (r.note ?? "")) change(i, { note }); }} />
+                      ) : r.note}
+                    </td>
+                    <td className="px-2 py-1 tabular">{r.amount}</td>
+                    <td className="px-2 py-1">{r.type}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+        {listed.length > shown ? (
+          <div className="px-4 py-2 border-t">
+            <Button size="sm" variant="ghost" onClick={() => setShown((n) => n + PAGE)}>Show more ({listed.length - shown} left)</Button>
+          </div>
+        ) : null}
       </Section>
       <div className="flex gap-2 px-4 pt-4 md:px-4">
         <Button variant="outline" className="flex-1" disabled={busy} onClick={() => void onCancel()}>Cancel</Button>

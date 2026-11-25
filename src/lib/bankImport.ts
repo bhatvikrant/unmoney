@@ -3,7 +3,7 @@
  * column mapping the user confirms (docs/specs/bank-import.md). Pure: the page guesses a mapping,
  * shows a preview, and hands the rows to the same review as a Money Manager file.
  */
-import type { ImportRow } from "../../shared/ops";
+import { parseImportDate, type ImportRow } from "../../shared/ops";
 import { parseNumber } from "../../shared/money";
 import { MONTH_SHORT } from "../../shared/dates";
 
@@ -238,4 +238,19 @@ export function toImportRows(grid: Grid, m: BankMapping, opts: { account: string
     });
   }
   return { rows, noAmount, refunds };
+}
+
+/**
+ * Whether a mapping someone else proposed (AI: shared/statementAi.ts) reads this file, tried before it
+ * is believed: its amount cells are numbers (a currency or Dr/Cr beside them at most: the amount
+ * reader would also find the digits in "ORDER 4711"), it yields rows, and most of the first of them
+ * have a date the importer reads.
+ */
+export function mappingReads(grid: Grid, m: BankMapping): boolean {
+  if (!mappingReady(m)) return false;
+  const cells = grid.slice(m.headerRow + 1, m.headerRow + 21).flatMap((r) => (m.mode === "split" ? [r[m.out], r[m.in]] : [r[m.amount]])).filter((c) => c?.trim());
+  if (cells.filter((c) => /\d/.test(c) && c.replace(/[^\p{L}]/gu, "").length <= 5).length * 2 < cells.length) return false;
+  const rows = toImportRows(grid, m, { account: "-" }).rows.slice(0, 20);
+  const dated = rows.filter((r) => parseImportDate(r.date, "dmy") ?? parseImportDate(r.date, "mdy")).length;
+  return rows.length > 0 && dated * 2 >= rows.length;
 }
