@@ -196,9 +196,33 @@ test("what stands out is found by the code, most telling first, each with its fi
   // Claude sees them by short id, in whole units, and can name each figure by its path
   expect(facts.input.findings![0]).toEqual({ id: "f1", type: "spike", about: "Social Life", now: 9000, usual: 1000, times: 9 });
   expect(facts.figures["f1.now"]).toEqual({ v: 900_000, u: "money" });
-  // two months are not enough to say what is usual, and a year has no findings
+  // two months are not enough to say what is usual
   expect(buildRecapFacts(f.snap, "2026-08")!.findings).toEqual([]);
-  expect(buildRecapFacts(f.snap, "2026")!.input.findings).toBeUndefined();
+});
+
+test("a year is looked at across its own months, the ones it has entries in: one big month, a habit that grew, a category that changed between the halves", () => {
+  const f = eventful();
+  const facts = buildRecapFacts(f.snap, "2026")!;
+  expect(facts.findings.map((x) => x.type)).toEqual(["peak", "growing", "shift"]);
+  const [peak, growing, shift] = facts.findings;
+  // July to October: the months before the ledger began and after its last entry are not zeros to compare with
+  expect(peak).toMatchObject({
+    subject: "Social Life", when: "October", drill: `c:${f.cat("Social Life")}`, figures: { now: { v: 900_000 }, total: { v: 1_200_000 }, share: { v: 75 } },
+    chart: { kind: "bars", unit: "money", bars: [{ label: "Jul", value: 100_000, on: false }, { label: "Aug", value: 100_000, on: false }, { label: "Sep", value: 100_000, on: false }, { label: "Oct", value: 900_000, on: true }] },
+  });
+  expect(growing).toMatchObject({ subject: "Coffee", drill: "n:Coffee", figures: { count: { v: 17 }, amount: { v: 340_000 }, early: { v: 6 }, late: { v: 11 }, months: { v: 2 }, eachEarly: { v: 20_000 }, eachLate: { v: 20_000 } }, chart: { unit: "count", bars: [{ value: 3 }, { value: 3 }, { value: 3, on: true }, { value: 8, on: true }] } });
+  expect(shift).toMatchObject({ subject: "Food", figures: { start: { v: 820_000 }, now: { v: 1_320_000 }, months: { v: 2 } } });
+  expect(facts.input.findings![0]).toEqual({ id: "f1", type: "peak", about: "Social Life", month: "October", now: 9000, total: 12000, share: 75 });
+  // a card for one of them passes the same checks as a month's
+  expect(validateRecap({ title: "", cards: [{ finding: "f1", headline: "October was the Social Life month", text: "{f1.now} of the year's {f1.total} went out in October." }], insights: [], budgets: [] }, facts).cards)
+    .toEqual([{ type: "peak", headline: "October was the Social Life month", text: "{m:900000} of the year's {m:1200000} went out in October.", chart: peak.chart, drill: `c:${f.cat("Social Life")}` }]);
+
+  // one-offs are the largest entries whose note came once, and a note that ran for months and then stopped is named with its last month
+  for (const m of ["03", "04", "05", "06"]) f.expense(`2026-${m}-07`, 250_000, "Health", "Physio");
+  f.expense("2026-06-15", 4_000_000, "Household", "Sofa");
+  const more = buildRecapFacts(f.snap, "2026")!.findings;
+  expect(more.find((x) => x.type === "oneoffs")).toMatchObject({ names: ["Sofa", "Wedding gift"], figures: { top: { v: 4_900_000 }, entries: { v: 2 } }, chart: { kind: "split", part: 4_900_000, items: [{ label: "Sofa", amount: 4_000_000 }, { label: "Wedding gift", amount: 900_000 }] } });
+  expect(more.find((x) => x.type === "stopped")).toMatchObject({ subject: "Physio", when: "June", figures: { usual: { v: 250_000 }, months: { v: 4 } } });
 });
 
 test("a card is a finding the code made, once, in words that pass the same checks; the story shows them before the closing card", () => {
@@ -223,9 +247,8 @@ test("a card is a finding the code made, once, in words that pass the same check
     insights: [], budgets: [], title: "The month of the wedding",
     cards: [{ type: "spike", headline: good.headline, text: "{m:900000} against a usual {m:100000}: 9 times as much.", chart: facts.findings[0].chart, drill: `c:${f.cat("Social Life")}` }],
   });
-  // a name with a figure in it is not a name, and a year has no findings to make a card of
+  // a name with a figure in it is not a name
   expect(validateRecap({ title: "A {spent.p0} month", cards: [], insights: [], budgets: [] }, facts).title).toBeUndefined();
-  expect(validateRecap({ title: "", cards: [good], insights: [], budgets: [] }, buildRecapFacts(f.snap, "2026")!)).toEqual({ insights: [], budgets: [] });
 
   const recap = monthRecap(f.snap, "2026-10")!;
   const budgets = [{ categoryId: f.cat("Food"), amount: 500_000, why: "" }];
