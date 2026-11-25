@@ -24,12 +24,13 @@ import { cn } from "@/lib/utils";
 import { BarList, Card, CohortGrid, Columns, DayChart, Group, Heatmap, SLOT, StackedDayBars, Tile } from "./charts";
 import { UserSheet } from "./UserSheet";
 import {
-  ALL, addDays, aiSeries, aiTotals, applyFilters, change, cohorts, dayKey, daySeries, fmtBytes, fmtDuration, fmtNum, fmtPct, fmtUsd, hourOfWeek, inRange,
+  ALL, addDays, aiByUser, aiSeries, aiTotals, applyFilters, change, cohorts, dayKey, daySeries, fmtBytes, fmtDuration, fmtNum, fmtPct, fmtUsd, hourOfWeek, inRange,
   photoBytes, sumRecords, tally, totals, userRows, type DayPoint, type Filters, type Overview, type UserRow,
 } from "./metrics";
 
 const TABS = [
   { value: "overview", label: "Overview" },
+  { value: "ai", label: "AI" },
   { value: "engagement", label: "Usage" },
   { value: "devices", label: "Devices" },
   { value: "features", label: "Features" },
@@ -170,7 +171,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
     const ai = aiTotals(curAi);
     const aiPrev = aiTotals(view.ai.filter((r) => r.day >= prevFrom && r.day <= prevTo));
     const aiDays = aiSeries(curAi, from, today);
-    const aiCalls = Object.fromEntries(AI_FEATURES.map((x) => [x.key, curAi.filter((r) => r.feature === x.key).reduce((n, r) => n + r.calls, 0)]));
+    const aiUsers = aiByUser(view.users, curAi);
     const rows = userRows(view, cur, today, curAi);
 
     // devices seen in the period, and which build each is on (versions sort as text: YYYY.MM.DD-HH:MM)
@@ -198,7 +199,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
     });
 
     return {
-      view, cur, tc, tp, ai, aiPrev, aiDays, aiCalls, series, chartSeries, rows, signups, signupsPrev, avgDau, avgDauPrev, entries, entriesPrev, bandwidth, bandwidthPrev,
+      view, cur, tc, tp, ai, aiPrev, aiDays, aiUsers, series, chartSeries, rows, signups, signupsPrev, avgDau, avgDauPrev, entries, entriesPrev, bandwidth, bandwidthPrev,
       docsBytes, fileBytes, activeDevices, latest, behind, sources, gmail, thisMonth, drafts, tableBytes, createdByHour, lengths, screens,
       heat: hourOfWeek(cur),
       cohorts: cohorts(view.users, view.daily, today, 8),
@@ -222,8 +223,16 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
     window.scrollTo(0, 0);
   };
 
+  const aiInfo = "Each call is priced from the tokens Anthropic reports, at list prices (shared/aiCost.ts), when it is made. Counted from 2 Nov 2026; earlier calls are not in it.";
+  const aiTiles = (
+    <>
+      <Tile label="AI cost" value={fmtUsd(m.ai.costUsd)} sub={`${fmtNum(m.ai.calls)} ${m.ai.calls === 1 ? "call" : "calls"} · ${m.ai.users} of ${m.view.users.length} users`} delta={change(m.ai.costUsd, m.aiPrev.costUsd)} info={aiInfo} />
+      <Tile label="AI cost per user" value={m.ai.users ? fmtUsd(m.ai.costUsd / m.ai.users) : "–"} sub={m.aiUsers[0] ? `Most: ${nameOf(m.aiUsers[0].u)} ${fmtUsd(m.aiUsers[0].t.costUsd)}` : "Nobody used AI"} info="The period's AI cost over the users who made any AI call in it. Every user's own cost is under AI." />
+    </>
+  );
+
   const tiles = (
-    <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4">
+    <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4 lg:grid-cols-5">
       <Tile label="Users" value={fmtNum(m.view.users.length)} sub={`${m.signups} new in ${periodLabel}`} delta={change(m.signups, m.signupsPrev)} info="Accounts that exist now. The change is in sign-ups against the period before." />
       <Tile label="Active users" value={fmtNum(m.tc.activeUsers)} sub={`${fmtNum(m.avgDau)} a day on average`} delta={change(m.tc.activeUsers, m.tp.activeUsers)} />
       <Tile label="Stickiness" value={m.tc.activeUsers ? fmtPct(m.avgDau / m.tc.activeUsers) : "–"} sub="Daily ÷ period users" delta={change(m.avgDau, m.avgDauPrev)} info="How many of the period's users come back on a typical day. 50% means a typical user opens it every other day." />
@@ -232,6 +241,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
       <Tile label="Entries added" value={fmtNum(m.entries)} sub={`${fmtNum(m.view.stats.reduce((n, s) => n + (s.tables.transactions?.count ?? 0), 0))} stored in all`} delta={change(m.entries, m.entriesPrev)} />
       <Tile label="Bandwidth" value={fmtBytes(m.bandwidth)} sub={`↓ ${fmtBytes(m.tc.bytesDown)} · ↑ ${fmtBytes(m.tc.bytesUp)}`} delta={change(m.bandwidth, m.bandwidthPrev)} info="Measured on each device: sync data as JSON, uploads by size, photo downloads estimated from each user's average photo. An estimate, not Convex's bill." />
       <Tile label="Storage" value={fmtBytes(m.docsBytes + m.fileBytes)} sub={`Docs ${fmtBytes(m.docsBytes)} · files ${fmtBytes(m.fileBytes)}`} info="Exact sizes of every document and file the users keep, counted daily (or with the refresh button)." />
+      {aiTiles}
     </div>
   );
 
@@ -270,6 +280,24 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
             <CohortGrid cohorts={m.cohorts} />
           </Card>
           {health}
+        </div>
+      </>
+    ),
+    ai: (
+      <>
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4">
+          {aiTiles}
+          <Tile label="Calls to Claude" value={fmtNum(m.ai.calls)} sub={m.ai.calls ? `${fmtUsd(m.ai.costUsd / m.ai.calls)} a call` : undefined} delta={change(m.ai.calls, m.aiPrev.calls)} />
+          <Tile label="Tokens" value={fmtNum(m.ai.inputTokens + m.ai.outputTokens)} sub={`In ${fmtNum(m.ai.inputTokens)} · out ${fmtNum(m.ai.outputTokens)}`} info="Input counts cached tokens too. Output tokens cost five times an input token." />
+        </div>
+        <AiUsersTable rows={m.aiUsers} total={m.ai.costUsd} others={m.view.users.length - m.aiUsers.length} onPick={onPick} period={periodLabel} />
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card title="AI cost per day" hint={`What Claude cost per day, last ${periodLabel}`} className="lg:col-span-2" info={aiInfo}>
+            <StackedDayBars data={m.aiDays} series={AI_FEATURES.map((x) => ({ key: x.key, label: x.label }))} format={fmtUsd} />
+          </Card>
+          <Card title="AI cost by feature" hint={`Last ${periodLabel}`}>
+            <BarList items={AI_FEATURES.map((x) => ({ label: x.label, value: m.ai[x.key], hint: calls(m.ai[`${x.key}Calls`]) })).filter((x) => x.value)} format={fmtUsd} of={m.ai.costUsd} color={SLOT(3)} empty="No AI calls in the period" />
+          </Card>
         </div>
       </>
     ),
@@ -353,22 +381,6 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
         <Card title="Storage by table" hint={`Across every user · files ${fmtBytes(m.fileBytes)}`}>
           <BarList items={Object.entries(m.tableBytes).filter(([, n]) => n).map(([label, value]) => ({ label: <span className="font-mono text-xs">{label}</span>, value })).sort((a, b) => b.value - a.value)} format={fmtBytes} limit={10} color={SLOT(1)} />
         </Card>
-        <Card title="AI cost" hint={`What Claude cost per day, last ${periodLabel}`} className="lg:col-span-2"
-          info="Each call is priced from the tokens Anthropic reports, at list prices (shared/aiCost.ts), when it is made. Counted from 2 Nov 2026; earlier calls are not in it.">
-          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Mini label={m.aiPrev.costUsd ? `spent · was ${fmtUsd(m.aiPrev.costUsd)}` : "spent"} value={fmtUsd(m.ai.costUsd)} />
-            <Mini label="calls to Claude" value={fmtNum(m.ai.calls)} />
-            <Mini label="per user who used it" value={m.ai.users ? fmtUsd(m.ai.costUsd / m.ai.users) : "–"} />
-            <Mini label="tokens in · out" value={`${fmtNum(m.ai.inputTokens)} · ${fmtNum(m.ai.outputTokens)}`} />
-          </div>
-          <StackedDayBars data={m.aiDays} series={AI_FEATURES.map((x) => ({ key: x.key, label: x.label }))} format={fmtUsd} />
-        </Card>
-        <Card title="AI cost by user" hint={`Last ${periodLabel} · tap for more`}>
-          <BarList items={m.rows.filter((u) => u.aiCost).sort((a, b) => b.aiCost - a.aiCost).map((u) => ({ key: u.id, label: nameOf(u), value: u.aiCost, hint: `${fmtNum(u.aiCalls)} ${u.aiCalls === 1 ? "call" : "calls"}` }))} format={fmtUsd} of={m.ai.costUsd} onPick={onPick} color={SLOT(3)} empty="No AI calls in the period" />
-        </Card>
-        <Card title="AI cost by feature" hint={`Last ${periodLabel}`}>
-          <BarList items={AI_FEATURES.map((x) => ({ label: x.label, value: m.ai[x.key], hint: `${fmtNum(m.aiCalls[x.key])} ${m.aiCalls[x.key] === 1 ? "call" : "calls"}` })).filter((x) => x.value)} format={fmtUsd} of={m.ai.costUsd} color={SLOT(3)} empty="No AI calls in the period" />
-        </Card>
       </div>
     ),
     users: <UsersTable rows={m.rows} onPick={onPick} period={periodLabel} now={data.now} />,
@@ -379,7 +391,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
       {/* sections, kept under the header while scrolling */}
       <div className="sticky top-12 z-20 border-b bg-background">
         <div className="mx-auto max-w-6xl">
-          {/* all six share a phone's width, so none hides off the edge */}
+          {/* all of them share a phone's width, so none hides off the edge */}
           <div role="tablist" aria-label="Sections" className="flex sm:px-2">
             {TABS.map((t) => (
               <button key={t.value} type="button" role="tab" aria-selected={tab === t.value} onClick={() => setTab(t.value)}
@@ -442,6 +454,86 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
 }
 
 const nameOf = (u: { name: string | null; email: string | null; id: string }) => u.name || u.email || u.id;
+const calls = (n: number) => `${fmtNum(n)} ${n === 1 ? "call" : "calls"}`;
+
+/** Every user who used AI in the period: what it cost, their share, and what the calls were for. */
+function AiUsersTable({ rows, total, others, onPick, period }: { rows: ReturnType<typeof aiByUser<Overview["users"][number]>>; total: number; others: number; onPick: (id: string) => void; period: string }) {
+  const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const feature = (cost: number, n: number) => (n ? <>{fmtUsd(cost)} <span className="text-xs text-muted-foreground">· {fmtNum(n)}</span></> : "–");
+  return (
+    <Card title={`AI cost by user (${rows.length})`} hint={`Last ${period}, dearest first. Tap a user for more.`}>
+      {!rows.length ? <p className="py-6 text-center text-sm text-muted-foreground">No AI calls in the period</p> : (
+        <>
+          <ul className="-mx-3 divide-y border-t sm:-mx-4 md:hidden">
+            {rows.map(({ u, t }) => (
+              <li key={u.id}>
+                <button type="button" onClick={() => onPick(u.id)} className="flex w-full items-center gap-3 px-3 py-3 text-left active:bg-accent sm:px-4">
+                  <Avatar seed={u.email || u.name || u.id} src={u.image ?? undefined} size={36} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{nameOf(u)}</span>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums">{fmtUsd(t.costUsd)}</span>
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs tabular-nums text-muted-foreground">
+                      <span>{total ? fmtPct(t.costUsd / total) : "–"} of all</span>
+                      <span>{calls(t.calls)}</span>
+                      <span>{fmtNum(t.inputTokens + t.outputTokens)} tokens</span>
+                      <span>last {day(t.lastDay)}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 text-xs tabular-nums text-muted-foreground">
+                      {AI_FEATURES.map((x) => (t[`${x.key}Calls`] ? <span key={x.key}>{x.label} {fmtUsd(t[x.key])}</span> : null))}
+                    </div>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="-mx-4 hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[860px] text-sm tabular-nums">
+              <thead className="border-b text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 text-left font-normal">User</th>
+                  <th className="px-2 py-2 text-right font-medium text-foreground">Cost ↓</th>
+                  <th className="px-2 py-2 text-right font-normal">Share</th>
+                  <th className="px-2 py-2 text-right font-normal">Calls</th>
+                  {AI_FEATURES.map((x) => <th key={x.key} className="px-2 py-2 text-right font-normal whitespace-nowrap">{x.label} · calls</th>)}
+                  <th className="px-2 py-2 text-right font-normal whitespace-nowrap">Tokens in</th>
+                  <th className="px-2 py-2 text-right font-normal whitespace-nowrap">Tokens out</th>
+                  <th className="px-2 py-2 text-right font-normal whitespace-nowrap">Per call</th>
+                  <th className="px-4 py-2 text-right font-normal whitespace-nowrap">Last call</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ u, t }) => (
+                  <tr key={u.id} onClick={() => onPick(u.id)} className="cursor-pointer border-b last:border-b-0 hover:bg-accent/50">
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-2">
+                        <Avatar seed={u.email || u.name || u.id} src={u.image ?? undefined} size={28} />
+                        <div className="min-w-0">
+                          <button type="button" className="block max-w-[200px] truncate text-left font-medium" onClick={(e) => { e.stopPropagation(); onPick(u.id); }}>{nameOf(u)}</button>
+                          <div className="max-w-[200px] truncate text-xs text-muted-foreground">{u.email}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 text-right font-semibold">{fmtUsd(t.costUsd)}</td>
+                    <td className="px-2 py-2 text-right text-muted-foreground">{total ? fmtPct(t.costUsd / total) : "–"}</td>
+                    <td className="px-2 py-2 text-right">{fmtNum(t.calls)}</td>
+                    {AI_FEATURES.map((x) => <td key={x.key} className="px-2 py-2 text-right whitespace-nowrap">{feature(t[x.key], t[`${x.key}Calls`])}</td>)}
+                    <td className="px-2 py-2 text-right">{fmtNum(t.inputTokens)}</td>
+                    <td className="px-2 py-2 text-right">{fmtNum(t.outputTokens)}</td>
+                    <td className="px-2 py-2 text-right">{fmtUsd(t.costUsd / t.calls)}</td>
+                    <td className="px-4 py-2 text-right whitespace-nowrap">{day(t.lastDay)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {others > 0 ? <p className="mt-3 text-xs text-muted-foreground">{others} other {others === 1 ? "user" : "users"} made no AI call in the period.</p> : null}
+    </Card>
+  );
+}
 
 function Mini({ label, value }: { label: string; value: ReactNode }) {
   return (
