@@ -5,6 +5,7 @@ import { ACCENTS, CORNERS, PATTERNS, TINTS } from "@/lib/theme";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 const focus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card";
@@ -25,6 +26,8 @@ export default function StyleSettings() {
       <Page>
         <Section>
           <Row label="Mode" right={(id) => <Select value={s.theme} onValueChange={(v) => update({ patch: { theme: v as "system" | "light" | "dark" } })}><SelectTrigger aria-labelledby={id} className="h-8 w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="system">System</SelectItem><SelectItem value="light">Light</SelectItem><SelectItem value="dark">Dark</SelectItem></SelectContent></Select>} />
+          {/* with Light chosen there is no dark page for it to change */}
+          {s.theme === "light" ? null : <Row label="True black" hint="A pure black page in dark mode" right={(id) => <Switch aria-labelledby={id} checked={!!s.trueBlack} onCheckedChange={(v) => update({ patch: { trueBlack: v } })} />} />}
           <Row label="Accent colour" right={(id) => (
             <div role="radiogroup" aria-labelledby={id} className="flex gap-2">
               {/* Ink is the theme's own neutral (near-white in dark mode), so its swatch follows the mode. */}

@@ -114,6 +114,8 @@ export default defineSchema({
     tint: v.optional(v.string()),
     pattern: v.optional(v.string()),
     corners: v.optional(v.string()),
+    /** Dark mode on a pure black page instead of near-black (index.css, [data-black]). */
+    trueBlack: v.optional(v.boolean()),
     subcategoryEnabled: v.boolean(),
     autocompleteEnabled: v.boolean(),
     /** The person asked for attached photos to be read by Claude (shared/receiptAi.ts). Unset: read on the device only. */
