@@ -10,7 +10,7 @@ import { listSafetyCopies, readSafetyCopy, SAFETY_DAYS, SAFETY_REASON, type Safe
 import { useBulkOps } from "@/lib/bulk";
 import { backupExport, txCsvRows } from "../../../shared/views";
 import { backupProblem, isTmpId, type BackupData } from "../../../shared/ops";
-import { packBackup, readBackupFile, type BackupPhotos } from "@/lib/backupFile";
+import { orGiveUp, packBackup, readBackupFile, type BackupPhotos } from "@/lib/backupFile";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Row, Section } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,10 @@ export default function BackupSettings() {
     const real = ids.filter((id) => !isTmpId(id)) as Id<"_storage">[];
     // the socket being down means the URL query would wait for it; photos are fetched 6 at a time
     for (let i = 0; status.connected && i < real.length; i += 200) {
-      const urls = Object.entries(await convex.query(api.files.urls, { ids: real.slice(i, i + 200) }).catch(() => ({} as Record<string, string | null>)));
+      const got = await orGiveUp(convex.query(api.files.urls, { ids: real.slice(i, i + 200) }).catch(() => ({} as Record<string, string | null>)));
+      // no answer: the connection went after Download was tapped. The backup is made with what has been fetched.
+      if (!got) break;
+      const urls = Object.entries(got);
       for (let j = 0; j < urls.length; j += 6) {
         await Promise.all(urls.slice(j, j + 6).map(async ([id, url]) => {
           const res = url ? await fetch(url, { signal: AbortSignal.timeout(60_000) }).catch(() => null) : null;
@@ -58,10 +61,12 @@ export default function BackupSettings() {
     try {
       const photos = await fetchPhotos(ids);
       // a zip this device can't build (too large for it) still leaves a backup of everything else
-      const file = await packBackup(data, photos).catch(() => { photos.clear(); return packBackup(data, photos); });
+      let tooLarge = false;
+      const file = await packBackup(data, photos).catch(() => { tooLarge = true; return packBackup(data, new Map()); });
       downloadBlob(`${name}.${file.ext}`, file.blob);
       const left = ids.length - photos.size;
-      if (left) toast.warning(`${left.toLocaleString()} of ${ids.length.toLocaleString()} receipt photos could not be fetched, so they are not in this backup. Download it again when you are online to include them.`, { duration: 10_000 });
+      if (tooLarge) toast.warning(`${photos.size.toLocaleString()} receipt photos are too much for one backup file on this device, so this backup has everything except the photos.`, { duration: 10_000 });
+      else if (left) toast.warning(`${left.toLocaleString()} of ${ids.length.toLocaleString()} receipt photos could not be fetched, so they are not in this backup. Download it again when you are online to include them.`, { duration: 10_000 });
       else toast.success(`Backup downloaded with ${photos.size.toLocaleString()} ${photos.size === 1 ? "photo" : "photos"}`);
     } catch {
       toast.error("Could not make the backup");

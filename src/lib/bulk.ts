@@ -14,7 +14,7 @@ import { currencyInfo } from "../../shared/currencies";
 import { restoreRowsFrom, rewriteIds, scaleAmount, type BackupData } from "../../shared/ops";
 import { backupExport } from "../../shared/views";
 import { saveSafetyCopy, type SafetyReason } from "./safetyCopy";
-import type { BackupPhotos } from "./backupFile";
+import { orGiveUp, type BackupPhotos } from "./backupFile";
 import type { Id } from "../../convex/_generated/dataModel";
 
 const CHUNK = 500;
@@ -58,16 +58,15 @@ export function useBulkOps() {
   /**
    * The photos of a backup that this account already has, as the server tells it: the backup was made here,
    * so they keep their ids. Uploading them again doubled the account's storage on every restore and left
-   * the first copies with nothing pointing at them. Offline (or with no answer in ten seconds) nothing is
-   * known, so every photo is uploaded: wasteful, but no photo is left out on a guess.
+   * the first copies with nothing pointing at them. Offline (or once an answer does not come) nothing more
+   * is known, so the rest are uploaded: wasteful, but no photo is left out on a guess.
    */
   async function alreadyHere(ids: string[]): Promise<Set<string>> {
     const here = new Set<string>();
     for (let i = 0; status.connected && i < ids.length; i += 200) {
-      const got = await Promise.race([
-        convex.query(api.files.owned, { ids: ids.slice(i, i + 200) as Id<"_storage">[] }).catch(() => [] as string[]),
-        new Promise<string[]>((done) => setTimeout(() => done([]), 10_000)),
-      ]);
+      const got = await orGiveUp(convex.query(api.files.owned, { ids: ids.slice(i, i + 200) as Id<"_storage">[] }).catch(() => [] as string[]));
+      // no answer: the connection went after the restore began, and the batches left would each wait as long
+      if (!got) break;
       for (const id of got) here.add(id);
     }
     return here;
@@ -78,8 +77,8 @@ export function useBulkOps() {
    * sit in the queue ahead of the restore, so this works offline too. A photo this account already has, one
    * the file does not carry, or one this device can't queue (storage full) keeps its old id.
    */
-  async function withPhotos(data: BackupData, photos?: BackupPhotos): Promise<BackupData> {
-    if (!photos?.size) return data;
+  async function withPhotos(data: BackupData, photos?: BackupPhotos): Promise<{ data: BackupData; uploading: number }> {
+    if (!photos?.size) return { data, uploading: 0 };
     const named = (data.transactions ?? []).flatMap((t) => (Array.isArray(t.photoIds) ? (t.photoIds as string[]) : []));
     const here = await alreadyHere([...new Set(named.filter((id) => photos.has(id)))]);
     const ids: Record<string, string> = {};
@@ -92,7 +91,7 @@ export function useBulkOps() {
       }
     }
     if (failed) toast.warning(`${failed.toLocaleString()} ${failed === 1 ? "photo" : "photos"} in the backup could not be read or kept on this device, so ${failed === 1 ? "it was" : "they were"} not restored.`);
-    return { ...data, transactions: rewriteIds(data.transactions, ids) };
+    return { data: { ...data, transactions: rewriteIds(data.transactions, ids) }, uploading: Object.keys(ids).length };
   }
 
   async function removeEntries(ifPresent?: boolean): Promise<string[]> {
@@ -158,10 +157,15 @@ export function useBulkOps() {
     /** `photos`: the receipt photos the backup file carries, re-uploaded for this account. */
     async restore(backup: BackupData, photos?: BackupPhotos) {
       await safetyCopy("restore");
-      const data = await withPhotos(backup, photos);
+      const { data, uploading } = await withPhotos(backup, photos);
+      // The photos are in the queue ahead of the restore, and it is sent only once they are up: with a few
+      // hundred of them that is minutes, during which nothing else syncs either. So the toast says what it is waiting for.
+      const loading = uploading
+        ? `Restoring… ${uploading.toLocaleString()} ${uploading === 1 ? "photo uploads" : "photos upload"} first. Keep UnMoney open until it is saved`
+        : null;
       if (view.transactions.length + (data.transactions?.length ?? 0) <= ONE_OP) {
         const { id } = await dispatchTracked("backup.restore", { data });
-        return track([id], { loading: "Restoring…", success: "Restored" });
+        return track([id], { loading: loading ?? "Restoring…", success: "Restored" });
       }
       // Everything but the entries goes first, and alone. The backup's entries are queued right behind it,
       // not once the server has answered: a reload or a closed tab in between (easy when offline) left the
@@ -178,7 +182,7 @@ export function useBulkOps() {
         // before this runs, that sweep reaches this device as ordinary changes.
         ids.push(...await removeEntries(true));
         await confirmed(ids);
-      })(), { loading: "Restoring… keep UnMoney open until it is saved", success: "Restored" });
+      })(), { loading: loading ?? "Restoring… keep UnMoney open until it is saved", success: "Restored" });
     },
 
     async changeDecimals(decimals: number) {

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { packBackup, readBackupFile, unzip, zip } from "./backupFile";
+import { orGiveUp, packBackup, readBackupFile, unzip, zip } from "./backupFile";
 import type { BackupData } from "../../shared/ops";
 
 const data: BackupData = { version: 1, settings: {}, accounts: [{ _id: "a" }], transactions: [{ _id: "t", photoIds: ["p1", "p2"], note: "₹ café" }] };
@@ -42,4 +42,9 @@ test("a backup unzipped and zipped again by another tool (deflated, inside a fol
   expect(back.data.transactions).toEqual([{ photoIds: ["p1"] }]);
   const photo = await back.photos.get("p1")!();
   expect([photo.type, await photo.text()]).toEqual(["image/jpeg", "a".repeat(80)]);
+});
+
+test("an answer that never comes is given up on, one that comes is passed on", async () => {
+  expect(await orGiveUp(new Promise<number>(() => {}), 5)).toBeNull();
+  expect(await orGiveUp(Promise.resolve(7), 5)).toBe(7);
 });
