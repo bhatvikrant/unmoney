@@ -43,7 +43,15 @@ Empty state: "Bookmark an entry you add often (open it and tap the star) and it 
 
 No new ops or fields. Everything saves through `transactions.create`, so offline works and Undo is `transactions.remove`. Pure helpers in `shared/quickAdd.ts` (`quickItems`, `fromTemplate`, `templateUsable`, `parseEntryLink`, `linkEntry`) are covered by `shared/quickAdd.test.ts`.
 
-## 5. Out of scope
+## 5. From a sentence (AI)
+
+Added 2026-11-25. For people the superadmin turned AI on for, a new entry has a one-line box above the form: type or dictate "450 swiggy dinner hdfc yesterday", tap **Fill in**, and the form is filled in to check (type, amount, date, time if given, note, description, category, payment method, and the receiving one for a transfer). It never saves; what the sentence does not say keeps the form's default, and what it does say replaces what was in the form. Dictation is the phone keyboard's own: there is no speech API.
+
+- `shared/quickAi.ts`: what is sent (`buildQuickNames`: names of categories and payment methods, currency codes, the 60 most-used notes with their category; never entries or amounts), the prompt and schema, `quickRequest`, and `validateQuick`, which drops anything that is not one of the person's ids, a sane amount, a real date from the last year or the next 31 days, or a note in their own words.
+- `convex/ai.ts` `quickEntry`: Haiku 5.5 at low effort, 300 sentences a month per person (`QUICK_MONTHLY_CAP`), 200 characters a sentence. The names are cached between sentences typed in a row.
+- Offline, on a failure or at the cap: one line in a toast, and the form is left as it was.
+
+## 6. Out of scope
 
 - A real home-screen widget (not possible for a PWA).
 - Choosing which bookmarks the sheet shows apart from their order (reorder them on the Bookmarks page).
