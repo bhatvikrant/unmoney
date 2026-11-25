@@ -1,4 +1,3 @@
-import { useNavigate } from "react-router";
 import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEffect, type ReactNode } from "react";
@@ -7,11 +6,12 @@ import { cn } from "@/lib/utils";
 import { SyncStrip } from "./SyncStatus";
 
 export function PageHeader({ title, hideTitle, back, left, right, className, sub }: {
-  title?: ReactNode; back?: boolean | string; left?: ReactNode; right?: ReactNode; className?: string; sub?: ReactNode;
+  title?: ReactNode; left?: ReactNode; right?: ReactNode; className?: string; sub?: ReactNode;
+  /** Shows Back, which returns to the screen this one was opened from. A path says where to land when there is none (opened by a link or a reload). */
+  back?: boolean | string;
   /** The title is not drawn (the bar under the header says where this is) but still names the page for the tab and screen readers. */
   hideTitle?: boolean;
 }) {
-  const nav = useNavigate();
   const goBack = useGoBack();
   // the tab and the screen reader say which screen this is
   useEffect(() => {
@@ -26,7 +26,7 @@ export function PageHeader({ title, hideTitle, back, left, right, className, sub
       <div className="mx-auto max-w-3xl flex h-12 items-center px-2 gap-1">
         <div className="flex items-center min-w-0 w-24">
           {back ? (
-            <Button variant="ghost" size="icon" aria-label="Back" onClick={() => (typeof back === "string" ? nav(back) : goBack())}>
+            <Button variant="ghost" size="icon" aria-label="Back" onClick={() => goBack(typeof back === "string" ? back : undefined)}>
               <ChevronLeft className="size-5" />
             </Button>
           ) : null}
