@@ -4,9 +4,9 @@
  * code is a chunk of its own that nobody else downloads. Filters live in the address, so a view can
  * be bookmarked.
  */
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation } from "convex/react";
 import { formatDistanceToNowStrict } from "date-fns";
 import { RefreshCw, Search, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -104,15 +104,34 @@ export default function AdminPage() {
   const [today] = useState(() => dayKey(new Date()));
   // twice the period, for "compared with the previous one"; at least 9 weeks, for the cohorts
   const fetchFrom = addDays(today, -(Math.max(f.days * 2, 63) - 1));
-  const data = useQuery(api.admin.overview, { from: fetchFrom, to: today });
+  // Read once, and again when something here changes it, rather than followed live: as a live query it
+  // ran again on every usage ping and every save from any user, reading weeks of usage rows each time
+  // for as long as this page stayed open.
+  const convex = useConvex();
+  const [data, setData] = useState<Overview>();
+  const [reloads, setReloads] = useState(0);
+  const reload = useCallback(() => setReloads((n) => n + 1), []);
+  useEffect(() => {
+    let stale = false;
+    convex.query(api.admin.overview, { from: fetchFrom, to: today })
+      .then((d) => { if (!stale) setData(d); })
+      .catch((e) => { if (!stale) toast.error(e instanceof Error ? e.message : "Couldn't load the dashboard"); });
+    return () => { stale = true; };
+  }, [convex, fetchFrom, today, reloads]);
   const refresh = useMutation(api.admin.refresh);
+  const recounted = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(recounted.current), []);
   const [picked, setPicked] = useState<string | null>(null);
   const [metric, setMetric] = useState<(typeof METRICS)[number]["key"]>("activeUsers");
 
   const onRefresh = async () => {
     try {
       await refresh({});
-      toast.success("Counting everyone's data again. The numbers update in a minute or so.");
+      // each user is counted a second after the one before (convex/admin.ts refreshStats): read the result once they all are
+      const seconds = (data?.users.length ?? 0) + 30;
+      clearTimeout(recounted.current);
+      recounted.current = setTimeout(reload, seconds * 1000);
+      toast.success(`Counting everyone's data again. The numbers update in about ${Math.ceil(seconds / 60)} min.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't start the count");
     }
@@ -136,14 +155,14 @@ export default function AdminPage() {
   return (
     <>
       {header}
-      <Dashboard data={data} f={f} setF={setF} meId={meId} today={today} metric={metric} setMetric={setMetric} onPick={setPicked} />
+      <Dashboard data={data} f={f} setF={setF} meId={meId} today={today} metric={metric} setMetric={setMetric} onPick={setPicked} reload={reload} />
       <UserSheet userId={picked} onClose={() => setPicked(null)} data={data} today={today} days={f.days} />
     </>
   );
 }
 
-function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
-  data: Overview;
+function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick, reload }: {
+  data: Overview; reload: () => void;
   f: Filters; setF: (p: Partial<Filters>) => void; meId: string | null; today: string;
   metric: (typeof METRICS)[number]["key"]; setMetric: (m: (typeof METRICS)[number]["key"]) => void; onPick: (id: string) => void;
 }) {
@@ -293,7 +312,7 @@ function Dashboard({ data, f, setF, meId, today, metric, setMetric, onPick }: {
           <Tile label="Calls to Claude" value={fmtNum(m.ai.calls)} sub={m.ai.calls ? `${fmtUsd(m.ai.costUsd / m.ai.calls)} a call` : undefined} delta={change(m.ai.calls, m.aiPrev.calls)} />
           <Tile label="Tokens" value={fmtNum(m.ai.inputTokens + m.ai.outputTokens)} sub={`In ${fmtNum(m.ai.inputTokens)} · out ${fmtNum(m.ai.outputTokens)}`} info="Input counts cached tokens too. Output tokens cost five times an input token." />
         </div>
-        <AiAccess users={data.users} />
+        <AiAccess users={data.users} onChanged={reload} />
         <AiUsersTable rows={m.aiUsers} total={m.ai.costUsd} others={m.view.users.length - m.aiUsers.length} onPick={onPick} period={periodLabel} />
         <div className="grid gap-4 lg:grid-cols-3">
           <Card title="AI cost per day" hint={`What Claude cost per day, last ${periodLabel}`} className="lg:col-span-2" info={aiInfo}>
@@ -461,7 +480,7 @@ const nameOf = (u: { name: string | null; email: string | null; id: string }) =>
 const calls = (n: number) => `${fmtNum(n)} ${n === 1 ? "call" : "calls"}`;
 
 /** Who may use AI: off for everyone until switched on here, one user at a time or for everyone ticked. The superadmin always may, so is not listed. */
-function AiAccess({ users }: { users: Overview["users"] }) {
+function AiAccess({ users, onChanged }: { users: Overview["users"]; onChanged: () => void }) {
   const setAi = useMutation(api.admin.setAi);
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<Set<Id<"users">>>(new Set());
@@ -472,6 +491,7 @@ function AiAccess({ users }: { users: Overview["users"] }) {
   const set = async (userIds: Id<"users">[], on: boolean, bulk = false) => {
     try {
       await setAi({ userIds, on });
+      onChanged();
       if (bulk) { setPicked(new Set()); toast.success(`AI turned ${on ? "on" : "off"} for ${userIds.length} ${userIds.length === 1 ? "user" : "users"}`); }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't change who has AI");
