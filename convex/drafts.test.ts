@@ -56,3 +56,22 @@ test("the daily prune removes drafts resolved more than 90 days ago and keeps th
   expect(left.map((d) => d._id).sort()).toEqual([recent, open].sort());
   expect(left.some((d) => d._id === oldAccepted || d._id === oldDismissed)).toBe(false);
 });
+
+test("a draft op loads only the drafts it names, and a merge still finds the draft of the entry it removes", async () => {
+  const { t, apply, accounts, food, draft } = await setup();
+  const fields = { type: "expense", date: "2026-10-18", amount: 48500, note: "Swiggy", accountId: accounts[0]._id, categoryId: food._id, tags: [], photoIds: [] };
+  const [saved, waiting, unwanted] = [await draft("m1"), await draft("m2"), await draft("m3")];
+  const get = (id: Id<"drafts">) => t.run((ctx) => ctx.db.get(id));
+  expect((await apply("drafts.dismiss", { ids: [unwanted] })).status).toBe("applied");
+  // the drafts the op did not name are neither rewritten nor taken for deleted
+  expect([(await get(unwanted))?.status, (await get(waiting))?.status, (await get(waiting))?.rev]).toEqual(["dismissed", "open", undefined]);
+  const accepted = await apply("drafts.accept", { id: saved, ...fields });
+  const made = Object.values(accepted.status === "applied" ? accepted.idMap : {})[0] as Id<"transactions">;
+  const typed = await apply("transactions.create", fields);
+  const keepId = Object.values(typed.status === "applied" ? typed.idMap : {})[0] as Id<"transactions">;
+  expect((await apply("transactions.merge", { keepId, removeId: made })).status).toBe("applied");
+  expect((await get(saved))?.transactionId).toBe(keepId);
+  // ids that are not a list name no drafts: the op saves nothing, and the batch is not thrown out
+  expect((await apply("drafts.acceptMany", { items: "m2" })).status).toBe("applied");
+  expect((await get(waiting))?.status).toBe("open");
+});
