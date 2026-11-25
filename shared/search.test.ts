@@ -26,6 +26,17 @@ test("search finds an entry by its amount", () => {
   expect(txSearch(s, { q: "coffee" }).map((t) => t.note)).toEqual(["Coffee"]);
 });
 
+test("search keeps to an amount range, ends included, on its own or with the other filters", () => {
+  const { s, cat } = seed();
+  expect(txSearch(s, { min: 499 }).map((t) => t.note)).toEqual(["Train", "Groceries"]);
+  expect(txSearch(s, { max: 499 }).map((t) => t.note)).toEqual(["Coffee", "Groceries"]);
+  expect(txSearch(s, { min: 12.01, max: 498.99 })).toEqual([]);
+  expect(txSearch(s, { min: 100, categoryIds: [cat("Food")] }).map((t) => t.note)).toEqual(["Groceries"]);
+  expect(txSearch(s, { q: "o", max: 100 }).map((t) => t.note)).toEqual(["Coffee"]);
+  // no range asked for: nothing is left out, a zero-amount entry included
+  expect(txSearch(s, { min: 0 })).toHaveLength(3);
+});
+
 test("recent categories: newest first, each once, archived ones left out", () => {
   const { s, cat } = seed();
   expect(recentCategories(s, "expense").map((c) => c.categoryId)).toEqual([cat("Food"), cat("Transport")]);
