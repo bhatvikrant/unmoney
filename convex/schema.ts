@@ -122,7 +122,7 @@ export default defineSchema({
     lockAfter: v.union(v.literal("always"), v.literal("5m"), v.literal("1h")),
     /** Account a new entry starts on; falls back to the first visible account when unset or gone. */
     defaultAccountId: v.optional(v.id("accounts")),
-    /** Notes (normalised) the user said are not bills, so the Bills & subscriptions page stops suggesting them. */
+    /** Notes (normalised) the user said are not bills, so the Bills & subscriptions page stops suggesting them; and the price rises and double charges dismissed there ("PRICE|…", "TWICE|…": shared/chargeSignals.ts). */
     dismissedRecurring: v.optional(v.array(v.string())),
     /** Merchants (normalised notes) the user said are not SIPs, so the SIPs page stops suggesting them. */
     dismissedSips: v.optional(v.array(v.string())),
@@ -415,6 +415,20 @@ export default defineSchema({
   }).index("by_user", ["userId"]),
 
   /**
+   * Claude's checked answer for one recap (convex/recapAi.ts): one row per user per period, `key` a
+   * month "2026-10" or a year "2026". `hash` is a fingerprint of the facts it saw: while they are the
+   * same the answer is shown again and Claude is not asked. Money inside a sentence is {m:<minor units>}.
+   */
+  recapInsights: defineTable({
+    userId: v.id("users"),
+    key: v.string(),
+    hash: v.string(),
+    at: v.number(),
+    insights: v.array(v.string()),
+    budgets: v.array(v.object({ categoryId: v.id("categories"), amount: v.number(), why: v.string() })),
+  }).index("by_user_key", ["userId", "key"]),
+
+  /**
    * A user's change number: every mutation that writes their synced documents adds one and stamps
    * what it wrote with it (convex/lib/changes.ts). `prunedRev` is the newest delete whose tombstone
    * has been dropped; a device that last looked before it has to load everything again.
@@ -577,6 +591,8 @@ export default defineSchema({
     }),
     confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
     how: v.union(v.literal("rule"), v.literal("ai")),
+    /** Read by the AI: its one line on what the mail says happened, at most 80 characters, shown on the draft's row. */
+    summary: v.optional(v.string()),
     /** An entry the user already typed in that looks like this one ("already added?"). */
     matchedTransactionId: v.optional(v.id("transactions")),
     /** The user said "No, it's new": the draft is never matched to an entry again. */

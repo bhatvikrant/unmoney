@@ -57,6 +57,21 @@ test("two receipts, a different amount, a different kind or two days apart stay 
   expect(samePayment(alert("a"), receipt("b"))).toBe(true);
 });
 
+test("two mails the model read as one payment fold, the one naming the account staying", () => {
+  // a shop no rule knows and a bank alert: samePayment cannot tell (no receipt it knows, digits on one side only)
+  const shop = cand({ id: "s", from: "Blue Tokai <orders@bluetokai.example>", note: "Blue Tokai", at: 1 });
+  const bank = cand({ id: "b", from: "Bank <alerts@bank.example>", note: "BLUE TOKAI", last4: "1234", at: 2 });
+  expect(foldDrafts([shop, bank], []).inserts.length).toBe(2);
+  const same = new Set(["s|b", "b|s"]);
+  expect(foldDrafts([shop, bank], [], [], same).inserts.map((d) => [d.messageId, d.extraMessageIds])).toEqual([["b", ["s"]]]);
+  // a third mail said to be the same as the one folded in joins them
+  const third = cand({ id: "t", from: "Pay <pay@gateway.example>", at: 3 });
+  expect(foldDrafts([shop, bank, third], [], [], new Set([...same, "s|t", "t|s"])).inserts.map((d) => [d.messageId, d.extraMessageIds])).toEqual([["b", ["s", "t"]]]);
+  // never across amounts or kinds, whatever was said
+  expect(foldDrafts([shop, { ...bank, proposal: { ...bank.proposal, amount: 1 } }], [], [], same).inserts.length).toBe(2);
+  expect(foldDrafts([shop, { ...bank, proposal: { ...bank.proposal, type: "income" } }], [], [], same).inserts.length).toBe(2);
+});
+
 test("a receipt arriving after its alert was already a draft folds into that draft", () => {
   const existing = open({ id: "a", note: "Swiggy Upi", last4: "1234" });
   const r = foldDrafts([receipt("b")], [existing]);
