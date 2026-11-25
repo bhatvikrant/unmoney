@@ -68,7 +68,7 @@ export default function AppShell() {
   const { d, m } = parts(todayISO());
   const today = `${d} ${MONTH_SHORT[m - 1]}`;
   return (
-    <div className="flex min-h-dvh bg-background">
+    <div className="flex min-h-dvh bg-background page-pattern">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-ring">Skip to content</a>
       <aside className="hidden md:flex w-56 shrink-0 flex-col border-r bg-sidebar px-3 py-5 gap-1 sticky top-0 h-dvh self-start">
         <div className="px-3 pb-4 text-lg font-semibold tracking-tight">UnMoney</div>

@@ -54,13 +54,14 @@ export function AppDataProvider({ settings, user, children }: { settings: Settin
   const ledger = useMemo(() => ledgerOf(core), [core]);
 
   useEffect(() => {
-    applyTheme(settings.theme, settings.accent, settings.colorSet);
+    const look = { tint: settings.tint, pattern: settings.pattern, corners: settings.corners };
+    applyTheme(settings.theme, settings.accent, settings.colorSet, look);
     if (settings.theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const h = () => applyTheme(settings.theme, settings.accent, settings.colorSet);
+    const h = () => applyTheme(settings.theme, settings.accent, settings.colorSet, look);
     mq.addEventListener("change", h);
     return () => mq.removeEventListener("change", h);
-  }, [settings.theme, settings.accent, settings.colorSet]);
+  }, [settings.theme, settings.accent, settings.colorSet, settings.tint, settings.pattern, settings.corners]);
 
   const value = useMemo<AppData>(() => {
     const accountById = new Map([...acc.accounts, ...acc.system].map((a) => [a._id as string, a]));
