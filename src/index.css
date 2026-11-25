@@ -231,6 +231,25 @@
   --accent: var(--secondary);
   --sidebar-accent: var(--secondary);
 }
+/*
+  True black: the dark page itself is pure black (on an OLED screen those pixels are off) and the surfaces
+  on it sit a step darker than usual, each still lighter than the one under it, so text only gains contrast.
+  A tint stays on the surfaces; the page under them is black.
+*/
+.dark[data-black] {
+  --background: oklch(0 0 0);
+  --sidebar: oklch(0 0 0);
+  --card: oklch(0.17 0 0);
+  --popover: var(--card);
+  --secondary: oklch(0.24 0 0);
+  --muted: var(--secondary);
+  --accent: var(--secondary);
+  --sidebar-accent: var(--secondary);
+}
+.dark[data-black][data-tint] {
+  --card: oklch(0.17 0.018 var(--tint-h));
+  --secondary: oklch(0.24 0.022 var(--tint-h));
+}
 :root[data-corners="sharp"] { --radius: 0.2rem; }
 :root[data-corners="round"] { --radius: 1rem; }
 /* The pattern behind the cards. The rules match any element, so a swatch on the Style page can show one that is not the page's. */
