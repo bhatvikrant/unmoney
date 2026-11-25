@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
-import { currentUserId } from "./lib/auth";
+import { aiAllowed, currentUserId } from "./lib/auth";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -18,7 +18,7 @@ export const me = query({
     const userId = await currentUserId(ctx);
     if (!userId) return null;
     const user = await ctx.db.get(userId);
-    return { userId, user: user ? { name: user.name, email: user.email, image: user.image } : null };
+    return { userId, user: user ? { name: user.name, email: user.email, image: user.image, ai: await aiAllowed(ctx, userId) } : null };
   },
 });
 
