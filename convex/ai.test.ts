@@ -8,6 +8,7 @@ import { SUPERADMIN_EMAIL, dayAt } from "../shared/admin";
 import { QUICK_MAX_SENTENCE, QUICK_MONTHLY_CAP } from "../shared/quickAi";
 import { SEARCH_MAX_QUESTION, SEARCH_MODEL, SEARCH_MONTHLY_CAP, SYSTEM_PROMPT } from "../shared/searchAi";
 import { SPLIT_MONTHLY_CAP } from "../shared/billSplit";
+import { STATEMENT_MAX_LINES, STATEMENT_MODEL } from "../shared/statementAi";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -216,6 +217,42 @@ test("AI is off for everyone but the superadmin until the superadmin turns it on
 
   await asAdmin.mutation(api.admin.setAi, { userIds: [userId], on: false });
   await expect(read(asUser)).rejects.toThrow("turned off");
+});
+
+test("statement suggestions: only for someone AI is turned on for, a capped number of rows, each call counted first", async () => {
+  const t = convexTest({ schema, modules });
+  const [admin, userId] = await t.run(async (ctx) => [await ctx.db.insert("users", { email: SUPERADMIN_EMAIL }), await ctx.db.insert("users", { email: "a@example.com" })] as const);
+  const asAdmin = t.withIdentity({ subject: `${admin}|s` });
+  const asUser = t.withIdentity({ subject: `${userId}|s` });
+  const lines = [{ text: "UPI-SWIGGY-8812", kind: "out" as const }];
+  await expect(t.action(api.ai.suggestImport, { lines })).rejects.toThrow("Sign in");
+  // not turned on: refused before anything is counted or sent
+  await expect(asUser.action(api.ai.suggestImport, { lines })).rejects.toThrow("turned on for your account");
+  // more rows than one file may ask about, or none, even for someone who may
+  await expect(asAdmin.action(api.ai.suggestImport, { lines: Array.from({ length: STATEMENT_MAX_LINES + 1 }, () => lines[0]) })).rejects.toThrow("up to");
+  await expect(asAdmin.action(api.ai.suggestImport, { lines: [] })).rejects.toThrow("up to");
+  // turned on gets past the switch (no key in tests, so it stops at the next check, still uncounted)
+  await asAdmin.mutation(api.admin.setAi, { userIds: [userId], on: true });
+  await expect(asUser.action(api.ai.suggestImport, { lines })).rejects.toThrow("set up");
+  expect(await t.run((ctx) => ctx.db.query("aiDaily").collect())).toEqual([]);
+
+  // every batch is a call, counted against the month before it is made
+  const claim = () => t.mutation(internal.usage.claimAi, { userId, feature: "statement", cap: 2 });
+  expect(await Promise.all([claim(), claim(), claim()])).toEqual([true, true, false]);
+  await t.mutation(internal.usage.recordAi, { userId, feature: "statement", model: STATEMENT_MODEL, tokens: { input: 900, output: 700, cacheWrite: 0, cacheRead: 2500 }, counted: true });
+  expect(await t.run((ctx) => ctx.db.query("aiDaily").collect())).toMatchObject([{ feature: "statement", calls: 2, inputTokens: 900, cacheReadTokens: 2500 }]);
+});
+
+test("a file's layout is worked out by AI only for someone AI is turned on for", async () => {
+  const t = convexTest({ schema, modules });
+  const [admin, userId] = await t.run(async (ctx) => [await ctx.db.insert("users", { email: SUPERADMIN_EMAIL }), await ctx.db.insert("users", { email: "a@example.com" })] as const);
+  const file = { header: ["Buchungstag", "Verwendungszweck", "Betrag"], rows: [["01.10.2026", "REWE SAGT DANKE", "-45,90"]], card: false };
+  await expect(t.action(api.ai.readLayout, file)).rejects.toThrow("Sign in");
+  await expect(t.withIdentity({ subject: `${userId}|s` }).action(api.ai.readLayout, file)).rejects.toThrow("turned on for your account");
+  // the superadmin gets past the switch (no key in tests, so it stops at the next check)
+  await expect(t.withIdentity({ subject: `${admin}|s` }).action(api.ai.readLayout, file)).rejects.toThrow("set up");
+  // nothing was counted or sent
+  expect(await t.run((ctx) => ctx.db.query("aiDaily").collect())).toEqual([]);
 });
 
 test("bill splitting: only with AI allowed and photo reading turned on, and no more than the month's bills", async () => {

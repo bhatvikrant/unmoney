@@ -26,6 +26,10 @@ import {
   SEARCH_MAX_QUESTION, SEARCH_MONTHLY_CAP, SEARCH_RECENT_ENTRIES, buildSearchContext, isRealDate, searchRequest, validateSearch, type SearchResult,
 } from "../shared/searchAi";
 import { QUICK_MAX_SENTENCE, QUICK_MONTHLY_CAP, buildQuickNames, quickRequest, validateQuick, type QuickRead } from "../shared/quickAi";
+import {
+  STATEMENT_BATCH, STATEMENT_MAX_LINES, STATEMENT_MONTHLY_CAP, STATEMENT_RECENT_ENTRIES, buildLayoutInput, buildStatementContext, layoutRequest, statementRequest, validateLayout, validateStatement,
+  type StatementLayout, type StatementSuggestion,
+} from "../shared/statementAi";
 import { SPLIT_MONTHLY_CAP, splitRequest, validateBill, type BillRead } from "../shared/billSplit";
 
 type Usage = Doc<"aiUsage">;
@@ -301,6 +305,115 @@ export const quickEntry = action({
       await reportServerError("ai.quickEntry", e, { userId });
       throw new ConvexError("Couldn't fill that in. Enter it yourself this time.");
     }
+  },
+});
+
+// ---- naming and filing the rows of a statement being imported (shared/statementAi.ts) ----
+
+/** What goes with the rows, built from the database so the prompt can't be inflated, and whether the person may use AI. */
+export const prepareStatement = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const [settings, categories, transactions] = await Promise.all([
+      loadTable(ctx, userId, "settings"),
+      loadTable(ctx, userId, "categories"),
+      // the newest entries: enough of the person's notes among them without reading the whole ledger
+      ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).order("desc").take(STATEMENT_RECENT_ENTRIES),
+    ]);
+    return { allowed: await aiAllowed(ctx, userId), categories, ...buildStatementContext({ settings, categories, transactions }) };
+  },
+});
+
+/**
+ * Ask Claude for a note and a category for the rows of a statement the person is about to import:
+ * the bank's text of each row, in batches, with their categories and most-used notes. Nothing is
+ * saved: the answers fill the import's review, where the person changes what they like and confirms
+ * as before. One answer per line, in the order sent: null where a batch was not asked (the month's
+ * limit) or failed, and `missed` says which, so the page can say some rows got nothing.
+ */
+export const suggestImport = action({
+  args: { lines: v.array(v.object({ text: v.string(), kind: v.union(v.literal("out"), v.literal("in"), v.literal("refund")) })) },
+  handler: async (ctx, { lines }): Promise<{ suggestions: (StatementSuggestion | null)[]; missed?: "cap" | "failed" }> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new ConvexError("Sign in first");
+    if (!lines.length || lines.length > STATEMENT_MAX_LINES) throw new ConvexError(`AI suggests for up to ${STATEMENT_MAX_LINES} different descriptions of a file`);
+    const prep = await ctx.runQuery(internal.ai.prepareStatement, { userId });
+    if (!prep.allowed) throw new ConvexError("AI suggestions aren't turned on for your account");
+    if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("AI suggestions aren't set up yet");
+    const client = new Anthropic({ timeout: 60_000, maxRetries: 1 });
+    // serialised once: every batch must send the same bytes to read what the first one cached
+    const context = JSON.stringify(prep.context);
+    const suggestions: (StatementSuggestion | null)[] = lines.map(() => null);
+    let missed: "cap" | "failed" | undefined;
+    const ask = async (start: number) => {
+      const batch = lines.slice(start, start + STATEMENT_BATCH);
+      if (!(await ctx.runMutation(internal.usage.claimAi, { userId, feature: "statement", cap: STATEMENT_MONTHLY_CAP }))) { missed ??= "cap"; return; }
+      try {
+        const res = await client.messages.create(statementRequest(context, batch));
+        console.log("statement-ai", { userId, rows: batch.length, stop: res.stop_reason, input: res.usage.input_tokens, cacheRead: res.usage.cache_read_input_tokens, output: res.usage.output_tokens });
+        await recordSpend(ctx, userId, "statement", res, true);
+        if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`stopped: ${res.stop_reason}`);
+        const text = res.content.find((b) => b.type === "text");
+        const got = validateStatement(JSON.parse(text && text.type === "text" ? text.text : "{}").rows, batch, prep, prep.categories);
+        // a row the model left out was still asked about: it is not sent again
+        got.forEach((s, i) => { suggestions[start + i] = s ?? {}; });
+      } catch (e) {
+        console.error("statement-ai failed", e instanceof Error ? e.message : e);
+        await reportServerError("ai.suggestImport", e, { userId, context: { rows: batch.length } });
+        missed = "failed";
+      }
+    };
+    // The first batch alone, so the rest find the person's categories and notes cached; then the
+    // rest together. If the first cannot be asked, the rest are not tried (and not counted).
+    await ask(0);
+    if (!missed) await Promise.all(lines.map((_, i) => i).filter((i) => i && i % STATEMENT_BATCH === 0).map(ask));
+    if (!suggestions.some(Boolean)) {
+      throw new ConvexError(missed === "cap" ? "AI has made as many suggestions as it does in a month. It starts again next month." : "Couldn't get AI suggestions. You can still import the file as it is.");
+    }
+    return missed ? { suggestions, missed } : { suggestions };
+  },
+});
+
+/** Whether a user may use AI, for an action that needs nothing else from the database. */
+export const allowed = internalQuery({
+  args: { userId: v.id("users") },
+  handler: (ctx, { userId }) => aiAllowed(ctx, userId),
+});
+
+/**
+ * Ask Claude which column of a statement is which, for a file whose header the importer could not
+ * work out: it sees the header row and a few rows under it, never the whole file, and does no sums.
+ * The answer is a column mapping; the import page tries it on the file, fills the "Match the
+ * columns" step with it for the person to check, and reads the file on the device as before.
+ */
+export const readLayout = action({
+  args: { header: v.array(v.string()), rows: v.array(v.array(v.string())), card: v.boolean() },
+  handler: async (ctx, { header, rows, card }): Promise<StatementLayout> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new ConvexError("Sign in first");
+    if (!(await ctx.runQuery(internal.ai.allowed, { userId }))) throw new ConvexError("AI suggestions aren't turned on for your account");
+    if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("AI suggestions aren't set up yet");
+    const input = buildLayoutInput(header, rows, card);
+    if (input.columns.length < 2) throw new ConvexError("That file has no columns to match");
+    if (!(await ctx.runMutation(internal.usage.claimAi, { userId, feature: "statement", cap: STATEMENT_MONTHLY_CAP }))) {
+      throw new ConvexError("AI has made as many suggestions as it does in a month. It starts again next month.");
+    }
+    const client = new Anthropic({ timeout: 45_000, maxRetries: 1 });
+    let layout: StatementLayout | null;
+    try {
+      const res = await client.messages.create(layoutRequest(input));
+      console.log("statement-layout-ai", { userId, columns: input.columns.length, stop: res.stop_reason, input: res.usage.input_tokens, output: res.usage.output_tokens });
+      await recordSpend(ctx, userId, "statement", res, true);
+      if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`stopped: ${res.stop_reason}`);
+      const text = res.content.find((b) => b.type === "text");
+      layout = validateLayout(JSON.parse(text && text.type === "text" ? text.text : "{}"), input);
+    } catch (e) {
+      console.error("statement-layout-ai failed", e instanceof Error ? e.message : e);
+      await reportServerError("ai.readLayout", e, { userId });
+      throw new ConvexError("Couldn't ask AI about this file. Match the columns yourself.");
+    }
+    if (!layout) throw new ConvexError("AI couldn't work out this file's columns. Match them yourself.");
+    return layout;
   },
 });
 
