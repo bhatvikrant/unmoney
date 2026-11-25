@@ -122,7 +122,7 @@ export default function BudgetPage() {
         <DialogContent className="max-h-[85dvh] grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()}>
           <DialogHeader><DialogTitle>{detail?.label}</DialogTitle></DialogHeader>
           {trend && detail ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} limit={detail.item.limit} limits={limits}
-            selected={picked} onPick={(i) => patch({ bar: ranges[i]?.key ?? null })} /> : <div className="h-48" />}
+            selected={picked} onPick={(i) => patch({ bar: ranges[i]?.key ?? null })} /> : <div className="h-[13.5rem]" />}
           {detail ? (
             <div className="space-y-0.5 text-xs text-muted-foreground">
               <div>Budget <Money amount={limits?.[picked] ?? detail.item.limit} /> · tap a bar to see its entries.</div>

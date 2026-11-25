@@ -69,6 +69,11 @@ test("recap insights: one stored answer per recap, shown again for free while th
   const rows = await t.run((ctx) => ctx.db.query("recapInsights").collect());
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ key: "2026-10", hash: "new", insights: ["Later."] });
+
+  // the name Claude gave the month and its cards, each with the chart the code made, come back as stored
+  const card = { type: "spike", headline: "Food ran past a usual month", text: "{m:210000} this month.", chart: { kind: "bars" as const, unit: "money" as const, bars: [{ label: "Oct", value: 210_000, on: true }] }, drill: "top:3" };
+  await t.mutation(internal.recapAi.store, { userId, key: "2026-10", hash: "cards", at: 3, insights: [], budgets: [], title: "A hungry October", cards: [card] });
+  expect(await as.query(api.recapAi.get, { key: "2026-10" })).toEqual({ insights: [], budgets: [], hash: "cards", at: 3, title: "A hungry October", cards: [card] });
 });
 
 test("recap insights: counted before Claude is asked, up to the month's limit, apart from the other AI features", async () => {

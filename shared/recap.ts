@@ -140,7 +140,8 @@ export type RecapSummary = {
 export type RecapScope = "month" | "year";
 
 export type MonthCard =
-  | { kind: "cover"; scope?: RecapScope; range: Range; entries: number; days: number; count: number; strip: RecapStrip }
+  /** `title` is the name Claude gave the period, when insights were written for it (shared/recapAi.ts). */
+  | { kind: "cover"; scope?: RecapScope; range: Range; entries: number; days: number; count: number; strip: RecapStrip; title?: string }
   | { kind: "total"; scope?: RecapScope; amount: number; prev?: number; change?: number; prevLabel?: string; perDay: number; perMonth?: number }
   | { kind: "categories"; scope?: RecapScope; total: number; top: { id: string; name: string; amount: number; pct: number }[]; rest: { count: number; amount: number; pct: number }; lead: { count: number; avg: number } }
   /** `amount` is what the entry counted as spending (a transfer's amount plus its fee), which can differ from `tx.amount`. */
@@ -329,7 +330,7 @@ function trackedFrom(snap: Snapshot, range: Range): ISODate {
  * buckets; for ranking single spends the parts of one entry are added back together (the first
  * bucket, the transfer's, keeps the label).
  */
-function rankedByTx(entries: Entry[]): Entry[] {
+export function rankedByTx(entries: Entry[]): Entry[] {
   const byId = new Map<string, Entry>();
   for (const e of entries) {
     const m = byId.get(e.t._id);
@@ -339,7 +340,7 @@ function rankedByTx(entries: Entry[]): Entry[] {
 }
 
 /** Notes grouped case-insensitively and trimmed, most frequent first (then by amount); empty notes skipped. */
-function notesByCount(entries: Entry[]): { text: string; count: number; amount: number }[] {
+export function notesByCount(entries: Entry[]): { text: string; count: number; amount: number }[] {
   const notes = new Map<string, { text: string; count: number; amount: number }>();
   for (const e of entries) {
     const text = e.t.note.trim();

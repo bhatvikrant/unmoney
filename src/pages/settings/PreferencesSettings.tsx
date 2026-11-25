@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { useState } from "react";
 import { play, setSoundsEnabled, useSoundsEnabled } from "@/lib/sound";
 import { analyticsConfigured, analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
+import { recapAiAuto, setRecapAiAuto } from "@/lib/recap";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const ordinal = (n: number) => `${n}${n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th"}`;
@@ -19,7 +20,8 @@ export default function PreferencesSettings() {
   const { pathname } = useLocation();
   const { settings: s } = useApp();
   const update = useOp("settings.update");
-  const { user } = useStore();
+  const { user, userId } = useStore();
+  const [recapAi, setRecapAi] = useState(() => recapAiAuto(userId));
   const sounds = useSoundsEnabled();
   const [reports, setReports] = useState(analyticsEnabled);
   return (
@@ -39,6 +41,7 @@ export default function PreferencesSettings() {
           <Row label="Subcategories" info="Lets categories have subcategories, for example Food › Groceries. When off, you only pick the main category." right={(id) => <Switch aria-labelledby={id} checked={s.subcategoryEnabled} onCheckedChange={(v) => update({ patch: { subcategoryEnabled: v } })} />} />
           <Row label="Autocomplete notes" info="While you type a note, suggests notes you have used before. Picking one also fills in the category and payment method you used with it." right={(id) => <Switch aria-labelledby={id} checked={s.autocompleteEnabled} onCheckedChange={(v) => update({ patch: { autocompleteEnabled: v } })} />} />
           {user?.ai ? <Row label="Read photos with AI" hint={<>Fills in the note, category and date. <AiHow feature="receipt" /></>} info="When you attach a photo to an entry, UnMoney sends that photo to Anthropic's Claude, along with the names of your categories and the notes and descriptions you use most. Claude suggests the note, description, category and date, and UnMoney fills in the ones still empty for you to check. Anthropic does not train its models on it. When off, a photo is read only on your device, and only for the amount." right={(id) => <Switch aria-labelledby={id} checked={!!s.receiptAiEnabled} onCheckedChange={(v) => update({ patch: { receiptAiEnabled: v } })} />} /> : null}
+          {user?.ai && userId ? <Row label="Insights on new recaps" hint={<>Kept on this device. <AiHow feature="recap" /></>} info="When you open the recap of a month or year that has just finished, UnMoney sends Anthropic's Claude a summary of it and shows what stands out as cards in the recap. It turns on the first time you tap Get insights on a recap. When off, a recap only gets insights when you tap Get insights on it." right={(id) => <Switch aria-labelledby={id} checked={recapAi} onCheckedChange={(v) => { setRecapAiAuto(userId, v); setRecapAi(v); }} />} /> : null}
           <Row label="Time input" hint="Record the time of each entry" info="Adds a time field next to the date when you enter a transaction. Turn it off if you only care about the day." right={(id) => <Switch aria-labelledby={id} checked={s.timeInputEnabled} onCheckedChange={(v) => update({ patch: { timeInputEnabled: v } })} />} />
           <Row label="Sounds" hint="Kept on this device" info="Quiet sounds when you make a transfer, pay a card, delete an entry, open a menu or drag across a chart. Nothing plays on its own. On iPhone the ringer switch silences them too." right={(id) => <Switch aria-labelledby={id} checked={sounds} onCheckedChange={(v) => { setSoundsEnabled(v); if (v) play("ding"); }} />} />
         </Section>

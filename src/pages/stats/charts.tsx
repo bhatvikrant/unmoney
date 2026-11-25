@@ -83,11 +83,12 @@ function pickColumn(e: React.MouseEvent<HTMLElement>, n: number, onPick: (index:
 /** `limit` draws the dashed line; `limits` (one per bar, else `limit`) decides which bars are over. */
 /** `selected`: the bar being looked at; the others are dimmed. */
 /**
- * `readout`: a figure above the chart that follows your finger or pointer across the bars, rolling
- * to each bar's amount with a quiet tick, and dims the other bars; it rests on the latest bar. It
- * takes the tooltip's place.
+ * A figure above the chart follows your finger or pointer across the bars, rolling to each bar's
+ * amount with a quiet tick, and dims the other bars; it rests on the selected bar, or the latest.
+ * It takes a tooltip's place. Only a move to another bar changes state, so a drag redraws the chart
+ * once per bar.
  */
-export function TrendBars({ data, color = "var(--expense)", limit, limits, onPick, selected, readout }: { data: { label: string; amount: number }[]; color?: string; limit?: number; limits?: number[]; onPick?: (index: number) => void; selected?: number; readout?: boolean }) {
+export function TrendBars({ data, color = "var(--expense)", limit, limits, onPick, selected }: { data: { label: string; amount: number }[]; color?: string; limit?: number; limits?: number[]; onPick?: (index: number) => void; selected?: number }) {
   const { fmt, settings } = useApp();
   const reduce = useReducedMotion();
   const [hover, setHover] = useState<number | null>(null);
@@ -99,23 +100,23 @@ export function TrendBars({ data, color = "var(--expense)", limit, limits, onPic
     setHover(i);
     play("tick");
   };
-  const focus = readout && hover !== null && hover < rows.length ? hover : selected;
+  const focus = hover !== null && hover < rows.length ? hover : selected;
   const shown = rows[focus ?? rows.length - 1];
   return (
     <div>
-      {readout && shown ? (
+      {shown ? (
         <div className="flex items-baseline justify-between px-2 pb-1">
           <span className="text-xs text-muted-foreground">{shown.label}</span>
           <RollingNumber value={fmt(shown.amount)} className="text-xl font-semibold tracking-tight" />
         </div>
       ) : null}
-      <ChartContainer config={barConfig} className={cn("h-48 w-full", onPick && "cursor-pointer", readout && "touch-pan-y")} onClick={onPick ? (e) => pickColumn(e, rows.length, onPick) : undefined}>
+      <ChartContainer config={barConfig} className={cn("h-48 w-full touch-pan-y", onPick && "cursor-pointer")} onClick={onPick ? (e) => pickColumn(e, rows.length, onPick) : undefined}>
         <BarChart accessibilityLayer data={rows} margin={{ top: 12, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%"
-          {...(readout ? { onMouseMove: track, onTouchStart: track, onTouchMove: track, onMouseLeave: () => setHover(null) } : {})}>
+          onMouseMove={track} onTouchStart={track} onTouchMove={track} onMouseLeave={() => setHover(null)}>
           <CartesianGrid vertical={false} />
           <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={16} />
           <YAxis tickLine={false} axisLine={false} width={40} tickFormatter={axisTick} />
-          <ChartTooltip cursor={{ fillOpacity: 0.5 }} content={readout ? () => null : <ChartTooltipContent formatter={(_v, _n, item) => <Row color={fillFor({ amount: item.payload?.amount ?? 0, limit: item.payload?.limit })} name={limit !== undefined ? "Spent" : "Amount"} value={fmt(item.payload?.amount ?? 0)} />} />} />
+          <ChartTooltip cursor={{ fillOpacity: 0.5 }} content={() => null} />
           {limit !== undefined ? (
             <ReferenceLine y={toMajor(limit, settings.decimals)} stroke="var(--muted-foreground)" strokeDasharray="4 4" ifOverflow="extendDomain" />
           ) : null}

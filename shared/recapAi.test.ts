@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
 import type { Id } from "../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "./ops";
 import { statsByCategory } from "./views";
-import { OUTPUT_SCHEMA, buildRecapFacts, fillMoney, recapRequest, validateRecap } from "./recapAi";
+import { monthRecap } from "./recap";
+import { OUTPUT_SCHEMA, buildRecapFacts, fillMoney, recapRequest, storyCards, validateRecap } from "./recapAi";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -48,10 +49,10 @@ test("the facts are the recap's own figures: totals per period, the largest cate
   // a budget may be suggested between half the average and the dearest month, and the current one is known
   expect(facts.bounds[food.id as string]).toEqual({ id: f.cat("Food"), lo: 255_000, hi: 660_000, now: 500_000 });
 
-  // nothing that identifies a document, and nothing about single entries
+  // nothing that identifies a document, no dates, and of single entries only the note behind a finding
   const sent = JSON.stringify(input);
   expect(sent).not.toContain(f.cat("Food"));
-  expect(sent).not.toMatch(/2026-\d\d-\d\d|Groceries|Rent|Fuel/);
+  expect(sent).not.toMatch(/2026-\d\d-\d\d|Rent|Fuel/);
   expect(sent.length).toBeLessThan(1500);
   const req = recapRequest(input);
   expect(req.messages[0].content).toBe(sent);
@@ -159,4 +160,88 @@ test("a suggested budget is for a live category of theirs, held to their own mon
   ])).toEqual([]);
   // one per category
   expect(budgets([{ category: id("Food"), amount: 4000, why: "" }, { category: id("Food"), amount: 4500, why: "" }])).toHaveLength(1);
+});
+
+/** The ledger with an October that stands out: a gift far past the usual, coffee nearly every other day, and the gym gone. */
+function eventful() {
+  const f = ledger();
+  for (const m of ["07", "08", "09"]) { f.expense(`2026-${m}-10`, 100_000, "Social Life", "Drinks"); f.expense(`2026-${m}-03`, 150_000, "Health", "Gym"); }
+  f.expense("2026-10-10", 900_000, "Social Life", "Wedding gift");
+  for (const d of ["18", "21", "24", "27", "30"]) f.expense(`2026-10-${d}`, 20_000, "Food", "Coffee");
+  return f;
+}
+
+test("what stands out is found by the code, most telling first, each with its figures and the chart the recap draws", () => {
+  // the plain ledger: food rose four months running, and one entry was most of it
+  const plain = ledger();
+  const base = buildRecapFacts(plain.snap, "2026-10")!;
+  expect(base.findings.map((x) => x.type)).toEqual(["climb", "drivers"]);
+  expect(base.findings[0]).toMatchObject({
+    subject: "Food", drill: `c:${plain.cat("Food")}`,
+    figures: { now: { v: 660_000, u: "money" }, start: { v: 360_000, u: "money" }, months: { v: 4, u: "count" } },
+    chart: { kind: "bars", unit: "money", bars: [{ label: "Jul", value: 360_000, on: true }, { label: "Aug", value: 460_000, on: true }, { label: "Sep", value: 560_000, on: true }, { label: "Oct", value: 660_000, on: true }] },
+  });
+  expect(base.findings[1]).toMatchObject({ subject: "Food", names: ["Groceries"], figures: { share: { v: 91, u: "pct" }, biggest: { v: 1, u: "count" }, entries: { v: 4, u: "count" } }, chart: { kind: "split", part: 600_000, total: 660_000, items: [{ label: "Groceries", amount: 600_000 }] } });
+
+  const f = eventful();
+  const facts = buildRecapFacts(f.snap, "2026-10")!;
+  expect(facts.findings.map((x) => x.type)).toEqual(["spike", "without", "climb", "habit", "missing"]);
+  const [spike, without, , habit, missing] = facts.findings;
+  // the one-off set aside (rent is as large, but it comes every month) leaves about a usual month
+  expect(without).toMatchObject({ names: ["Wedding gift"], figures: { total: { v: 3_810_000 }, top: { v: 900_000 }, rest: { v: 2_910_000 }, usual: { v: 2_860_000 }, share: { v: 24 }, entries: { v: 1 } } });
+  expect(spike).toMatchObject({ subject: "Social Life", figures: { now: { v: 900_000 }, usual: { v: 100_000 }, times: { v: 9 } } });
+  expect(habit).toMatchObject({ subject: "Coffee", drill: "n:Coffee", figures: { count: { v: 8 }, amount: { v: 160_000 }, each: { v: 20_000 }, usualCount: { v: 3 }, usualEach: { v: 20_000 } }, chart: { unit: "count", bars: [{ value: 3 }, { value: 3 }, { value: 3 }, { label: "Oct", value: 8, on: true }] } });
+  expect(missing).toMatchObject({ subject: "Gym", figures: { usual: { v: 150_000 }, months: { v: 3 } }, chart: { bars: [{ value: 150_000 }, { value: 150_000 }, { value: 150_000 }, { label: "Oct", value: 0, on: true }] } });
+
+  // Claude sees them by short id, in whole units, and can name each figure by its path
+  expect(facts.input.findings![0]).toEqual({ id: "f1", type: "spike", about: "Social Life", now: 9000, usual: 1000, times: 9 });
+  expect(facts.figures["f1.now"]).toEqual({ v: 900_000, u: "money" });
+  // two months are not enough to say what is usual, and a year has no findings
+  expect(buildRecapFacts(f.snap, "2026-08")!.findings).toEqual([]);
+  expect(buildRecapFacts(f.snap, "2026")!.input.findings).toBeUndefined();
+});
+
+test("a card is a finding the code made, once, in words that pass the same checks; the story shows them before the closing card", () => {
+  const f = eventful();
+  const facts = buildRecapFacts(f.snap, "2026-10")!;
+  const good = { finding: "f1", headline: "Social Life ran far past a usual month", text: "{f1.now} against a usual {f1.usual}: {f1.times} times as much." };
+  const out = validateRecap({
+    title: "The month of the wedding",
+    cards: [
+      good,
+      { ...good, headline: "The same finding twice" },
+      { finding: "f9", headline: "Not a finding", text: "Nothing here." },
+      { finding: "f4", headline: "Coffee 8 times", text: "A number of its own." },
+      { finding: "f4", headline: "Coffee became a habit", text: "It cost {f4.total} in all." },
+      { finding: "constructor", headline: "No", text: "No." },
+      null,
+    ],
+    insights: [],
+    budgets: [],
+  }, facts);
+  expect(out).toEqual({
+    insights: [], budgets: [], title: "The month of the wedding",
+    cards: [{ type: "spike", headline: good.headline, text: "{m:900000} against a usual {m:100000}: 9 times as much.", chart: facts.findings[0].chart, drill: `c:${f.cat("Social Life")}` }],
+  });
+  // a name with a figure in it is not a name, and a year has no findings to make a card of
+  expect(validateRecap({ title: "A {spent.p0} month", cards: [], insights: [], budgets: [] }, facts).title).toBeUndefined();
+  expect(validateRecap({ title: "", cards: [good], insights: [], budgets: [] }, buildRecapFacts(f.snap, "2026")!)).toEqual({ insights: [], budgets: [] });
+
+  const recap = monthRecap(f.snap, "2026-10")!;
+  const budgets = [{ categoryId: f.cat("Food"), amount: 500_000, why: "" }];
+  const story = storyCards(recap.cards, { ...out, budgets });
+  expect(story.map((c) => c.kind)).toEqual([...recap.cards.slice(0, -1).map((c) => c.kind), "insight", "ideas", "closer"]);
+  expect(story[0]).toMatchObject({ kind: "cover", title: "The month of the wedding", count: recap.cards.length + 2 });
+  // nothing from Claude, or nothing left of it to show, leaves the recap's own cards
+  expect(storyCards(recap.cards, null)).toBe(recap.cards);
+  expect(storyCards(recap.cards, { insights: ["x"], budgets }, [])).toBe(recap.cards);
+});
+
+test("more out than in is told as the share of income spent, never as a negative share kept", () => {
+  const f = ledger();
+  f.expense("2026-10-25", 6_000_000, "Household", "Deposit");
+  const facts = buildRecapFacts(f.snap, "2026-10")!;
+  expect(facts.input.kept).toBeUndefined();
+  expect(facts.input.spentOfIncome).toBe(176);
+  expect(validateRecap({ insights: ["You spent {spentOfIncome} of what came in.", "You kept {kept}."], budgets: [] }, facts).insights).toEqual(["You spent 176% of what came in."]);
 });

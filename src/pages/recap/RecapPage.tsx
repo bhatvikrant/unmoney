@@ -17,20 +17,25 @@
  * a flick; anything less springs back. A pull is never also a tap.
  *
  * "Insights" in the top bar opens what Claude makes of the period (RecapInsights). It is only there
- * once the server has answered whether an answer is stored, so offline the recap is unchanged.
+ * once the server has answered whether an answer is stored, so offline the recap is unchanged. What
+ * Claude wrote is also in the story (shared/recapAi.ts storyCards): its name for the period on the
+ * cover, the findings it chose and the budgets to try as cards before the closing one. Once the
+ * person has asked for insights on this device, a recap that has just finished gets them when it is
+ * opened, and the cards join the story when the answer arrives.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router";
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { animate, AnimatePresence, motion, useMotionValue, useReducedMotion, useTransform, type Transition } from "framer-motion";
-import { ChevronLeft, ChevronRight, Pause, Play, WandSparkles, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Pause, Play, WandSparkles, X } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import { useStore, useView } from "@/lib/store";
 import { useGoBack } from "@/lib/nav";
 import { useShortcuts, useSwipe } from "@/lib/shortcuts";
 import { useMediaQuery, WIDE } from "@/lib/media";
 import { useToday } from "@/lib/today";
-import { markRecapSeen, markRecapYearSeen } from "@/lib/recap";
+import { markRecapSeen, markRecapYearSeen, recapAiAuto } from "@/lib/recap";
+import { useApp } from "@/lib/app";
 import { monthLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -38,6 +43,8 @@ import { EmptyState } from "@/components/shell/misc";
 import { monthKey, monthRange, yearRange } from "../../../shared/period";
 import { monthRecap, yearRecap, RECAP_MIN_ENTRIES, RECAP_YEAR_MIN_MONTHS, type RecapDrill } from "../../../shared/recap";
 import { settingsOf, statsEntries } from "../../../shared/views";
+import { addDays } from "../../../shared/dates";
+import { buildRecapFacts, storyCards } from "../../../shared/recapAi";
 import { RecapCardView } from "./cards";
 import { RecapDrawer } from "./RecapDrawer";
 import { RecapInsights } from "./RecapInsights";
@@ -51,6 +58,8 @@ const HOLD_MS = 300;
 /** A pull down past this many px, or faster than PULL_FLICK px/ms, closes the story. */
 const PULL_CLOSE = 140;
 const PULL_FLICK = 0.6;
+/** Insights are written unasked only for a recap whose period ended this recently: looking back through old ones does not use up the month's runs. */
+const AUTO_DAYS = 31;
 const variants = {
   enter: (dir: number) => ({ opacity: 0, x: dir * SLIDE }),
   center: { opacity: 0.999, x: 0 },
@@ -66,7 +75,9 @@ export default function RecapPage() {
 
 function Recap({ month }: { month: string }) {
   const view = useView();
-  const { userId, user } = useStore();
+  const { userId, user, status: sync } = useStore();
+  const { categoryById } = useApp();
+  const ask = useAction(api.recapAi.ask);
   const goBack = useGoBack();
   const wide = useMediaQuery(WIDE);
   const still = useReducedMotion();
@@ -103,8 +114,33 @@ function Recap({ month }: { month: string }) {
     document.addEventListener("visibilitychange", h);
     return () => document.removeEventListener("visibilitychange", h);
   }, []);
-  const n = recap?.cards.length ?? 0;
-  const at = Math.min(Math.max(0, Math.trunc(Number(params.get("card")) || 0)), Math.max(0, n - 1));
+  // What Claude wrote, as the story shows it. An answer that arrives while the last card is up waits for the
+  // story to move, so cards never slide in under the person; a URL that asks for a later card lets it in at once.
+  const [ai, setAi] = useState(stored);
+  const cards = useMemo(() => {
+    if (!recap) return [];
+    // a category deleted or archived since is not offered a budget
+    const budgets = (ai?.budgets ?? []).filter((b) => { const c = categoryById.get(b.categoryId); return !!c && !c.deletedAt && !c.archivedAt; });
+    return storyCards(recap.cards, ai, budgets);
+  }, [recap, ai, categoryById]);
+  const n = cards.length;
+  const asked = Math.max(0, Math.trunc(Number(params.get("card")) || 0));
+  const at = Math.min(asked, Math.max(0, n - 1));
+  if (stored !== ai && (at < n - 1 || asked > at || n < 2)) setAi(stored);
+
+  // Insights unasked, for a recap that has just finished, once the person has asked for them on this device
+  // (the sheet says so): when none are stored, or the entries have changed since. A failure is silent; the button still asks.
+  const auto = !!recap && !!user?.ai && recapAiAuto(userId) && range.to >= addDays(today, -AUTO_DAYS);
+  const tried = useRef("");
+  const [writing, setWriting] = useState(false);
+  useEffect(() => {
+    if (!auto || stored === undefined || !sync.connected || sync.pending) return;
+    const hash = buildRecapFacts(view, month)?.hash;
+    if (!hash || stored?.hash === hash || tried.current === hash) return;
+    tried.current = hash;
+    setWriting(true);
+    void ask({ key: month }).catch(() => {}).finally(() => setWriting(false));
+  }, [auto, stored, view, month, sync.connected, sync.pending, ask]);
 
   // Opening a recap counts as having seen it: the ledger card for that month goes away. The year's card carried December too.
   useEffect(() => {
@@ -112,7 +148,7 @@ function Recap({ month }: { month: string }) {
     if (year !== null) { markRecapYearSeen(userId, year); markRecapSeen(userId, monthKey(year, 12)); } else markRecapSeen(userId, month);
   }, [userId, recap, month, year]);
 
-  const card = recap?.cards[Math.min(at, n - 1)];
+  const card = cards[at];
   const drill = decodeDrill(params.get("drill"), card);
   const openDrill = (d: RecapDrill | null) => {
     if (d) setHints(false);
@@ -191,12 +227,14 @@ function Recap({ month }: { month: string }) {
 
   const transition: Transition = still ? { duration: 0 } : { duration: 0.22, ease: "easeOut" };
   const last = at === n - 1;
-  // one button per card: the done ones solid, the current one filling over CARD_MS (the last one full), with a taller hit area than its 3 px
+  // the last card waits, and so does the one with a slider to play with
+  const waits = last || card?.kind === "ideas";
+  // one button per card: the done ones solid, the current one filling over CARD_MS (a waiting one full), with a taller hit area than its 3 px
   const segments = (
     <div className="flex flex-1 gap-[3px]" role="group" aria-label={`Card ${at + 1} of ${n}`}>
-      {recap.cards.map((c, i) => (
+      {cards.map((_, i) => (
         <button
-          key={c.kind}
+          key={i}
           type="button"
           aria-label={`Card ${i + 1} of ${n}`}
           aria-current={i === at ? "step" : undefined}
@@ -204,10 +242,10 @@ function Recap({ month }: { month: string }) {
           className={cn(
             "relative block h-[3px] flex-1 cursor-pointer rounded-[2px] after:absolute after:inset-x-0 after:-inset-y-2",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-            i < at || (i === at && last) ? "bg-foreground" : "bg-foreground/15",
+            i < at || (i === at && waits) ? "bg-foreground" : "bg-foreground/15",
           )}
         >
-          {i === at && !last ? (
+          {i === at && !waits ? (
             <span
               key={at}
               className="absolute inset-0 origin-left rounded-[2px] bg-foreground"
@@ -222,7 +260,7 @@ function Recap({ month }: { month: string }) {
   const closeButton = (
     <>
       {stored !== undefined && user?.ai ? (
-        <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" title="AI insights" onClick={() => setInsights(true)}><WandSparkles className="size-4" />Insights</Button>
+        <Button variant="ghost" size="sm" className="h-8 gap-1 px-2" title={writing ? "Writing insights" : "AI insights"} onClick={() => setInsights(true)}>{writing ? <Loader2 className="size-4 animate-spin" /> : <WandSparkles className="size-4" />}Insights</Button>
       ) : null}
       {!last ? (
         <Button variant="ghost" size="icon" aria-label={stopped ? "Play" : "Pause"} aria-pressed={stopped} title={stopped ? "Play (Space)" : "Pause (Space)"} onClick={() => setStopped((v) => !v)}>
