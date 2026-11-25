@@ -23,8 +23,9 @@ import {
   RECEIPT_MAX_BYTES, RECEIPT_MEDIA_TYPES, RECEIPT_MONTHLY_CAP, RECEIPT_RECENT_ENTRIES, buildReceiptInput, receiptRequest, validateReceipt, type ReceiptRead,
 } from "../shared/receiptAi";
 import {
-  SEARCH_MAX_QUESTION, SEARCH_MONTHLY_CAP, SEARCH_RECENT_ENTRIES, buildSearchContext, isRealDate, searchRequest, validateSearch, type SearchFilters,
+  SEARCH_MAX_QUESTION, SEARCH_MONTHLY_CAP, SEARCH_RECENT_ENTRIES, buildSearchContext, isRealDate, searchRequest, validateSearch, type SearchResult,
 } from "../shared/searchAi";
+import { QUICK_MAX_SENTENCE, QUICK_MONTHLY_CAP, buildQuickNames, quickRequest, validateQuick, type QuickRead } from "../shared/quickAi";
 import {
   STATEMENT_BATCH, STATEMENT_MAX_LINES, STATEMENT_MONTHLY_CAP, STATEMENT_RECENT_ENTRIES, buildLayoutInput, buildStatementContext, layoutRequest, statementRequest, validateLayout, validateStatement,
   type StatementLayout, type StatementSuggestion,
@@ -214,11 +215,13 @@ export const prepareSearch = internalQuery({
  * Ask Claude which of the search page's filters a typed question means. Only when the person taps
  * Ask AI, and at most SEARCH_MONTHLY_CAP times a month. Claude sees the question and the names of
  * their categories, payment methods and tags, never an entry; the search then runs on the device.
+ * For a question that wants a figure the same answer also says how to work it out, as choices from
+ * fixed lists; the device does the sums over the entries it matched (shared/searchAnswer.ts).
  * One quick call: someone is waiting, and the page falls back to its plain search if this is slow or fails.
  */
 export const askSearch = action({
   args: { question: v.string(), today: v.string() },
-  handler: async (ctx, args): Promise<SearchFilters> => {
+  handler: async (ctx, args): Promise<SearchResult> => {
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new ConvexError("Sign in first");
     const question = args.question.replace(/\s+/g, " ").trim();
@@ -242,6 +245,64 @@ export const askSearch = action({
       console.error("search-ai failed", e instanceof Error ? e.message : e);
       await reportServerError("ai.askSearch", e, { userId });
       throw new ConvexError("AI couldn't work that question out");
+    }
+  },
+});
+
+// ---- an entry from a typed sentence (shared/quickAi.ts) ----
+
+/**
+ * The person's names for Claude, built from the database so the prompt can't be inflated, and whether
+ * they may use AI. Entries are read only for the notes on them: no entry or amount is passed on.
+ */
+export const prepareQuick = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const [settings, categories, accounts, currencies, transactions] = await Promise.all([
+      loadTable(ctx, userId, "settings"),
+      loadTable(ctx, userId, "categories"),
+      loadTable(ctx, userId, "accounts"),
+      loadTable(ctx, userId, "currencies"),
+      ctx.db.query("transactions").withIndex("by_user_date", (q) => q.eq("userId", userId)).order("desc").take(RECEIPT_RECENT_ENTRIES),
+    ]);
+    return { allowed: await aiAllowed(ctx, userId), ...buildQuickNames({ settings, categories, accounts, currencies, transactions }) };
+  },
+});
+
+/**
+ * Ask Claude to turn a typed or dictated sentence ("450 swiggy dinner hdfc yesterday") into the fields
+ * of an entry, in the person's own categories, payment methods and notes. At most QUICK_MONTHLY_CAP
+ * times a month. Nothing is saved: the form is filled in, and the person checks it and saves.
+ */
+export const quickEntry = action({
+  args: { sentence: v.string(), today: v.string() },
+  handler: async (ctx, args): Promise<QuickRead> => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new ConvexError("Sign in first");
+    const sentence = args.sentence.replace(/\s+/g, " ").trim();
+    const today = args.today;
+    if (!sentence || sentence.length > QUICK_MAX_SENTENCE || !/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+      throw new ConvexError(`Describe the entry in one short sentence, up to ${QUICK_MAX_SENTENCE} characters`);
+    }
+    const prep = await ctx.runQuery(internal.ai.prepareQuick, { userId });
+    if (!prep.allowed) throw new ConvexError("Filling in an entry from a sentence isn't turned on for your account");
+    if (!process.env.ANTHROPIC_API_KEY) throw new ConvexError("Filling in an entry from a sentence isn't set up yet");
+    if (!(await ctx.runMutation(internal.usage.claimAi, { userId, feature: "quick", cap: QUICK_MONTHLY_CAP }))) {
+      throw new ConvexError(`AI has filled in ${QUICK_MONTHLY_CAP} entries this month, the most it does. It starts again next month.`);
+    }
+    // someone is looking at the form: better to give up soon than to keep them waiting
+    const client = new Anthropic({ timeout: 15_000, maxRetries: 1 });
+    try {
+      const res = await client.messages.create(quickRequest(prep.names, sentence, today));
+      console.log("quick-ai", { userId, stop: res.stop_reason, input: res.usage.input_tokens, cached: res.usage.cache_read_input_tokens ?? 0, output: res.usage.output_tokens });
+      await recordSpend(ctx, userId, "quick", res, true);
+      if (res.stop_reason === "refusal" || res.stop_reason === "max_tokens") throw new Error(`stopped: ${res.stop_reason}`);
+      const text = res.content.find((b) => b.type === "text");
+      return validateQuick(JSON.parse(text && text.type === "text" ? text.text : "{}"), prep.known, sentence, today);
+    } catch (e) {
+      console.error("quick-ai failed", e instanceof Error ? e.message : e);
+      await reportServerError("ai.quickEntry", e, { userId });
+      throw new ConvexError("Couldn't fill that in. Enter it yourself this time.");
     }
   },
 });

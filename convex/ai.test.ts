@@ -4,11 +4,16 @@ import { expect, test, vi } from "vitest";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { SUPERADMIN_EMAIL } from "../shared/admin";
-import { SEARCH_MAX_QUESTION, SEARCH_MODEL, SEARCH_MONTHLY_CAP } from "../shared/searchAi";
+import { SUPERADMIN_EMAIL, dayAt } from "../shared/admin";
+import { QUICK_MAX_SENTENCE, QUICK_MONTHLY_CAP } from "../shared/quickAi";
+import { SEARCH_MAX_QUESTION, SEARCH_MODEL, SEARCH_MONTHLY_CAP, SYSTEM_PROMPT } from "../shared/searchAi";
 import { STATEMENT_MAX_LINES, STATEMENT_MODEL } from "../shared/statementAi";
 
 const modules = import.meta.glob("./**/*.ts");
+
+// Claude is never called from tests: where one needs an answer, it says what Claude would have sent back.
+const claude = vi.hoisted(() => vi.fn());
+vi.mock("@anthropic-ai/sdk", () => ({ default: class { messages = { create: claude }; } }));
 
 test("photo reading: only for someone who turned it on, counted before Claude is asked, up to the month's limit", async () => {
   const t = convexTest({ schema, modules });
@@ -80,6 +85,90 @@ test("search questions: a bad one is refused before anything is counted, only na
     vi.unstubAllEnvs();
   }
   expect((await t.run((ctx) => ctx.db.get(rows[0]._id)))!.calls).toBe(SEARCH_MONTHLY_CAP);
+});
+
+test("a question that wants a figure: the same one call, still only names sent, and how to work it out comes back as checked choices", async () => {
+  const t = convexTest({ schema, modules });
+  const userId = await t.run((ctx) => ctx.db.insert("users", { email: "a@example.com", aiEnabled: true }));
+  const asUser = t.withIdentity({ subject: `${userId}|session` });
+  await asUser.mutation(api.sync.apply, { ops: [{ id: "op1", kind: "settings.completeOnboarding", args: { currency: "INR" }, at: 1 }] });
+  const accounts = (await asUser.query(api.sync.table, { table: "accounts" })) as Doc<"accounts">[];
+  const categories = (await asUser.query(api.sync.table, { table: "categories" })) as Doc<"categories">[];
+  const food = categories.find((c) => c.type === "expense" && c.name === "Food")!;
+  const entry = { type: "expense", accountId: accounts[0]._id, categoryId: food._id, amount: 48500, note: "Secret dinner", date: "2026-11-20", tags: [], photoIds: [] };
+  await asUser.mutation(api.sync.apply, { ops: [{ id: "op2", kind: "transactions.create", args: entry, at: 2 }] });
+  const { context } = await t.query(internal.ai.prepareSearch, { userId });
+  const short = context.expenseCategories.find((c) => c.name === "Food")!.id;
+
+  const none = { text: null, from: null, to: null, type: null, categories: [short], accounts: [], tag: null, min: null, max: null };
+  const says = (answer: object) => claude.mockResolvedValueOnce({
+    model: SEARCH_MODEL, stop_reason: "end_turn", usage: { input_tokens: 200, output_tokens: 60 }, content: [{ type: "text", text: JSON.stringify({ ...none, answer }) }],
+  });
+  const ask = (question: string) => asUser.action(api.ai.askSearch, { question, today: "2026-11-25" });
+  claude.mockClear();
+  vi.stubEnv("ANTHROPIC_API_KEY", "not-a-key");
+  try {
+    says({ of: "spent", measure: "total", by: "month", order: "highest", limit: 1 });
+    expect(await ask("which month did I spend the most on food")).toEqual({ categoryIds: [food._id], answer: { of: "spent", measure: "total", by: "month", order: "highest", limit: 1 } });
+    // what went out: the fixed prompt, the names, the question. Nothing of the entry, though the answer will be worked out from it.
+    const [req] = claude.mock.calls[0];
+    expect(req.system).toBe(SYSTEM_PROMPT);
+    expect(req.messages).toHaveLength(1);
+    expect(req.messages[0].content[0]).toEqual({ type: "text", text: JSON.stringify(context), cache_control: { type: "ephemeral" } });
+    expect(JSON.parse(req.messages[0].content[1].text).question).toBe("which month did I spend the most on food");
+    for (const secret of ["Secret dinner", "48500", "485", "2026-11-20", food._id]) expect(JSON.stringify(req)).not.toContain(secret);
+
+    // something the app cannot work out, or a formula where a choice belongs: no figure, the filters still set
+    says({ of: "spent", measure: "median", by: "none", order: null, limit: null });
+    expect(await ask("median food spend")).toEqual({ categoryIds: [food._id] });
+    says({ of: "amount * 2", measure: "total", by: "none", order: null, limit: null });
+    expect(await ask("double my food spend")).toEqual({ categoryIds: [food._id] });
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  // one call a question, under the same cap and the same line of cost as a question that only sets filters
+  expect(claude).toHaveBeenCalledTimes(3);
+  const rows = await t.run((ctx) => ctx.db.query("aiDaily").collect());
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ feature: "search", calls: 3, inputTokens: 600, outputTokens: 180 });
+});
+
+test("an entry from a sentence: only with AI turned on, names only, and stopped at the month's limit before Claude is asked", async () => {
+  const t = convexTest({ schema, modules });
+  const userId = await t.run(async (ctx) => {
+    const userId = await ctx.db.insert("users", { email: "a@example.com" });
+    const food = await ctx.db.insert("categories", { userId, type: "expense", name: "Food", order: 1 });
+    const hdfc = await ctx.db.insert("accounts", { userId, kind: "card", name: "HDFC Card", bankName: "HDFC", last4: "4321", initialBalance: 987654, includeInTotals: true, hidden: false, order: 1, transferAsExpense: false });
+    await ctx.db.insert("transactions", { userId, type: "expense", date: "2026-11-20", accountId: hdfc, categoryId: food, amount: 123456, note: "Swiggy", description: "Dinner for two", tags: [], photoIds: [] });
+    return userId;
+  });
+  const asUser = t.withIdentity({ subject: `${userId}|session` });
+  const fill = (sentence = "450 swiggy dinner hdfc yesterday") => asUser.action(api.ai.quickEntry, { sentence, today: "2026-11-25" });
+  // not turned on by the superadmin: refused before anything is counted or sent
+  await expect(fill()).rejects.toThrow("turned on for your account");
+  expect(await t.run((ctx) => ctx.db.query("aiDaily").collect())).toEqual([]);
+
+  // what would go to Claude: the person's names and the note, and no amount, balance, date or description from the ledger
+  const prep = await t.query(internal.ai.prepareQuick, { userId });
+  expect(JSON.parse(prep.names)).toEqual({
+    currency: "", currencies: [], expense: [{ id: "c1", name: "Food" }], income: [],
+    methods: [{ id: "m1", name: "HDFC Card", kind: "card", bank: "HDFC", last4: "4321" }], notes: [["Swiggy", "c1"]],
+  });
+  for (const secret of ["123456", "987654", "2026-11-20", "Dinner for two"]) expect(prep.names).not.toContain(secret);
+
+  await t.run((ctx) => ctx.db.patch(userId, { aiEnabled: true }));
+  // a sentence too long to be one entry is refused, and no key means no call
+  await expect(fill("x".repeat(QUICK_MAX_SENTENCE + 1))).rejects.toThrow("one short sentence");
+  await expect(fill()).rejects.toThrow("set up");
+  // the month used up: refused before Claude is asked (the key is made up, so a call would fail differently)
+  await t.run((ctx) => ctx.db.insert("aiDaily", { userId, day: dayAt(Date.now(), 330), feature: "quick", calls: QUICK_MONTHLY_CAP, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, costUsd: 0 }));
+  vi.stubEnv("ANTHROPIC_API_KEY", "test");
+  try {
+    await expect(fill()).rejects.toThrow("starts again next month");
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  expect((await t.run((ctx) => ctx.db.query("aiDaily").collect())).map((r) => r.calls)).toEqual([QUICK_MONTHLY_CAP]);
 });
 
 test("a tidy-up run is counted before Claude is asked: three a day, and none within a month of one that worked", async () => {
