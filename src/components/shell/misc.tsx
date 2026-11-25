@@ -8,12 +8,18 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
-/** "How it works", beside an AI feature: opens that feature's section of the public features page (pages/features/FeaturesPage.tsx). */
-export function AiHow({ feature, className }: { feature: AiFeature; className?: string }) {
+/**
+ * "How it works", beside an AI feature: opens that feature's section of the public features page
+ * (pages/features/FeaturesPage.tsx). `newTab`: for a screen that holds work nothing else keeps (a
+ * statement picked and matched in Import), which leaving would throw away: the page opens beside it.
+ */
+export function AiHow({ feature, className, newTab }: { feature: AiFeature; className?: string; newTab?: boolean }) {
   const leaveTo = useLeaveTo();
   const to = `/features#${feature}`;
+  const cls = cn("whitespace-nowrap underline underline-offset-2 hover:text-foreground", className);
+  if (newTab) return <Link to={to} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} className={cls}>How it works</Link>;
   // through the leave guard: a half-filled entry asks before it is dropped
-  return <Link to={to} onClick={(e) => { e.stopPropagation(); leaveTo(to, e); }} className={cn("whitespace-nowrap underline underline-offset-2 hover:text-foreground", className)}>How it works</Link>;
+  return <Link to={to} onClick={(e) => { e.stopPropagation(); leaveTo(to, e); }} className={cls}>How it works</Link>;
 }
 
 /** Small (i) icon: explains on hover (desktop) and on tap (touch). */

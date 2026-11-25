@@ -28,7 +28,7 @@ import { QUICK_MONTHLY_CAP } from "../../../shared/quickAi";
 import { RECAP_MONTHLY_CAP } from "../../../shared/recapAi";
 import { RECEIPT_MONTHLY_CAP } from "../../../shared/receiptAi";
 import { SEARCH_MONTHLY_CAP } from "../../../shared/searchAi";
-import { STATEMENT_MAX_LINES, STATEMENT_MAX_TEXT } from "../../../shared/statementAi";
+import { LAYOUT_ROWS, STATEMENT_MAX_LINES, STATEMENT_MAX_TEXT } from "../../../shared/statementAi";
 import { AI_MIN_CATEGORIES, AI_MIN_ENTRIES, AI_MIN_HISTORY_DAYS, AI_RUN_EVERY_MS } from "../../../shared/tidyAi";
 
 const num = (n: number) => n.toLocaleString("en-US");
@@ -94,7 +94,7 @@ const FEATURES: Record<AiFeature, Feature> = {
     kept: { icon: FileLock, lead: "No amounts, dates or balances.", rest: "The file itself stays on your device." },
     stat: { lead: "At most", value: num(STATEMENT_MAX_TEXT), label: "characters of each row's bank text" },
     where: "More › Import, with a bank statement",
-    limit: `Up to ${num(STATEMENT_MAX_LINES)} different descriptions a file. If the columns can't be told apart, Match the columns with AI sends the header row and the 5 rows under it, amounts and dates included.`,
+    limit: `Up to ${num(STATEMENT_MAX_LINES)} different descriptions a file. If the columns can't be told apart, Match the columns with AI sends the header row and the ${LAYOUT_ROWS} rows under it, amounts and dates included.`,
   },
   search: {
     lead: "Ask instead of filtering.", rest: "A question turns into the filters Search already has.",
@@ -144,15 +144,16 @@ const COPY = "text-[17px] leading-6 tracking-[-0.012em] text-muted-foreground te
 
 export default function FeaturesPage() {
   const goBack = useGoBack();
-  const { hash } = useLocation();
+  const { hash, key } = useLocation();
   // Signed out, nothing has applied a theme yet: follow the system, as the sign-in screen does.
   useEffect(() => {
     if (!document.documentElement.dataset.colorset) applyTheme("system", "neutral", "A");
   }, []);
   // A "How it works" link names its feature in the hash. After the app's own scroll-to-top for a new page.
+  // `key` changes with every navigation, so a link to the section already in the address scrolls back to it.
   useEffect(() => {
     if (hash) document.getElementById(hash.slice(1))?.scrollIntoView();
-  }, [hash]);
+  }, [hash, key]);
 
   return (
     <div className="min-h-dvh bg-background">
