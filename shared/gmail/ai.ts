@@ -6,6 +6,7 @@
  */
 import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { addDays, diffDays } from "../dates";
+import { cutText } from "../categoryLint";
 import type { Confidence } from "../tidyAi";
 import { isoDateIn, oneLine, senderAddress, type Channel, type Mail, type Parsed, type ParsedKind } from "./mail";
 
@@ -55,7 +56,7 @@ export function buildAiInput(mails: Mail[], snap: Snap, timeZone = "Asia/Kolkata
   const aiMails = mails.map((m, i) => {
     const short = `m${i + 1}`;
     ids.mails[short] = m.id;
-    return { id: short, from: m.from, subject: m.subject, received: `${isoDateIn(m.receivedAt, timeZone)} (${timeZone})`, text: m.text.slice(0, AI_MAX_TEXT) };
+    return { id: short, from: m.from, subject: m.subject, received: `${isoDateIn(m.receivedAt, timeZone)} (${timeZone})`, text: cutText(m.text, AI_MAX_TEXT) };
   });
   return { input: { context: { currency: snap.mainCurrency, categories, methods }, mails: aiMails }, ids };
 }
@@ -186,7 +187,7 @@ export function validateAiResults(raw: unknown, mails: Mail[], ids: AiIds, categ
     const currency = typeof r.currency === "string" ? r.currency.trim().toUpperCase() : "";
     const date = typeof r.date === "string" ? r.date.trim() : "";
     const received = isoDateIn(mail.receivedAt, timeZone);
-    const merchant = typeof r.merchant === "string" ? r.merchant.trim().slice(0, MAX_MERCHANT) : "";
+    const merchant = typeof r.merchant === "string" ? cutText(r.merchant.trim(), MAX_MERCHANT) : "";
     if (!KINDS.has(kind) || !(amount > 0) || amount > MAX_AMOUNT || !/^[A-Z]{3}$/.test(currency) || !ISO.test(date) || !merchant) { dropped++; continue; }
     if (date < addDays(received, -3) || date > addDays(received, 3)) { dropped++; continue; }
     const type = kind === "debit" || kind === "refund" ? "expense" : kind === "cardPayment" ? undefined : "income";
@@ -197,9 +198,9 @@ export function validateAiResults(raw: unknown, mails: Mail[], ids: AiIds, categ
     const time = typeof r.time === "string" && HHMM.test(r.time.trim()) ? r.time.trim() : undefined;
     const parsed: Parsed = {
       rule: "ai", type: kind, amount: Math.round(amount * 100) / 100, currency, date, dateSource: "mail", time,
-      last4, bankName: typeof r.bankName === "string" && r.bankName.trim() ? r.bankName.trim().slice(0, 30) : undefined, channel, merchantRaw: merchant,
+      last4, bankName: typeof r.bankName === "string" && r.bankName.trim() ? cutText(r.bankName.trim(), 30) : undefined, channel, merchantRaw: merchant,
     };
-    const summary = typeof r.summary === "string" ? oneLine(r.summary).slice(0, MAX_SUMMARY) : "";
+    const summary = typeof r.summary === "string" ? cutText(oneLine(r.summary), MAX_SUMMARY) : "";
     const read: AiRead = {
       mailId: mail.id,
       parsed,

@@ -4,6 +4,7 @@
  * to the mailbox.
  */
 import { htmlToText, type Mail } from "../../shared/gmail/mail";
+import { cutText } from "../../shared/categoryLint";
 
 export const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -209,6 +210,6 @@ export async function getMail(token: string, id: string): Promise<Mail> {
     from: header("from"),
     subject: header("subject"),
     receivedAt: Number(json.internalDate ?? Date.now()),
-    text: tidyBody(trimQuoted(raw.replace(/\r\n?/g, "\n"))).slice(0, MAX_TEXT),
+    text: cutText(tidyBody(trimQuoted(raw.replace(/\r\n?/g, "\n"))), MAX_TEXT),
   };
 }

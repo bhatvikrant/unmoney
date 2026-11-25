@@ -11,6 +11,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import { addDays, weekday } from "./dates";
+import { cutText } from "./categoryLint";
 import { monthKeyForDate, monthRange, shiftMonthKey, weekRange, type Range } from "./period";
 
 /** This feature's own model and effort, so they can change without touching the other AI features. */
@@ -81,7 +82,7 @@ export function isRealDate(s: unknown): s is string {
  */
 export function buildSearchContext(snap: Snap): { context: SearchContext; ids: SearchIds } {
   const settings = snap.settings[0];
-  const name = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, MAX_NAME);
+  const name = (s: string) => cutText(s.replace(/\s+/g, " ").trim(), MAX_NAME);
   const ids: SearchIds = { categories: {}, accounts: {} };
 
   const cats = snap.categories.filter((c) => !c.deletedAt).sort((a, b) => a.type.localeCompare(b.type) || a.order - b.order).slice(0, MAX_CATEGORIES);
@@ -218,7 +219,7 @@ export function validateSearch(raw: unknown, ids: SearchIds, tags: string[]): Se
   const r = raw as { text?: unknown; from?: unknown; to?: unknown; type?: unknown; categories?: unknown; accounts?: unknown; tag?: unknown; min?: unknown; max?: unknown; answer?: unknown } | null;
   if (!r || typeof r !== "object") return {};
   const out: SearchResult = {};
-  const text = typeof r.text === "string" ? r.text.replace(/\s+/g, " ").trim().slice(0, MAX_TEXT) : "";
+  const text = typeof r.text === "string" ? cutText(r.text.replace(/\s+/g, " ").trim(), MAX_TEXT) : "";
   if (text) out.text = text;
 
   const from = isRealDate(r.from) ? r.from : undefined;
