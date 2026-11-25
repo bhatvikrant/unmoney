@@ -7,10 +7,14 @@ Status: built · 2026-10-21 (roadmap A1 in docs/reviews/2026-10-21-product-revie
 Money Manager only looks back. The most common reason people leave it is that it never says what is about to go out: rent on the 1st, Netflix on the 14th, the phone bill next week. UnMoney already knows most of this, because repeat schedules hold their next date and the ledger holds every past payment. This feature shows it.
 
 - **Upcoming rows in the ledger.** Every active repeat schedule shows its coming dates in the visible month as faded rows, like Gmail drafts. They never count in a total. Tapping one offers **Add now** (pay it early: the entry is saved today and the schedule moves on), **Skip this one** (the schedule moves on and nothing is added) and **Edit schedule**.
-- **Bills & subscriptions page** (More › Look ahead). Three lists:
+- **Bills & subscriptions page** (More › Look ahead). Five lists:
   1. *Next 30 days*: every coming date of every schedule, with the total going out and coming in.
   2. *Subscriptions*: each active expense schedule with what it costs a month ("₹649 a month", "₹1,499 a year ≈ ₹125 a month") and a total a month and a year.
   3. *Looks like a subscription*: payments that recur in the ledger but have no schedule (same note, about a month apart, three or more times, amounts within 10%). **Make it a repeat** creates the schedule from the last payment; **Not a bill** hides the suggestion for good. Entries read from Gmail count like any other, so a Netflix receipt saved every month is found.
+  4. *Price went up*: "Netflix went from ₹499 to ₹649 in October". A payment with the same note that came round on a steady interval (monthly or slower) at exactly one price three times or more, and in the last two months cost at least 5% more. A bill that changes every time (electricity) never has a settled price, so it is left out. A jump to double or more counts only once it is charged again (else it is likelier a yearly plan or two months in one entry). Foreign-currency charges are compared in the currency charged, so a moving rate is not a rise; a refund since the rise keeps it quiet. **See payments** opens them in Search; **Got it** hides it for good.
+  5. *Charged twice?*: two expenses in the last two months with the same note, payment method and amount, on the same day or a day apart, when that note has no other two payments that close in the last 400 days (two coffees a day is a habit). Never transfers, SIP payments, entries a schedule added, instalments, entries shared on UnSplit, or a pair with a refund of that amount since. **See both** opens the two in Search; **Not a double** hides it for good.
+
+  Lists 4 and 5 are rules on the device (`shared/chargeSignals.ts`): no network, no model. They stay quiet when unsure, and entries without a note are not looked at.
 
 What to hold to:
 
@@ -24,7 +28,7 @@ What to hold to:
 |---|---|
 | Ledger, Daily view | Faded rows on their day after the entries and drafts; a repeat icon and "Upcoming · <method>". Hidden while a filter is on, like drafts. |
 | Ledger row tap | A bottom sheet: what, when, how much, how often; Add now / Skip this one / Edit schedule. |
-| More › Look ahead › Bills & subscriptions (`/upcoming`) | The three lists above. Rows open the same sheet; a suggestion row opens its last entry. |
+| More › Look ahead › Bills & subscriptions (`/upcoming`) | The lists above. Rows open the same sheet; a suggestion row opens its last entry, a price rise the first payment at the new price, a double charge the second of the two. |
 | More › Set up › Repeats | Unchanged (Edit schedule goes there). |
 | Bills & subscriptions, Budget page | What the bills still due do to the budgets running now (docs/specs/budget-signals.md). |
 
@@ -39,7 +43,7 @@ States:
 
 No new table. One optional field on `settings`:
 
-- `dismissedRecurring?: string[]` — normalised notes the user said are not bills. Set through `settings.update`.
+- `dismissedRecurring?: string[]` — normalised notes the user said are not bills, and the price rises and double charges the user dismissed (`PRICE|<note>|<currency>|<new price>`, `TWICE|<note>|<currency>|<date>|<amount>`; the capitals keep them apart from a note, which is lower case). Set through `settings.update`.
 
 New ops in `shared/ops.ts` (tables: `repeats`, plus `transactions`/`accounts`/`categories` where noted):
 
@@ -47,12 +51,13 @@ New ops in `shared/ops.ts` (tables: `repeats`, plus `transactions`/`accounts`/`c
 - `repeats.skip { id, date }` → moves `nextDate` past `date`. A `date` already behind `nextDate` is a no-op (the other device skipped it); one after it is refused.
 - `repeats.create { template, frequency, after, fromTransactionId? }` → a schedule whose first date is the first one after `after` that is later than today, so nothing is back-filled. `fromTransactionId` links that entry to the schedule (the repeat icon).
 
-Read models in `shared/upcoming.ts`: `upcomingOccurrences(snap, from, to, today)`, `subscriptionsList(snap)`, `recurringSuggestions(snap, today)`, `monthlyCost(amount, frequency)`.
+Read models in `shared/upcoming.ts`: `upcomingOccurrences(snap, from, to, today)`, `subscriptionsList(snap)`, `recurringSuggestions(snap, today)`, `monthlyCost(amount, frequency)`. In `shared/chargeSignals.ts`: `chargeSignals(snap, today)`.
 
 ## 4. Out of scope
 
 - Due dates of credit cards in the 30-day list (roadmap A2 adds them).
 - Reminders and push (A4).
 - Yearly or weekly suggestion detection; only monthly patterns are suggested.
+- Price rises of yearly charges (two of them never fit in the 400 days looked at) and of weekly ones.
 - Skipping a date other than the next one, and amounts that change per occurrence.
 - Calendar view dots for upcoming dates.
