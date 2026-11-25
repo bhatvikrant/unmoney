@@ -22,7 +22,7 @@ export default function LedgerRoute() {
     <div className={cn("grid", entry && "grid-cols-[minmax(0,1fr)_440px]")}>
       <div className="min-w-0"><TransactionsPage /></div>
       {entry ? (
-        <aside className="sticky top-0 h-dvh overflow-y-auto border-l bg-background" aria-label="Entry">
+        <aside className="sticky top-0 h-dvh overflow-y-auto border-l bg-background page-pattern" aria-label="Entry">
           {/* a fresh form for each entry opened from the list */}
           <TransactionEditor key={formKey} panel />
         </aside>
