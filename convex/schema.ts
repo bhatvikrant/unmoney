@@ -622,6 +622,8 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"])
+    /** The waiting drafts around the days a check read (gmail.ts openDraftsBetween). */
+    .index("by_user_status_date", ["userId", "status", "proposal.date"])
     .index("by_user_message", ["userId", "messageId"])
     .index("by_user_rev", ["userId", "rev"]),
 
