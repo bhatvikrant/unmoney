@@ -95,6 +95,8 @@ export default defineSchema({
     colorSet: v.union(v.literal("A"), v.literal("B")),
     subcategoryEnabled: v.boolean(),
     autocompleteEnabled: v.boolean(),
+    /** The person asked for attached photos to be read by Claude (shared/receiptAi.ts). Unset: read on the device only. */
+    receiptAiEnabled: v.optional(v.boolean()),
     timeInputEnabled: v.boolean(),
     repeatDisplay: v.union(v.literal("onDate"), v.literal("firstOfMonth")),
     cardExpenseDisplay: v.union(v.literal("atTime"), v.literal("lumpSum")),
@@ -640,7 +642,7 @@ export default defineSchema({
   aiDaily: defineTable({
     userId: v.id("users"),
     day: v.string(),
-    feature: v.union(v.literal("tidy"), v.literal("gmail")),
+    feature: v.union(v.literal("tidy"), v.literal("gmail"), v.literal("receipt")),
     calls: v.number(),
     inputTokens: v.number(),
     outputTokens: v.number(),

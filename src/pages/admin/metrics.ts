@@ -128,9 +128,9 @@ export function totals(daily: Daily[]) {
   return { ...t, activeUsers: users.size, userDays: userDays.size };
 }
 
-/** What Claude cost over some rows of aiDaily: in all, per feature, and how many users it was for. */
+/** What Claude cost over some rows of aiDaily: in all, per feature (dollars and calls), how many users it was for, and the last day it was asked. */
 export function aiTotals(rows: Ai[]) {
-  const t = { costUsd: 0, calls: 0, inputTokens: 0, outputTokens: 0, tidy: 0, gmail: 0 };
+  const t = { costUsd: 0, calls: 0, inputTokens: 0, outputTokens: 0, tidy: 0, gmail: 0, receipt: 0, tidyCalls: 0, gmailCalls: 0, receiptCalls: 0, lastDay: "" };
   const users = new Set<string>();
   for (const r of rows) {
     users.add(r.userId);
@@ -139,13 +139,20 @@ export function aiTotals(rows: Ai[]) {
     t.inputTokens += r.inputTokens + r.cacheWriteTokens + r.cacheReadTokens;
     t.outputTokens += r.outputTokens;
     t[r.feature] += r.costUsd;
+    t[`${r.feature}Calls`] += r.calls;
+    if (r.day > t.lastDay) t.lastDay = r.day;
   }
   return { ...t, users: users.size };
 }
 
+/** The users who asked Claude anything in some rows of aiDaily, each with their totals, dearest first. */
+export function aiByUser<U extends { id: string }>(users: U[], rows: Ai[]) {
+  return users.map((u) => ({ u, t: aiTotals(rows.filter((r) => r.userId === u.id)) })).filter((x) => x.t.calls).sort((a, b) => b.t.costUsd - a.t.costUsd);
+}
+
 /** Claude's cost per day from `from` to `to`, split by feature; zeros where nothing was asked. */
-export function aiSeries(rows: Ai[], from: string, to: string): { day: string; tidy: number; gmail: number }[] {
-  const by = new Map(daysBetween(from, to).map((day) => [day, { day, tidy: 0, gmail: 0 }]));
+export function aiSeries(rows: Ai[], from: string, to: string): { day: string; tidy: number; gmail: number; receipt: number }[] {
+  const by = new Map(daysBetween(from, to).map((day) => [day, { day, tidy: 0, gmail: 0, receipt: 0 }]));
   for (const r of rows) { const p = by.get(r.day); if (p) p[r.feature] += r.costUsd; }
   return [...by.values()];
 }
