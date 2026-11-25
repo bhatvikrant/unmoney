@@ -1,15 +1,18 @@
 /**
  * AI insights for a recap, in a sheet over the story. Nothing is sent until the person taps "Get
  * insights" under the text that says what goes to Claude; the answer is stored on the server
- * (convex/recapAi.ts), so the sheet shows it again whenever the recap is reopened. For a month it
- * also lists suggested budgets, each set with one tap through the ordinary budget op, starting with
- * the current month so past months keep what they had. The page only offers the sheet once the
- * server has answered: offline, the recap is as it always was.
+ * (convex/recapAi.ts), so the sheet shows it again whenever the recap is reopened. That first tap
+ * also turns on insights for the recaps that follow on this device, as the text says (lib/recap.ts
+ * recapAiAuto; Preferences turns it off). The sheet has everything Claude wrote in one place: what
+ * its cards in the story say, anything else worth knowing, and for a month the suggested budgets,
+ * each set with one tap through the ordinary budget op, starting with the current month so past
+ * months keep what they had. The page only offers the sheet once the server has answered: offline,
+ * the recap is as it always was.
  */
 import { useMemo, useState } from "react";
 import { useAction } from "convex/react";
 import { ConvexError } from "convex/values";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, WandSparkles } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { StoredInsights } from "../../../convex/recapAi";
 import { monthKeyForDate } from "../../../shared/period";
@@ -18,13 +21,14 @@ import { useOp, useStore, useView } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { useToday } from "@/lib/today";
 import { monthLabel } from "@/lib/format";
+import { setRecapAiAuto } from "@/lib/recap";
 import { BottomSheet } from "@/components/shell/BottomSheet";
 import { AiHow } from "@/components/shell/misc";
 import { Button } from "@/components/ui/button";
 
 export function RecapInsights({ recapKey, stored, open, onOpenChange }: { recapKey: string; stored: StoredInsights | null; open: boolean; onOpenChange: (o: boolean) => void }) {
   const view = useView();
-  const { status: sync } = useStore();
+  const { status: sync, userId } = useStore();
   const { fmt, settings, categoryById } = useApp();
   const today = useToday();
   const ask = useAction(api.recapAi.ask);
@@ -49,6 +53,8 @@ export function RecapInsights({ recapKey, stored, open, onOpenChange }: { recapK
     setState({ kind: "running" });
     try {
       const res = await ask({ key: recapKey });
+      // asked for once: the recaps that follow get theirs when opened, as the text above the button says
+      if (!stored && userId) setRecapAiAuto(userId, true);
       if (stored && res.hash === stored.hash) setSame(true);
       setState({ kind: "idle" });
     } catch (e) {
@@ -68,7 +74,9 @@ export function RecapInsights({ recapKey, stored, open, onOpenChange }: { recapK
       <div className="space-y-3 px-2 pb-2 text-sm">
         {stored ? (
           <>
+            {stored.title ? <div className="text-base font-semibold">{stored.title}</div> : null}
             <ul className="space-y-2.5">
+              {(stored.cards ?? []).map((c) => <li key={c.headline} className="rounded-lg border bg-card px-3 py-2.5"><div className="font-medium">{fillMoney(c.headline, fmt)}</div><div className="text-muted-foreground">{fillMoney(c.text, fmt)}</div></li>)}
               {stored.insights.map((s) => <li key={s} className="rounded-lg border bg-card px-3 py-2.5">{fillMoney(s, fmt)}</li>)}
             </ul>
             {budgets.length ? (
@@ -89,7 +97,7 @@ export function RecapInsights({ recapKey, stored, open, onOpenChange }: { recapK
                 </ul>
               </div>
             ) : null}
-            <p className="text-xs text-muted-foreground">Written by Claude from this {year ? "year's" : "month's"} totals. The figures are UnMoney's own. <AiHow feature="recap" /></p>
+            <p className="text-xs text-muted-foreground"><WandSparkles className="mr-1 inline size-3.5 align-[-2px]" />Written by AI from this {year ? "year's" : "month's"} totals{stored.cards?.length ? " and what UnMoney found in them" : ""}. The figures are UnMoney's own. <AiHow feature="recap" /></p>
             {changed ? (
               <div className="space-y-2 border-t pt-3">
                 <p className="text-xs text-muted-foreground">{blocked || "Your entries have changed since this was written. Asking again sends the same kind of summary."}</p>
@@ -102,9 +110,10 @@ export function RecapInsights({ recapKey, stored, open, onOpenChange }: { recapK
             <p className="text-muted-foreground">
               To point out what stands out{year ? "" : " and suggest next month's budgets"}, UnMoney sends Anthropic's Claude a summary of this{" "}
               {year ? "year and the two before it" : "month and the five before it"}: totals spent and received, your largest categories by name with
-              what went out under each, your budgets and whether they held, and the notes you logged most often. It does not send individual
-              entries, dates, accounts or photos. Nothing changes until you set a budget yourself. <AiHow feature="recap" />
+              what went out under each, your budgets and whether they held, and the notes you logged most often{year ? "" : ". For what stands out in a month it also sends the notes and amounts of the few largest entries behind it"}.
+              It does not send dates, accounts, descriptions or photos. Nothing changes until you set a budget yourself. <AiHow feature="recap" />
             </p>
+            <p className="text-xs text-muted-foreground">From then on, a recap that has just finished gets its insights when you open it on this device. Preferences turns that off.</p>
             {blocked ? <p className="text-xs text-muted-foreground">{blocked}</p> : null}
             <div className="flex gap-2 pt-1">
               <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>Not now</Button>

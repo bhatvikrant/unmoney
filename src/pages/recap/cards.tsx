@@ -6,30 +6,37 @@
  * links catch them, and so do the parts that open their entries in the drawer (a category, a day's
  * bar, a note: see drill.ts). The cards a month and a year share switch their copy on `card.scope`.
  */
-import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { ArrowDown, ArrowUp, ChevronRight, Download, Share2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronRight, Download, Share2, WandSparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useApp } from "@/lib/app";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Money } from "@/components/shell/Money";
 import { colorAt } from "@/lib/theme";
-import { longMonth } from "@/lib/format";
+import { longMonth, monthLabel } from "@/lib/format";
+import { useOp, useView } from "@/lib/store";
+import { useToday } from "@/lib/today";
+import { play } from "@/lib/sound";
+import { RollingNumber } from "@/components/motion/RollingNumber";
 import { diffDays, MONTH_LONG, MONTH_SHORT, WEEKDAY_SHORT, parts, weekday, type ISODate } from "../../../shared/dates";
-import { parseMonthKey, shiftMonthKey as shiftMonth, type MonthKey, type Range } from "../../../shared/period";
+import { monthKeyForDate, monthRange, parseMonthKey, shiftMonthKey as shiftMonth, type MonthKey, type Range } from "../../../shared/period";
 import { pctChange, type RecapBudgetRow, type RecapBudgetYearRow, type RecapCard, type RecapDrill, type RecapStrip } from "../../../shared/recap";
-import type { Tx } from "../../../shared/views";
-import { useDrill, useHints } from "./drill";
+import { fillMoney, type RecapAiCard, type RecapInsights, type StoryCard } from "../../../shared/recapAi";
+import type { FindingChart, FindingType } from "../../../shared/recapFindings";
+import { statsByCategory, type Tx } from "../../../shared/views";
+import { decodeDrill, useDrill, useHints } from "./drill";
 import { MARK, posterImage, posterRows, type Poster, type PosterRow } from "./poster";
 import { Logo } from "@/components/shell/Logo";
 import { useOverText, useShortMoney } from "@/lib/budgetText";
 
 /** The chart hue each card is tinted with, in the order the cards run. */
-const TINT: Record<RecapCard["kind"], string> = {
+const TINT: Record<StoryCard["kind"], string> = {
   cover: "var(--chart-rest)", total: "var(--chart-8)", categories: "var(--chart-1)", biggest: "var(--chart-2)", days: "var(--chart-4)",
   repeat: "var(--chart-7)", changes: "var(--chart-5)", inout: "var(--chart-3)", budgets: "var(--chart-3)", invested: "var(--chart-6)", closer: "var(--chart-rest)",
   months: "var(--chart-4)", top5: "var(--chart-7)", calendar: "var(--chart-8)", clock: "var(--chart-6)", methods: "var(--chart-3)", new: "var(--chart-4)", personality: "var(--chart-7)",
+  insight: "var(--chart-1)", ideas: "var(--chart-3)",
 };
 const WEEKDAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 /** Text drawn on a solid chart colour: a fixed near-black in both themes (spec §4.2). */
@@ -70,7 +77,7 @@ const joinAnd = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0,
 // ---- the shared bones ----
 
 /** The card surface: the page background with one chart hue mixed in (9%, 14% in dark mode; srgb, see the spec). */
-export function CardFrame({ kind, children, className }: { kind: RecapCard["kind"]; children: ReactNode; className?: string }) {
+export function CardFrame({ kind, children, className }: { kind: StoryCard["kind"]; children: ReactNode; className?: string }) {
   return (
     <section
       style={{ "--tint": TINT[kind] } as CSSProperties}
@@ -187,6 +194,40 @@ function Delta({ change }: { change: number }) {
   );
 }
 
+/**
+ * Dragging a finger or the pointer across a row of bars, as on Stats: `at` is the bar under it, and
+ * each move to another bar plays the same quiet tick. Only that move changes state, so a drag
+ * re-renders the card once per bar, not once per pixel. Spread `bind` on the element the bars sit in.
+ */
+function useScrub(n: number) {
+  const [at, setAt] = useState<number | null>(null);
+  const bind = {
+    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      const i = Math.min(n - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * n)));
+      if (i === at) return;
+      setAt(i);
+      play("tick");
+    },
+    onPointerLeave: () => setAt(null),
+    onPointerCancel: () => setAt(null),
+    // a drag that starts on the bars is theirs, not a swipe to the next card (useSwipe leaves an open row alone)
+    "data-swipe-row": "open",
+  };
+  return { at, bind };
+}
+/** A bar that is not the one being scrubbed steps back. For the element that holds the bar. */
+const dimmed = (scrub: { at: number | null }, i: number) => (scrub.at !== null && scrub.at !== i ? "opacity-40" : "");
+/** What rides above bar `i` of `n`: its label and its figure, rolling as the scrub moves. It hangs towards the middle, so it never runs off the card. */
+function Callout({ i, n, label, value, className }: { i: number; n: number; label: string; value?: string; className?: string }) {
+  const right = i > n * 0.6;
+  return (
+    <span className={cn("pointer-events-none absolute top-0 text-[11px] whitespace-nowrap text-muted-foreground", className)} style={right ? { right: pct((n - i - 0.5) / n) } : { left: pct((i + 0.5) / n) }}>
+      {right ? "" : "← "}{label}{value ? <> · <RollingNumber value={value} className="font-medium text-foreground" /></> : null}{right ? " →" : ""}
+    </span>
+  );
+}
+
 // ---- the cards ----
 
 type Props<K extends RecapCard["kind"]> = { card: Extract<RecapCard, { kind: K }>; month: MonthKey; onClose?: () => void };
@@ -199,6 +240,7 @@ export function CoverCard({ card, month }: Props<"cover">) {
         <Vis>
           <Label>Your year in money</Label>
           <div className="mb-1.5 text-[88px] font-semibold leading-none tracking-[-0.05em]">{month}</div>
+          {card.title ? <Ctx className="text-[17px] font-medium text-foreground">{card.title}</Ctx> : null}
           <Ctx className="mt-[18px]"><B>{plural(card.entries, "entry", "entries")}</B> across {plural(card.days, "day")}</Ctx>
           <Ctx>{straddles ? `${yearRangeLabel(card.range)} · ` : ""}{plural(card.count, "card")} · under a minute</Ctx>
         </Vis>
@@ -214,6 +256,7 @@ export function CoverCard({ card, month }: Props<"cover">) {
         <Label>Your recap</Label>
         <H xl>{longMonth(month)}</H>
         <H xl className="mt-0.5 font-medium text-muted-foreground">{y}</H>
+        {card.title ? <Ctx className="mt-3 text-[17px] font-medium text-foreground">{card.title}</Ctx> : null}
         <Ctx className="mt-[18px]"><B>{plural(card.entries, "entry", "entries")}</B> across {plural(card.days, "day")}</Ctx>
         <Ctx>{rangeLabel(card.range)} · {plural(card.count, "card")} · about 30 seconds</Ctx>
       </Vis>
@@ -336,35 +379,32 @@ export function BiggestCard({ card }: Props<"biggest">) {
 }
 
 export function DaysCard({ card }: Props<"days">) {
+  const { fmt } = useApp();
   const days = card.perDay;
+  const scrub = useScrub(days.length);
   const bi = days.findIndex((d) => d.date === card.busiest);
   const busiest = days[bi];
   const max = Math.max(1, ...days.map((d) => d.amount));
   const at = (f: number) => parts(days[Math.round((days.length - 1) * f)].date).d;
-  const calloutRight = bi > days.length * 0.6;
-  const callout = `${WEEKDAY_SHORT[weekday(card.busiest)]} ${parts(card.busiest).d}`;
+  // the busiest day is named until a drag across the bars names another, with what it came to
+  const named = days[scrub.at ?? bi];
   return (
     <CardFrame kind="days">
       <Label>Your days</Label>
       <H>Busiest: {dayLabel(card.busiest)}</H>
       <Ctx className="truncate"><B><Money amount={busiest.amount} /></B> in {plural(busiest.count, "entry", "entries")}{card.busiestNotes.length ? ` · ${joinAnd(card.busiestNotes)}` : ""}</Ctx>
       <Vis>
-        <div className="relative my-1.5 flex h-[150px] items-end gap-[3px]">
-          <span
-            className="absolute top-0 text-[11px] whitespace-nowrap text-muted-foreground"
-            style={calloutRight ? { right: pct((days.length - bi - 0.5) / days.length) } : { left: pct((bi + 0.5) / days.length) }}
-          >
-            {calloutRight ? `${callout} →` : `← ${callout}`}
-          </span>
-          {days.map((d) => {
+        <div {...scrub.bind} className="relative my-1.5 flex h-[150px] items-end gap-[3px]">
+          <Callout i={scrub.at ?? bi} n={days.length} label={`${WEEKDAY_SHORT[weekday(named.date)]} ${parts(named.date).d}`} value={scrub.at !== null ? fmt(named.amount) : undefined} />
+          {days.map((d, i) => {
             const wk = weekday(d.date) === 0 || weekday(d.date) === 6;
             const zero = d.amount === 0;
             // the whole column is the button, so a short bar is as easy to hit as a tall one
             return (
-              <Tap key={d.date} drill={{ kind: "day", date: d.date }} hint={d.date === card.busiest && BAR_FOOT} label={dayLabel(d.date)} className="flex h-full min-w-0 flex-1 items-end">
+              <Tap key={d.date} drill={{ kind: "day", date: d.date }} hint={d.date === card.busiest && BAR_FOOT} label={dayLabel(d.date)} className={cn("flex h-full min-w-0 flex-1 items-end", dimmed(scrub, i))}>
                 <i
-                  className={cn("block w-full rounded-t-[2px]", zero ? "opacity-40" : d.date === card.busiest ? "bg-expense" : wk ? "bg-expense opacity-55" : "bg-expense opacity-40")}
-                  style={{ height: zero ? 3 : `${Math.max(2, Math.round((d.amount / max) * 100))}%`, background: zero ? REST : undefined }}
+                  className={cn("bar-grow-y block w-full rounded-t-[2px]", zero ? "opacity-40" : d.date === card.busiest ? "bg-expense" : wk ? "bg-expense opacity-55" : "bg-expense opacity-40")}
+                  style={{ height: zero ? 3 : `${Math.max(2, Math.round((d.amount / max) * 100))}%`, background: zero ? REST : undefined, "--i": i / 3 } as CSSProperties}
                 />
               </Tap>
             );
@@ -379,7 +419,7 @@ export function DaysCard({ card }: Props<"days">) {
           <Tile label="Per day" value={card.entriesPerDay.toFixed(1)} hint="entries" />
         </Tiles>
       </Vis>
-      <Foot><span>Lighter bars are weekends · tap a bar for that day</span></Foot>
+      <Foot><span>Lighter bars are weekends · drag across, or tap a bar for that day</span></Foot>
     </CardFrame>
   );
 }
@@ -787,6 +827,7 @@ export function MonthsCard({ card }: Props<"months">) {
   const { fmt } = useApp();
   const max = Math.max(1, ...card.perMonth.map((m) => m.amount));
   const priciest = card.perMonth.find((m) => m.month === card.priciest)!;
+  const scrub = useScrub(card.perMonth.length);
   return (
     <CardFrame kind="months">
       <Label>Month by month</Label>
@@ -794,14 +835,15 @@ export function MonthsCard({ card }: Props<"months">) {
       <Ctx className="truncate"><B><Money amount={priciest.amount} /></B>{card.ratio > 0 && card.lightest !== card.priciest ? <> · {card.ratio.toFixed(1)}× {longMonth(card.lightest)}, your lightest</> : null}</Ctx>
       <Vis>
         {/* the priciest bar is solid expense, the lightest the income colour; both carry their amount above */}
-        <div className="my-2.5 mb-1 flex h-[140px] items-end gap-[5px] pt-4">
-          {card.perMonth.map((m) => {
+        <div {...scrub.bind} className="my-2.5 mb-1 flex h-[140px] items-end gap-[5px] pt-4">
+          {card.perMonth.map((m, i) => {
             const hi = m.month === card.priciest, lo = m.month === card.lightest;
             const h = m.amount ? Math.max(2, Math.round((m.amount / max) * 100)) : 0;
             return (
-              <Tap key={m.month} drill={{ kind: "month", month: m.month }} hint={hi && BAR_FOOT} label={longMonth(m.month)} className="relative h-full min-w-0 flex-1">
-                <i className={cn("absolute inset-x-0 bottom-0 block rounded-t-[3px]", hi ? "bg-expense" : lo ? "bg-income opacity-90" : "bg-expense opacity-40")} style={{ height: `${h}%` }} />
-                {(hi || lo) && m.amount ? <span className="absolute left-1/2 -translate-x-1/2 text-[10px] whitespace-nowrap text-foreground" style={{ bottom: `calc(${h}% + 3px)` }}>{fmt(m.amount)}</span> : null}
+              <Tap key={m.month} drill={{ kind: "month", month: m.month }} hint={hi && BAR_FOOT} label={longMonth(m.month)} className={cn("relative h-full min-w-0 flex-1", dimmed(scrub, i))}>
+                <i className={cn("bar-grow-y absolute inset-x-0 bottom-0 block rounded-t-[3px]", hi ? "bg-expense" : lo ? "bg-income opacity-90" : "bg-expense opacity-40")} style={{ height: `${h}%`, "--i": i } as CSSProperties} />
+                {/* the dearest and the lightest carry their amount; a drag across the bars moves it to the bar under the finger */}
+                {(scrub.at === null ? hi || lo : scrub.at === i) && m.amount ? <span className="absolute left-1/2 -translate-x-1/2 text-[10px] whitespace-nowrap text-foreground" style={{ bottom: `calc(${h}% + 3px)` }}>{fmt(m.amount)}</span> : null}
               </Tap>
             );
           })}
@@ -813,7 +855,7 @@ export function MonthsCard({ card }: Props<"months">) {
           <Tile label="Swing" value={`±${pct(card.swing)}`} hint="vs the average" />
         </Tiles>
       </Vis>
-      <Foot><span>Each month's spend · tap a bar for its entries</span></Foot>
+      <Foot><span>Each month's spend · drag across, or tap a bar for its entries</span></Foot>
     </CardFrame>
   );
 }
@@ -898,16 +940,18 @@ export function CalendarCard({ card }: Props<"calendar">) {
 
 export function ClockCard({ card }: Props<"clock">) {
   const max = Math.max(1, ...card.perHour);
+  const scrub = useScrub(24);
   return (
     <CardFrame kind="clock">
       <Vis>
         <Label>On the clock</Label>
         <H xl>{hourRange(card.peakHour)}</H>
         <Ctx className="mt-1.5">Your spending hour · <B>{pct(card.eveningShare)}</B> of entries after 7 pm</Ctx>
-        <div className="my-2.5 mb-1 flex h-[110px] items-end gap-0.5">
+        <div {...scrub.bind} className="relative mt-6 mb-1 flex h-[110px] items-end gap-0.5">
+          {scrub.at !== null ? <Callout i={scrub.at} n={24} label={hourRange(scrub.at)} value={plural(card.perHour[scrub.at], "entry", "entries")} className="-top-5" /> : null}
           {card.perHour.map((v, h) => (
-            <Tap key={h} drill={{ kind: "hour", hour: h }} hint={h === card.peakHour && BAR_FOOT} label={hourRange(h)} className="flex h-full min-w-0 flex-1 items-end">
-              <i className={cn("block w-full rounded-t-[2px]", h === card.peakHour ? "opacity-100" : "opacity-35")} style={{ height: `${Math.max(2, Math.round((v / max) * 100))}%`, background: "var(--tint)" }} />
+            <Tap key={h} drill={{ kind: "hour", hour: h }} hint={h === card.peakHour && BAR_FOOT} label={hourRange(h)} className={cn("flex h-full min-w-0 flex-1 items-end", dimmed(scrub, h))}>
+              <i className={cn("bar-grow-y block w-full rounded-t-[2px]", h === card.peakHour ? "opacity-100" : "opacity-35")} style={{ height: `${Math.max(2, Math.round((v / max) * 100))}%`, background: "var(--tint)", "--i": h / 2 } as CSSProperties} />
             </Tap>
           ))}
         </div>
@@ -917,7 +961,7 @@ export function ClockCard({ card }: Props<"clock">) {
           {card.first ? <Tile label="Earliest" value={timeLabel(card.first.time)} hint={`${card.first.note}, ${shortDay(card.first.date)}`} drill={{ kind: "day", date: card.first.date }} /> : null}
         </Tiles>
       </Vis>
-      <Foot><span>Entries with a time ({card.timed.toLocaleString()} of {card.total.toLocaleString()}) · tap an hour</span></Foot>
+      <Foot><span>Entries with a time ({card.timed.toLocaleString()} of {card.total.toLocaleString()}) · drag across, or tap an hour</span></Foot>
     </CardFrame>
   );
 }
@@ -1001,9 +1045,170 @@ export function PersonalityCard({ card }: Props<"personality">) {
   );
 }
 
+// ---- Claude's cards: a finding it chose, in its words, over the chart the code made for it (shared/recapFindings.ts) ----
+
+const FINDING_LABEL: Record<FindingType, string> = {
+  climb: "Climbing", spike: "Out of the ordinary", low: "A light month", drivers: "What was behind it", without: "One-offs",
+  pace: "The month's pace", habit: "On repeat", weekday: "Your week", missing: "Gone quiet",
+};
+
+/** Bars oldest first (or one per weekday): the ones the finding is about in the card's hue, the rest grey. Drag across for each bar's figure. */
+function BarsChart({ chart }: { chart: Extract<FindingChart, { kind: "bars" }> }) {
+  const short = useShortMoney();
+  const n = chart.bars.length;
+  const scrub = useScrub(n);
+  const max = Math.max(1, ...chart.bars.map((b) => b.value));
+  const figure = (v: number) => (chart.unit === "money" ? short(v) : `${v}×`);
+  // at rest the figure sits on the last bar the finding is about
+  const at = scrub.at ?? chart.bars.findLastIndex((b) => b.on);
+  return (
+    <div>
+      <div {...scrub.bind} className="relative flex h-[170px] items-end gap-2 pt-6">
+        {at >= 0 ? <Callout i={at} n={n} label={chart.bars[at].label} value={figure(chart.bars[at].value)} /> : null}
+        {chart.bars.map((b, i) => (
+          <span key={i} className={cn("pointer-events-auto flex h-full min-w-0 flex-1 items-end transition-opacity", dimmed(scrub, i))}>
+            <i className={cn("bar-grow-y block w-full rounded-t-[4px]", !b.on && "opacity-45")} style={{ height: b.value ? `${Math.max(2, Math.round((b.value / max) * 100))}%` : 3, background: b.on ? "var(--tint)" : REST, "--i": i } as CSSProperties} />
+          </span>
+        ))}
+      </div>
+      <div className="mt-1.5 flex gap-2 text-center text-[11px] text-muted-foreground">{chart.bars.map((b, i) => <span key={i} className="min-w-0 flex-1 truncate">{b.label}</span>)}</div>
+    </div>
+  );
+}
+
+/** A part of a whole, and what is in the part. */
+function SplitChart({ chart }: { chart: Extract<FindingChart, { kind: "split" }> }) {
+  const { fmt } = useApp();
+  return (
+    <div>
+      <div className="mb-3.5 flex h-11 gap-1 overflow-hidden rounded-md">
+        <i className="bar-grow-x block h-full" style={{ width: pct(chart.total ? chart.part / chart.total : 0), background: "var(--tint)" }} />
+        <i className="block h-full flex-1 opacity-45" style={{ background: REST }} />
+      </div>
+      <Legend>
+        {chart.items.flatMap((it, i) => legendRow(`i${i}`, "var(--tint)", it.label, fmt(it.amount)))}
+        {chart.total > chart.part ? legendRow("rest", REST, "Everything else", fmt(chart.total - chart.part), true) : null}
+      </Legend>
+    </div>
+  );
+}
+
+/** How much of the month's spending had gone by each day: this month against the months before, with the halfway line. */
+function PaceChart({ chart }: { chart: Extract<FindingChart, { kind: "line" }> }) {
+  const path = (c: number[]) => c.map((share, i) => `${i ? "L" : "M"}${((i / Math.max(1, c.length - 1)) * 100).toFixed(1)} ${(100 - share * 100).toFixed(1)}`).join(" ");
+  return (
+    <div>
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-[150px] w-full overflow-visible" role="img" aria-label="The share of the month's spending gone by each day, this month and in the months before">
+        <line x1="0" x2="100" y1="50" y2="50" stroke="var(--muted-foreground)" strokeOpacity="0.5" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+        <path d={path(chart.usual)} fill="none" stroke={REST} strokeWidth="2" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+        <path d={path(chart.now)} fill="none" stroke="var(--tint)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="mt-1 mb-3 flex justify-between text-[11px] text-muted-foreground"><span>Day 1</span><span>dotted line: half spent</span><span>Day {chart.now.length}</span></div>
+      <Legend>
+        {legendRow("now", "var(--tint)", "This month", "")}
+        {legendRow("usual", REST, "The months before", "", true)}
+      </Legend>
+    </div>
+  );
+}
+
+export function InsightCard({ card }: { card: RecapAiCard }) {
+  const { fmt } = useApp();
+  const drill = decodeDrill(card.drill ?? null, undefined);
+  return (
+    <CardFrame kind="insight">
+      <Label>{FINDING_LABEL[card.type] ?? "Worth a look"}</Label>
+      <H className="line-clamp-3">{fillMoney(card.headline, fmt)}</H>
+      <Ctx className="line-clamp-4">{fillMoney(card.text, fmt)}</Ctx>
+      <Vis>
+        {card.chart.kind === "bars" ? <BarsChart chart={card.chart} /> : card.chart.kind === "split" ? <SplitChart chart={card.chart} /> : <PaceChart chart={card.chart} />}
+      </Vis>
+      <Foot>
+        <span className="inline-flex items-center gap-1.5"><WandSparkles className="size-3.5 shrink-0" />Found by UnMoney, worded by AI</span>
+        {drill ? <Tap drill={drill} hint="-left-4 top-1/2 -translate-y-1/2" className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground">See the entries<ChevronRight className="size-3.5" /></Tap> : null}
+      </Foot>
+    </CardFrame>
+  );
+}
+
+/**
+ * The budgets Claude suggested, to try before setting one: drag the amount and see which of the last
+ * months it would have held, from the ledger as it is now. Nothing changes until "Set" is tapped,
+ * and then as the ordinary budget op, from the current month on. This card waits to be stepped past.
+ */
+export function IdeasCard({ budgets, month }: { budgets: RecapInsights["budgets"]; month: MonthKey }) {
+  const view = useView();
+  const { fmt, settings, categoryById } = useApp();
+  const short = useShortMoney();
+  const today = useToday();
+  const upsert = useOp("budgets.upsert");
+  const [pick, setPick] = useState(0);
+  const [tried, setTried] = useState<Record<string, number>>({});
+  // this month and the five before it, oldest first; a month with nothing in it (before the ledger began) is left out
+  const months = useMemo(() => Array.from({ length: 6 }, (_, i) => shiftMonth(month, i - 5)).map((k) => {
+    const r = monthRange(k, settings.monthStartDay);
+    const stats = statsByCategory(view, r.from, r.to, "expense");
+    return { k, total: stats.total, by: new Map(stats.items.map((it) => [it.id, it.amount])) };
+  }).filter((m) => m.total > 0), [view, month, settings.monthStartDay]);
+  const b = budgets[Math.min(pick, budgets.length - 1)];
+  if (!b) return null;
+  const spent = months.map((m) => m.by.get(b.categoryId) ?? 0);
+  const unit = 10 ** settings.decimals;
+  const top = Math.max(b.amount, ...spent);
+  // steps of a tenth of the amount's size: 100 for thousands, 1,000 for tens of thousands
+  const step = 10 ** Math.max(0, Math.floor(Math.log10(top / unit)) - 1) * unit;
+  const amount = tried[b.categoryId] ?? b.amount;
+  const held = spent.filter((s) => s <= amount).length;
+  const now = view.budgets.find((x) => x.period === "monthly" && x.categoryId === b.categoryId)?.amount;
+  const from = monthKeyForDate(today, settings.monthStartDay);
+  return (
+    <CardFrame kind="ideas">
+      <Label>Try a budget</Label>
+      <H className="truncate">{categoryById.get(b.categoryId)?.name} at <RollingNumber value={short(amount)} /></H>
+      <Ctx>Would have held <B>{held} of {spent.length}</B> {spent.length === 1 ? "month" : "months"}</Ctx>
+      {b.why ? <Ctx className="line-clamp-2 text-[13px]">{fillMoney(b.why, fmt)}</Ctx> : null}
+      <Vis>
+        {budgets.length > 1 ? (
+          <div className="mb-4 flex flex-wrap gap-1.5">
+            {budgets.map((x, i) => (
+              <button key={x.categoryId} type="button" aria-pressed={i === pick} onClick={() => setPick(i)} className={cn("pointer-events-auto cursor-pointer rounded-full border px-2.5 py-1 text-xs", i === pick ? "border-foreground bg-foreground text-background" : "bg-card text-muted-foreground")}>
+                {categoryById.get(x.categoryId)?.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex gap-1.5">
+          {months.map((m, i) => (
+            <div key={m.k} className="min-w-0 flex-1 text-center">
+              <i className={cn("block h-9 rounded transition-colors", spent[i] <= amount ? "bg-income" : "bg-expense")} title={fmt(spent[i])} />
+              <span className="mt-1 block text-[11px] text-muted-foreground">{MONTH_SHORT[parseMonthKey(m.k).m - 1]}</span>
+            </div>
+          ))}
+        </div>
+        {/* a drag on the slider is the slider's, not a swipe to the next card (useSwipe leaves an open row alone) */}
+        <input
+          type="range" data-swipe-row="open" aria-label={`Budget for ${categoryById.get(b.categoryId)?.name}`}
+          className="pointer-events-auto mt-5 w-full cursor-pointer accent-foreground"
+          min={step} max={Math.ceil((top * 1.2) / step) * step} step={step} value={amount}
+          onChange={(e) => { setTried((t) => ({ ...t, [b.categoryId]: Number(e.target.value) })); play("tick"); }}
+        />
+        <div className="mt-1 flex justify-between text-[11px] text-muted-foreground"><span className="inline-flex items-center gap-1.5"><i className="block size-2 rounded-[2px] bg-income" />held<i className="ml-1.5 block size-2 rounded-[2px] bg-expense" />went over</span><span>{now !== undefined ? `Now ${short(now)}` : "No budget yet"}</span></div>
+      </Vis>
+      <Foot>
+        <span className="inline-flex items-center gap-1.5"><WandSparkles className="size-3.5 shrink-0" />AI suggests {short(b.amount)}</span>
+        {now === amount
+          ? <span className="inline-flex items-center gap-1 font-medium text-foreground"><Check className="size-3.5" />Set</span>
+          : <Button size="sm" className="pointer-events-auto h-8" onClick={() => void upsert({ categoryId: b.categoryId, period: "monthly", amount, from })}>Set from {monthLabel(from)}</Button>}
+      </Foot>
+    </CardFrame>
+  );
+}
+
 /** The card for a `kind`. */
-export function RecapCardView({ card, month, onClose }: { card: RecapCard; month: MonthKey; onClose: () => void }) {
+export function RecapCardView({ card, month, onClose }: { card: StoryCard; month: MonthKey; onClose: () => void }) {
   switch (card.kind) {
+    case "insight": return <InsightCard card={card.card} />;
+    case "ideas": return <IdeasCard budgets={card.budgets} month={month} />;
     case "cover": return <CoverCard card={card} month={month} />;
     case "total": return <TotalCard card={card} month={month} />;
     case "categories": return <CategoriesCard card={card} month={month} />;

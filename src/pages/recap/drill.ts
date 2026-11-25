@@ -4,7 +4,8 @@
  * (?drill=…, replaced like ?card=), so Back from an entry opened in the drawer reopens the drawer.
  */
 import { createContext, useContext } from "react";
-import type { RecapCard, RecapDrill } from "../../../shared/recap";
+import type { RecapDrill } from "../../../shared/recap";
+import type { StoryCard } from "../../../shared/recapAi";
 
 /** What the cards call to open a drill; the recap page provides it. */
 export const DrillContext = createContext<(d: RecapDrill) => void>(() => {});
@@ -31,7 +32,7 @@ export function encodeDrill(d: RecapDrill): string {
 }
 
 /** The drill a URL value names, or null for nothing or nonsense. "rest" is the categories after the card's top ones. */
-export function decodeDrill(s: string | null, card: RecapCard | undefined): RecapDrill | null {
+export function decodeDrill(s: string | null, card: StoryCard | undefined): RecapDrill | null {
   if (!s) return null;
   if (s === "rest") return card?.kind === "categories" ? { kind: "rest", exclude: card.top.map((t) => t.id) } : null;
   if (s === "s") return { kind: "scheduled" };

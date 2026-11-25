@@ -426,6 +426,19 @@ export default defineSchema({
     at: v.number(),
     insights: v.array(v.string()),
     budgets: v.array(v.object({ categoryId: v.id("categories"), amount: v.number(), why: v.string() })),
+    /** The name Claude gave the period, and the findings it chose to show as cards, each with the chart the code made (shared/recapFindings.ts). */
+    title: v.optional(v.string()),
+    cards: v.optional(v.array(v.object({
+      type: v.string(),
+      headline: v.string(),
+      text: v.string(),
+      chart: v.union(
+        v.object({ kind: v.literal("bars"), unit: v.union(v.literal("money"), v.literal("count")), bars: v.array(v.object({ label: v.string(), value: v.number(), on: v.boolean() })) }),
+        v.object({ kind: v.literal("split"), part: v.number(), total: v.number(), items: v.array(v.object({ label: v.string(), amount: v.number() })) }),
+        v.object({ kind: v.literal("line"), now: v.array(v.number()), usual: v.array(v.number()) }),
+      ),
+      drill: v.optional(v.string()),
+    }))),
   }).index("by_user_key", ["userId", "key"]),
 
   /**
