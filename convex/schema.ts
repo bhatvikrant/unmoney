@@ -499,6 +499,8 @@ export default defineSchema({
     /** A check is running since this instant (gmail.ts syncUser claims it, the check's write or failure clears it): one check at a time. */
     syncingSince: v.optional(v.number()),
     lastSyncAt: v.optional(v.number()),
+    /** When a check last searched the whole look-back; the others search only the last day (gmail.ts wholeWindow). Cleared to ask the next check for the whole of it. */
+    searchedAllAt: v.optional(v.number()),
     lastError: v.optional(v.string()),
     status: v.union(v.literal("ok"), v.literal("reauth"), v.literal("paused")),
     lookbackDays: v.number(),
