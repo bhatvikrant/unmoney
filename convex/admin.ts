@@ -1,7 +1,7 @@
 /**
  * The superadmin dashboard's backend (src/pages/admin, shared/admin.ts). Every public function here
- * answers only the superadmin; everyone else is refused. Read-only: it counts what users keep and do,
- * never returns amounts, notes or names of anything in a ledger.
+ * answers only the superadmin; everyone else is refused. It counts what users keep and do, never
+ * returns amounts, notes or names of anything in a ledger, and changes one thing: who may use AI (setAi).
  */
 import { v } from "convex/values";
 import { getDocumentSize } from "convex/values";
@@ -30,7 +30,7 @@ export const overview = query({
     const users = await Promise.all((await ctx.db.query("users").collect()).map(async (u) => {
       // the last change the user's app saved: seen even by a build too old to report usage
       const op = await ctx.db.query("syncOps").withIndex("by_user", (q) => q.eq("userId", u._id)).order("desc").first();
-      return { id: u._id, name: u.name ?? null, email: u.email ?? null, image: u.image ?? null, joinedAt: u._creationTime, lastSyncAt: op?._creationTime ?? null };
+      return { id: u._id, name: u.name ?? null, email: u.email ?? null, image: u.image ?? null, joinedAt: u._creationTime, lastSyncAt: op?._creationTime ?? null, ai: !!u.aiEnabled };
     }));
     const devices = (await ctx.db.query("usageDevices").collect()).map(({ _id, _creationTime, ...d }) => d);
     const daily = (await ctx.db.query("usageDaily").withIndex("by_day", (q) => q.gte("day", from).lte("day", to)).take(DAILY_LIMIT + 1))
@@ -50,6 +50,15 @@ export const userSessions = query({
     await requireSuperadmin(ctx);
     const rows = await ctx.db.query("usageSessions").withIndex("by_user_started", (q) => q.eq("userId", userId)).order("desc").take(Math.min(limit ?? 50, 200));
     return rows.map(({ _id, _creationTime, userId: _u, ...s }) => s);
+  },
+});
+
+/** Turn AI on or off for some users (lib/auth.ts aiAllowed). Off is how everyone starts. */
+export const setAi = mutation({
+  args: { userIds: v.array(v.id("users")), on: v.boolean() },
+  handler: async (ctx, { userIds, on }) => {
+    await requireSuperadmin(ctx);
+    for (const id of userIds) if (await ctx.db.get(id)) await ctx.db.patch(id, { aiEnabled: on });
   },
 });
 
