@@ -148,6 +148,13 @@ export default function PrivacyPage() {
             is stored as before. Turn the setting off and photos are again read only on your device.
           </p>
           <p className="mt-3">
+            With that setting on, an expense that has a photo can be split by what each person had. Only when you tap "Read
+            items from the photo" while splitting it, the entry's first photo is sent to the same API, reduced in size, with
+            the code of your currency and nothing else. Claude lists the items, taxes, other charges and total printed on the
+            bill; UnMoney checks that they add up and works out the shares itself. The names of the people you split with are
+            not sent to Anthropic.
+          </p>
+          <p className="mt-3">
             Anthropic processes this only to return the answer to UnMoney. Under Anthropic's commercial terms, data sent
             through its API is not used to train its models, and it is deleted after a limited retention period. UnMoney checks
             every answer against your real categories and payment methods before it becomes a draft.

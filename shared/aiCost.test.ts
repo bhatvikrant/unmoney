@@ -3,11 +3,13 @@ import { PRICES, costOf } from "./aiCost";
 import { AI_MODEL as TIDY_MODEL } from "./tidyAi";
 import { AI_MODEL as GMAIL_MODEL } from "./gmail/ai";
 import { AI_MODEL as RECEIPT_MODEL } from "./receiptAi";
+import { SPLIT_MODEL } from "./billSplit";
 
 test("every model the app calls has a price", () => {
   expect(PRICES[TIDY_MODEL]).toBeDefined();
   expect(PRICES[GMAIL_MODEL]).toBeDefined();
   expect(PRICES[RECEIPT_MODEL]).toBeDefined();
+  expect(PRICES[SPLIT_MODEL]).toBeDefined();
 });
 
 test("a call is priced by its input, output and cache tokens", () => {

@@ -8,6 +8,7 @@
  */
 import type { Doc } from "../../convex/_generated/dataModel";
 import { formatNumber } from "../../shared/money";
+import { billLines, itemLabel, sharesText, splitShares, type Bill } from "../../shared/billSplit";
 
 type Tx = Doc<"transactions">;
 
@@ -85,7 +86,28 @@ export function buildHandoff(txs: Tx[], ctx: { currency: string; decimals: numbe
   return h;
 }
 
-export const handoffUrl = (h: Handoff) => `${UNSPLIT_URL}/expenses/new#unmoney=${encodePayload(h)}`;
+/**
+ * One entry's handoff with its bill split by line item (shared/billSplit.ts). The handoff has no place
+ * for people or for what each owes: UnSplit takes lines (a name and an amount), which it opens as an
+ * itemised split with everyone on every line, and free-text notes. So the bill's lines go over with the
+ * tax, tip and discount already spread into them (UnSplit takes its total from the lines), each named
+ * with who had it, and the shares worked out here go in the notes to tick the lines against.
+ */
+export function withBill(h: Handoff, bill: Bill, people: string[], who: string[][], decimals: number): Handoff {
+  const lines = billLines(bill);
+  const shares = people.length > 1 ? splitShares(bill, people, who) : null;
+  return {
+    ...h,
+    items: bill.items.map((it, i) => ({
+      ref: h.refs[0],
+      name: `${itemLabel(it)}${shares ? ` (${who[i].join(", ")})` : ""}`.slice(0, 200),
+      amount: formatNumber(lines[i], decimals, false),
+    })),
+    notes: [h.notes, shares ? `Shares worked out in UnMoney:\n${sharesText(shares, decimals)}` : ""].filter(Boolean).join("\n\n").slice(0, 2000) || undefined,
+  };
+}
+
+export const handoffUrl =(h: Handoff) => `${UNSPLIT_URL}/expenses/new#unmoney=${encodePayload(h)}`;
 export const expenseUrl = (expenseId: string) => `${UNSPLIT_URL}/expenses/${encodeURIComponent(expenseId)}`;
 
 /** The expense UnSplit made, from the hash it sent the browser back with. */

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { Id } from "../../convex/_generated/dataModel";
 import { applyOp, emptySnapshot, type Snapshot } from "../../shared/ops";
-import { buildHandoff, decodePayload, encodePayload, expenseUrl, handoffUrl, parseReturn } from "./unsplit";
+import { buildHandoff, decodePayload, encodePayload, expenseUrl, handoffUrl, parseReturn, withBill } from "./unsplit";
 
 const ctx = { userId: "u" as Id<"users"> };
 let n = 0;
@@ -52,6 +52,22 @@ test("one entry goes as it is, with its description as the notes", () => {
   const h = buildHandoff([dinner], { currency: "INR", decimals: 0, categoryLabel: label(s) })!;
   expect(h).toMatchObject({ description: "Dinner", notes: "Birthday", amount: "120000", currency: "INR" });
   expect(h.items).toBeUndefined();
+});
+
+test("a bill split by line item goes as lines that carry their tax and say who had them, with the shares in the notes", () => {
+  const s = ledger();
+  const dinner = s.transactions.find((t) => t.note === "Dinner")!;
+  const h = buildHandoff([dinner], { currency: "USD", decimals: 2, categoryLabel: label(s) })!;
+  const bill = { items: [{ name: "Paneer tikka", qty: 1, amount: 60000 }, { name: "Naan", qty: 2, amount: 40000 }], charges: [{ label: "Service", amount: 20000 }], total: 120000 };
+  const split = withBill(h, bill, ["Me", "Asha"], [["Asha"], ["Me", "Asha"]], 2);
+  // the lines add up to the amount: UnSplit takes its total from them
+  expect(split.items).toEqual([
+    { ref: dinner._id, name: "Paneer tikka (Asha)", amount: "720.00" },
+    { ref: dinner._id, name: "2 × Naan (Me, Asha)", amount: "480.00" },
+  ]);
+  expect(split).toMatchObject({ amount: "1200.00", refs: [dinner._id], notes: "Birthday\n\nShares worked out in UnMoney:\nMe: 240.00\nAsha: 960.00" });
+  // nobody else named: just the lines, for the people to be picked on UnSplit
+  expect(withBill(h, bill, ["Me"], [["Me"], ["Me"]], 2)).toMatchObject({ items: [{ name: "Paneer tikka" }, { name: "2 × Naan" }], notes: "Birthday" });
 });
 
 test("nothing to split gives null", () => {
