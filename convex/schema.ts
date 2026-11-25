@@ -717,7 +717,7 @@ export default defineSchema({
     .index("by_user_started", ["userId", "startedAt"]),
 
   /**
-   * What each user keeps on the server, counted by admin.refreshStats (daily, or when the dashboard
+   * What each user keeps on the server, counted by admin.refreshStats (weekly, or when the dashboard
    * asks): document counts and sizes per table, files, which features are in use. Counts only,
    * never amounts, notes or names.
    */
