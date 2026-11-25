@@ -122,7 +122,7 @@ export default defineSchema({
     lockAfter: v.union(v.literal("always"), v.literal("5m"), v.literal("1h")),
     /** Account a new entry starts on; falls back to the first visible account when unset or gone. */
     defaultAccountId: v.optional(v.id("accounts")),
-    /** Notes (normalised) the user said are not bills, so the Bills & subscriptions page stops suggesting them. */
+    /** Notes (normalised) the user said are not bills, so the Bills & subscriptions page stops suggesting them; and the price rises and double charges dismissed there ("PRICE|…", "TWICE|…": shared/chargeSignals.ts). */
     dismissedRecurring: v.optional(v.array(v.string())),
     /** Merchants (normalised notes) the user said are not SIPs, so the SIPs page stops suggesting them. */
     dismissedSips: v.optional(v.array(v.string())),
