@@ -320,6 +320,8 @@ export function txGet(snap: Snapshot, id: string): TxDetail | null {
 export type SearchArgs = {
   q?: string; from?: string; to?: string; type?: "income" | "expense" | "transfer";
   accountIds?: string[]; categoryIds?: string[]; tag?: string;
+  /** The smallest and largest amount to include, in the main currency's units as typed (499.5). */
+  min?: number; max?: number;
 };
 
 export function txSearch(snap: Snapshot, args: SearchArgs): Tx[] {
@@ -332,7 +334,11 @@ export function txSearch(snap: Snapshot, args: SearchArgs): Tx[] {
   const qAccs = named(snap.accounts);
   // "499" or "1,299.50" also finds the entry of that amount (to within one minor unit)
   const decimals = settingsOf(snap)?.decimals ?? 2;
-  const qAmount = q && /^[\d,]*\.?\d+$/.test(q) ? Math.round(Number(q.replace(/,/g, "")) * 10 ** decimals) : null;
+  const minor = (n: number) => Math.round(n * 10 ** decimals);
+  const qAmount = q && /^[\d,]*\.?\d+$/.test(q) ? minor(Number(q.replace(/,/g, ""))) : null;
+  // an amount range, ends included; an entry's amount is in the main currency even when it was paid in another
+  const min = args.min === undefined ? null : minor(args.min);
+  const max = args.max === undefined ? null : minor(args.max);
   const out = snap.transactions.filter((t) => {
     if (args.from && t.date < args.from) return false;
     if (args.to && t.date > args.to) return false;
@@ -340,6 +346,8 @@ export function txSearch(snap: Snapshot, args: SearchArgs): Tx[] {
     if (acc && !acc.has(t.accountId) && !(t.toAccountId && acc.has(t.toAccountId))) return false;
     if (cats && !(t.categoryId && cats.has(t.categoryId)) && !(t.subcategoryId && cats.has(t.subcategoryId))) return false;
     if (args.tag && !t.tags.includes(args.tag)) return false;
+    if (min !== null && t.amount < min) return false;
+    if (max !== null && t.amount > max) return false;
     if (q && !(t.note.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q) || t.tags.some((x) => x.toLowerCase().includes(q))
       || qCats.has(t.categoryId ?? "") || qCats.has(t.subcategoryId ?? "") || qAccs.has(t.accountId) || qAccs.has(t.toAccountId ?? "")
       || (qAmount !== null && Math.abs(t.amount - qAmount) <= 1))) return false;

@@ -159,6 +159,13 @@ export default function PrivacyPage() {
             and are deleted with it. A suggested budget changes nothing until you tap "Set".
           </p>
           <p className="mt-3">
+            Search runs on your device. Only when you type a question in Search and tap Ask AI is that question sent to the
+            same API, to turn it into the search's filters (dates, type, category, payment method, tag and amount range).
+            With it go today's date, your currency, the days your month and week start on, and the names of your categories,
+            payment methods and tags. None of your entries, amounts or notes are sent: the filters come back and the search
+            itself still runs on your device. Typing in Search without tapping Ask AI sends nothing.
+          </p>
+          <p className="mt-3">
             Anthropic processes this only to return the answer to UnMoney. Under Anthropic's commercial terms, data sent
             through its API is not used to train its models, and it is deleted after a limited retention period. UnMoney checks
             every answer against your real categories and payment methods before it becomes a draft.
