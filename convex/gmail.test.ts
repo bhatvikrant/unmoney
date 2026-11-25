@@ -320,6 +320,42 @@ test("the hourly check schedules one run per live connection", async () => {
   expect(scheduled.map((s) => [s.name, (s.args[0] as { userId: string }).userId])).toEqual([["gmail:syncUser", userId]]);
 });
 
+test("the hourly check leaves a user who is away to one check a day, unless the last one failed or left mail waiting", async () => {
+  const { t, userId, connect } = await setup();
+  const now = Date.now();
+  const hour = 60 * 60 * 1000;
+  const cid = await connect({ lastSyncAt: now - 2 * hour, syncedUpTo: now - 2 * hour });
+  const runs = async () => {
+    await t.mutation(internal.gmail.syncAll, {});
+    const all = await t.run((ctx) => ctx.db.system.query("_scheduled_functions").collect());
+    return all.filter((s) => s.name === "gmail:syncUser").length;
+  };
+  // checked two hours ago and never seen in the app: the app checks when it opens
+  expect(await runs()).toBe(0);
+  // in the app this morning: every hour, as before
+  const device = await t.run((ctx) => ctx.db.insert("usageDevices", { userId, deviceId: "d", firstSeenAt: 1, lastSeenAt: now - 3 * hour, os: "iOS", browser: "Safari", formFactor: "phone", standalone: true, appVersion: "1", tzOffset: 330, sessions: 1 }));
+  expect(await runs()).toBe(1);
+  // away for days: not again today
+  await t.run((ctx) => ctx.db.patch(device, { lastSeenAt: now - 72 * hour }));
+  expect(await runs()).toBe(1);
+  // the last check held mail back for the next one (or failed, which leaves syncedUpTo behind too)
+  await t.run((ctx) => ctx.db.patch(cid, { syncedUpTo: now - 5 * hour }));
+  expect(await runs()).toBe(2);
+  // a day since the last check
+  await t.run((ctx) => ctx.db.patch(cid, { lastSyncAt: now - 23.5 * hour, syncedUpTo: now - 23.5 * hour }));
+  expect(await runs()).toBe(3);
+});
+
+test("new mail is compared with the waiting drafts around its days, not with every draft that waits", async () => {
+  const { t, userId, insert } = await setup();
+  const draft = (messageId: string, date: string, status: "open" | "dismissed" = "open") =>
+    t.run((ctx) => ctx.db.insert("drafts", { userId, ...insert(messageId), proposal: { ...insert(messageId).proposal, date }, status }));
+  const [, before, on, after] = [await draft("old", "2025-11-02"), await draft("before", "2026-10-16"), await draft("on", "2026-10-18"), await draft("after", "2026-10-20")];
+  await draft("handled", "2026-10-18", "dismissed");
+  const got = await t.query(internal.gmail.openDraftsBetween, { userId, from: "2026-10-16", to: "2026-10-20" });
+  expect(got.map((d) => d._id)).toEqual([before, on, after]);
+});
+
 test("connecting records where reading may start: now for \"from now on\", the look-back before it otherwise", async () => {
   const { t, userId } = await setup();
   const before = Date.now();
@@ -516,7 +552,9 @@ test("the first check after the change remembers what the drafts and the old pro
   });
   const seen = () => t.query(internal.gmail.seenMessageIds, { userId, ids: ["alert", "receipt", "open", "otp", "new"] });
   expect(await seen()).toEqual([]);
-  expect(await t.mutation(internal.gmail.claimSync, { userId, startedAt: at })).toBe(true);
+  // the claim hands back what the check needs, so the connection is not read again for it
+  expect((await t.mutation(internal.gmail.claimSync, { userId, startedAt: at }))?.connection._id).toBe(cid);
+  expect(await t.mutation(internal.gmail.claimSync, { userId, startedAt: at + 1 })).toBeNull();
   expect(await seen()).toEqual(["alert", "receipt", "open", "otp"]);
   const c = (await t.run((ctx) => ctx.db.get(cid)))!;
   expect([c.seenFilled, c.processed]).toEqual([true, undefined]);

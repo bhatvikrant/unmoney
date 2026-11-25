@@ -61,6 +61,8 @@ const FETCH_AT_ONCE = 3;
 const FETCH_BATCH_MS = 300;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+/** The cron checks a user who was in the app within this long every hour, and one who is away once a day: the app checks when it opens (src/pages/transactions/GmailNudge.tsx). */
+const AWAY_AFTER_MS = DAY_MS;
 /** Between one backfill slice and the next; longer after a failure or while the AI could not read some mail. */
 const STEP_GAP_MS = 5000;
 const STEP_BUSY_MS = 60 * 1000;
@@ -487,7 +489,7 @@ export const syncAll = internalMutation({
       if (c.status !== "ok") continue;
       // three seconds apart, starting over after 45 minutes' worth so the last ones still run inside the hour
       const delay = (i++ % 900) * 3000;
-      await ctx.scheduler.runAfter(delay, internal.gmail.syncUser, { userId: c.userId });
+      if (await dueForCron(ctx, c, now)) await ctx.scheduler.runAfter(delay, internal.gmail.syncUser, { userId: c.userId });
       const b = c.backfill;
       const used = c.aiMonth === monthOf(now) ? c.aiCalls : 0;
       if (b && ((b.state === "running" && now - (b.lastStepAt ?? b.startedAt) > STALL_MS) || (b.state === "waiting-ai" && used < BACKFILL_AI_CAP))) await kickBackfill(ctx, c, delay + 60_000);
@@ -495,6 +497,19 @@ export const syncAll = internalMutation({
     if (!res.isDone) await ctx.scheduler.runAfter(0, internal.gmail.syncAll, { cursor: res.continueCursor, started: i });
   },
 });
+
+/**
+ * Whether the hourly cron checks this connection now. A check reads and rewrites the connection and
+ * looks up its whole window of mail: database I/O every hour for people who are not looking, when
+ * the app checks as it opens anyway. Hourly still for a user who is around, and for a connection never checked, checked
+ * a day ago, or whose last check failed or left mail for the next one (syncedUpTo held back).
+ */
+async function dueForCron(ctx: MutationCtx, c: Connection, now: number): Promise<boolean> {
+  if (!c.lastSyncAt || now - c.lastSyncAt >= DAY_MS - HOUR_MS || (c.syncedUpTo ?? 0) < c.lastSyncAt) return true;
+  // a build too old to report usage has not been opened since usage was added: away
+  const devices = await ctx.db.query("usageDevices").withIndex("by_user_device", (q) => q.eq("userId", c.userId)).collect();
+  return devices.some((d) => now - d.lastSeenAt < AWAY_AFTER_MS);
+}
 
 /** "Check now" from the settings page or the app coming to the front. At most once a minute; says whether it ran. */
 export const syncNow = action({
@@ -513,13 +528,14 @@ export const syncNow = action({
 
 /**
  * The start of a check claims the connection, so the hourly check, "Check now" and the first check
- * after connecting never run at once; false when another run holds it or the connection is not live.
+ * after connecting never run at once; null when another run holds it or the connection is not live.
+ * Otherwise what the check needs (prepOf), so it does not read the connection a second time for it.
  */
 export const claimSync = internalMutation({
   args: { userId: v.id("users"), startedAt: v.number() },
-  handler: async (ctx, { userId, startedAt }): Promise<boolean> => {
+  handler: async (ctx, { userId, startedAt }) => {
     const c = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
-    if (!c || c.status !== "ok" || syncing(c, startedAt)) return false;
+    if (!c || c.status !== "ok" || syncing(c, startedAt)) return null;
     if (!c.seenFilled) {
       // once per connection: what the drafts and the old `processed` list knew, as gmailSeen rows
       const rows: SeenRow[] = (c.processed ?? []).map((p) => ({ messageId: p.id, receivedAt: p.receivedAt, processed: true }));
@@ -527,7 +543,7 @@ export const claimSync = internalMutation({
       await markSeen(ctx, userId, rows);
     }
     await ctx.db.patch(c._id, { syncingSince: startedAt, ...(c.seenFilled ? {} : { seenFilled: true, processed: undefined }) });
-    return true;
+    return prepOf(ctx, c);
   },
 });
 
@@ -585,14 +601,18 @@ export const prepareSync = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }) => {
     const connection = await ctx.db.query("gmailConnections").withIndex("by_user", (q) => q.eq("userId", userId)).unique();
-    if (!connection) return null;
-    const written = await ctx.db.query("drafts").withIndex("by_user_rev", (q) => q.eq("userId", userId).gt("rev", connection.learnedRev ?? 0)).collect();
-    return { connection, ai: await aiAllowed(ctx, userId), rev: await currentRev(ctx, userId), learnFrom: await withEntries(ctx, written.filter((d) => d.status === "accepted")) };
+    return connection ? prepOf(ctx, connection) : null;
   },
 });
 
+async function prepOf(ctx: QueryCtx | MutationCtx, connection: Connection) {
+  const userId = connection.userId;
+  const written = await ctx.db.query("drafts").withIndex("by_user_rev", (q) => q.eq("userId", userId).gt("rev", connection.learnedRev ?? 0)).collect();
+  return { connection, ai: await aiAllowed(ctx, userId), rev: await currentRev(ctx, userId), learnFrom: await withEntries(ctx, written.filter((d) => d.status === "accepted")) };
+}
+
 /** Saved drafts with the entry each became (what the user picked when saving). */
-async function withEntries(ctx: QueryCtx, drafts: Doc<"drafts">[]): Promise<{ draft: Doc<"drafts">; tx: Doc<"transactions"> }[]> {
+async function withEntries(ctx: QueryCtx | MutationCtx, drafts: Doc<"drafts">[]): Promise<{ draft: Doc<"drafts">; tx: Doc<"transactions"> }[]> {
   const out: { draft: Doc<"drafts">; tx: Doc<"transactions"> }[] = [];
   for (const d of drafts) {
     const tx = d.transactionId ? await ctx.db.get(d.transactionId) : null;
@@ -609,7 +629,7 @@ async function withEntries(ctx: QueryCtx, drafts: Doc<"drafts">[]): Promise<{ dr
 export const prepareRead = internalQuery({
   args: { userId: v.id("users"), since: v.number() },
   handler: async (ctx, { userId, since }) => {
-    const [settings, accounts, categories, currencies, openDrafts, saved] = await Promise.all([
+    const [settings, accounts, categories, currencies, saved] = await Promise.all([
       ctx.db.query("settings").withIndex("by_user", (q) => q.eq("userId", userId)).unique(),
       ctx.db.query("accounts").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
       Promise.all([
@@ -617,14 +637,24 @@ export const prepareRead = internalQuery({
         ctx.db.query("categories").withIndex("by_user_type", (q) => q.eq("userId", userId).eq("type", "income")).collect(),
       ]).then(([e, i]) => [...e, ...i]),
       ctx.db.query("currencies").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
-      ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "open")).collect(),
       ctx.db.query("drafts").withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "accepted").gte("_creationTime", since)).collect(),
     ]);
     return {
       settings: { mainCurrency: settings?.mainCurrency ?? "INR", decimals: settings?.decimals ?? 2 },
-      accounts, categories, currencies, openDrafts, saved: await withEntries(ctx, saved),
+      accounts, categories, currencies, saved: await withEntries(ctx, saved),
     };
   },
+});
+
+/**
+ * The waiting drafts dated from `from` to `to`: the ones new mail can fold into, pair with or be
+ * matched beside. Every draft that waits is thousands after a mailbox was read back a year, and a
+ * check with new mail used to read them all.
+ */
+export const openDraftsBetween = internalQuery({
+  args: { userId: v.id("users"), from: v.string(), to: v.string() },
+  handler: (ctx, { userId, from, to }) =>
+    ctx.db.query("drafts").withIndex("by_user_status_date", (q) => q.eq("userId", userId).eq("status", "open").gte("proposal.date", from).lte("proposal.date", to)).collect(),
 });
 
 /**
@@ -659,7 +689,7 @@ export const seenMessageIds = internalQuery({
   },
 });
 
-type Prep = NonNullable<FunctionReturnType<typeof internal.gmail.prepareSync>>;
+type Prep = Awaited<ReturnType<typeof prepOf>>;
 
 type Collected = {
   scanned: number;
@@ -858,7 +888,11 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
   const waitingRate = candidates.filter((d) => d.proposal.amount === 0);
   if (waitingRate.length) notes.push(`${waitingRate.length} ${waitingRate.length === 1 ? "mail waits" : "mails wait"} for an exchange rate`);
   if (waiting) notes.push(`${waiting} older ${waiting === 1 ? "mail" : "mails"} waiting`);
-  const { inserts: folded, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), read.openDrafts, read.accounts.filter((a) => !a.deletedAt), same);
+  // New mail and a waiting draft are compared a day either way (dedup.ts), and an entry a draft already has is
+  // within a day of that draft: two days around the days read (`dates` holds one already) reaches every draft that counts.
+  const days = [...dates].sort();
+  const openDrafts = days.length ? await ctx.runQuery(internal.gmail.openDraftsBetween, { userId: c.userId, from: addDays(days[0], -1), to: addDays(days[days.length - 1], 1) }) : [];
+  const { inserts: folded, updates } = foldDrafts(candidates.filter((d) => d.proposal.amount !== 0), openDrafts, read.accounts.filter((a) => !a.deletedAt), same);
   // The other mail of a purchase whose first mail was already saved (the shop's receipt arriving after
   // the bank's alert was accepted): the entry exists, so this is nothing new. Remembered as read.
   const inserts = folded.filter((d) => {
@@ -868,7 +902,7 @@ async function collect(ctx: ActionCtx, prep: Prep, startedAt: number, range?: Ra
   });
   // waiting drafts are matched only where every day around them was read; the app matches the rest itself (shared/views draftMatches)
   const covered = new Set(dates);
-  const matchable = read.openDrafts.filter((d) => d.matchedTransactionId || around(d.proposal.date).every((x) => covered.has(x)));
+  const matchable = openDrafts.filter((d) => d.matchedTransactionId || around(d.proposal.date).every((x) => covered.has(x)));
   return {
     scanned,
     inserts: inserts.map((d) => ({ ...d, matchedTransactionId: matchEntry(d, transactions, read.accounts) })),
@@ -889,11 +923,9 @@ export const syncUser = internalAction({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }): Promise<{ ran: boolean; found?: number; error?: string }> => {
     const startedAt = Date.now();
-    if (!(await ctx.runMutation(internal.gmail.claimSync, { userId, startedAt }))) return { ran: false };
+    const prep: Prep | null = await ctx.runMutation(internal.gmail.claimSync, { userId, startedAt });
+    if (!prep) return { ran: false };
     try {
-      const prep = await ctx.runQuery(internal.gmail.prepareSync, { userId });
-      // disconnected since the claim: nothing left to clear
-      if (!prep) return { ran: false };
       const got = await collect(ctx, prep, startedAt);
       await ctx.runMutation(internal.gmail.writeSync, {
         userId, startedAt,
