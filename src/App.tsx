@@ -112,6 +112,7 @@ const GmailReviewPage = screen(() => import("@/pages/transactions/GmailReviewPag
 const UpcomingPage = screen(() => import("@/pages/transactions/UpcomingPage"));
 const SipsPage = screen(() => import("@/pages/transactions/SipsPage"));
 const PrivacyPage = screen(() => import("@/pages/legal/PrivacyPage"));
+const FeaturesPage = screen(() => import("@/pages/features/FeaturesPage"));
 // Its own chunk (AdminPage-*.js), left out of the service worker's precache (vite.config.ts): only the superadmin ever downloads it.
 const AdminPage = screen(() => import("@/pages/admin/AdminPage"));
 
@@ -322,6 +323,8 @@ function Screens() {
   const { pathname } = useLocation();
   // public, signed in or not: Google's verification links to it
   if (pathname === "/privacy") return <PrivacyPage />;
+  // public too: what each AI feature does and sends, linked from sign-in and from the features themselves
+  if (pathname === "/features") return <FeaturesPage />;
   if (!ready) return <Splash />;
   // A copy of the ledger on this device: use it, whatever the network is doing.
   if (hasLocal) {

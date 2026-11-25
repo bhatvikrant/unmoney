@@ -17,7 +17,7 @@ import { useApp } from "@/lib/app";
 import { guessKind } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 import { guessMapping, guessSign, headerNames, layoutKey, mappingReady, mappingReads, recallMapping, toImportRows, type BankMapping, type Grid } from "@/lib/bankImport";
-import { Section } from "@/components/shell/misc";
+import { AiHow, Section } from "@/components/shell/misc";
 import { Money } from "@/components/shell/Money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -159,7 +159,7 @@ export function ColumnMapping({ name, grid, headerRow: foundRow, onCancel, onCon
               <div className={cn("text-xs", ai.kind === "error" ? "text-destructive" : "text-muted-foreground")}>
                 {ai.kind === "running" ? "Reading the first rows…" : ai.text
                   ?? (status.connected
-                    ? `UnMoney couldn't tell which column is which. This sends the header row below and the ${LAYOUT_ROWS} rows under it to Anthropic's Claude to work it out. The rest of the file stays on your device.`
+                    ? <>UnMoney couldn't tell which column is which. This sends the header row below and the {LAYOUT_ROWS} rows under it to Anthropic's Claude to work it out. The rest of the file stays on your device. <AiHow feature="statement" newTab /></>
                     : "Matching with AI needs a connection. You can match the columns yourself.")}
               </div>
             </div>

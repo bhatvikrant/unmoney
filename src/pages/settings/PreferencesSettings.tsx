@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { useOp, useStore } from "@/lib/store";
 import { useApp } from "@/lib/app";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
-import { Row, Section } from "@/components/shell/misc";
+import { AiHow, Row, Section } from "@/components/shell/misc";
 import { Switch } from "@/components/ui/switch";
 import { useState } from "react";
 import { play, setSoundsEnabled, useSoundsEnabled } from "@/lib/sound";
@@ -38,7 +38,7 @@ export default function PreferencesSettings() {
         <Section title="Entering a transaction">
           <Row label="Subcategories" info="Lets categories have subcategories, for example Food › Groceries. When off, you only pick the main category." right={(id) => <Switch aria-labelledby={id} checked={s.subcategoryEnabled} onCheckedChange={(v) => update({ patch: { subcategoryEnabled: v } })} />} />
           <Row label="Autocomplete notes" info="While you type a note, suggests notes you have used before. Picking one also fills in the category and payment method you used with it." right={(id) => <Switch aria-labelledby={id} checked={s.autocompleteEnabled} onCheckedChange={(v) => update({ patch: { autocompleteEnabled: v } })} />} />
-          {user?.ai ? <Row label="Read photos with AI" hint="Fills in the note, category and date" info="When you attach a photo to an entry, UnMoney sends that photo to Anthropic's Claude, along with the names of your categories and the notes and descriptions you use most. Claude suggests the note, description, category and date, and UnMoney fills in the ones still empty for you to check. Anthropic does not train its models on it. When off, a photo is read only on your device, and only for the amount." right={(id) => <Switch aria-labelledby={id} checked={!!s.receiptAiEnabled} onCheckedChange={(v) => update({ patch: { receiptAiEnabled: v } })} />} /> : null}
+          {user?.ai ? <Row label="Read photos with AI" hint={<>Fills in the note, category and date. <AiHow feature="receipt" /></>} info="When you attach a photo to an entry, UnMoney sends that photo to Anthropic's Claude, along with the names of your categories and the notes and descriptions you use most. Claude suggests the note, description, category and date, and UnMoney fills in the ones still empty for you to check. Anthropic does not train its models on it. When off, a photo is read only on your device, and only for the amount." right={(id) => <Switch aria-labelledby={id} checked={!!s.receiptAiEnabled} onCheckedChange={(v) => update({ patch: { receiptAiEnabled: v } })} />} /> : null}
           <Row label="Time input" hint="Record the time of each entry" info="Adds a time field next to the date when you enter a transaction. Turn it off if you only care about the day." right={(id) => <Switch aria-labelledby={id} checked={s.timeInputEnabled} onCheckedChange={(v) => update({ patch: { timeInputEnabled: v } })} />} />
           <Row label="Sounds" hint="Kept on this device" info="Quiet sounds when you make a transfer, pay a card, delete an entry, open a menu or drag across a chart. Nothing plays on its own. On iPhone the ringer switch silences them too." right={(id) => <Switch aria-labelledby={id} checked={sounds} onCheckedChange={(v) => { setSoundsEnabled(v); if (v) play("ding"); }} />} />
         </Section>

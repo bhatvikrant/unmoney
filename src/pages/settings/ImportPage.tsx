@@ -25,7 +25,7 @@ import { IMPORT_ACCEPT, readImportFile, type ParsedImport } from "@/lib/importFi
 import { SHARE_CACHE, SHARE_KEY } from "@/lib/share";
 import { isIOS, promptInstall, useInstallState } from "@/lib/pwa";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
-import { Row, Section } from "@/components/shell/misc";
+import { AiHow, Row, Section } from "@/components/shell/misc";
 import { SwipeToDelete, useSwipedRow } from "@/components/shell/SwipeToDelete";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -593,7 +593,7 @@ function Review({ loaded, answers, onBack, onCancel, onDone }: { loaded: Loaded;
               <div className={cn("text-xs", ai.kind === "error" ? "text-destructive" : "text-muted-foreground")}>
                 {ai.kind === "running" ? "Reading the descriptions…" : ai.text
                   ?? (status.connected
-                    ? "Sends the bank's description of each new row, with your category names and the notes you use most, to Anthropic's Claude. No amounts or dates. Nothing is imported until you confirm."
+                    ? <>Sends the bank's description of each new row, with your category names and the notes you use most, to Anthropic's Claude. No amounts or dates. Nothing is imported until you confirm. <AiHow feature="statement" newTab /></>
                     : "AI suggestions need a connection. You can import without them.")}
               </div>
             </div>
