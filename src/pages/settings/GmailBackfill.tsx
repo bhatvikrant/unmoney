@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { useStore } from "@/lib/store";
 
 /** "1 Jan 2023". */
 export const longDay = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
@@ -78,6 +79,8 @@ type Estimate = { count: number; capped: boolean; ms: number; aiShort: boolean; 
  */
 export function BackfillEstimate({ year, busy, onStart }: { year: number | null; busy: boolean; onStart: (year: number) => void }) {
   const estimate = useAction(api.gmail.estimateBackfill);
+  // without AI, mail no rule can read is skipped: nothing to run out of
+  const ai = !!useStore().user?.ai;
   const cache = useRef(new Map<number, Estimate>());
   const [got, setGot] = useState<{ year: number; e?: Estimate; failed?: boolean } | null>(null);
 
@@ -113,8 +116,8 @@ export function BackfillEstimate({ year, busy, onStart }: { year: number | null;
               ? "No unread money mail in that time: everything there was already read. Starting finishes in moments."
               : <><span className="text-foreground">{e.capped ? `Over ${count(e.count)}` : `About ${count(e.count)}`} money {e.count === 1 ? "email" : "emails"}</span> UnMoney hasn't read yet.</>}
           </Fact>
-          {e.count ? <Fact icon={Clock}>Takes <span className="text-foreground">{formatDuration(e.ms)}{e.capped ? " or more" : ""}</span>, depending on how much needs AI to read.</Fact> : null}
-          {e.aiShort ? (
+          {e.count ? <Fact icon={Clock}>Takes <span className="text-foreground">{formatDuration(e.ms)}{e.capped ? " or more" : ""}</span>{ai ? ", depending on how much needs AI to read" : ""}.</Fact> : null}
+          {e.aiShort && ai ? (
             <Fact icon={Sparkles} tone="warn">Mail no rule can read uses AI, which has a monthly allowance. If it runs out, the rest is read from {longDay(e.aiResumesAt)} on its own. Some is always kept for new mail.</Fact>
           ) : null}
         </>
