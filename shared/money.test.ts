@@ -45,8 +45,30 @@ describe("evaluateExpression", () => {
     expect(evaluateExpression(expr, mark)).toBe(want);
   });
 
-  test.each(["5+", "abc", ""])("%j is incomplete", (expr) => {
+  test.each([
+    ["(2+3)*4", 20],
+    ["-5+8", 3],
+    ["10-2-3", 5],
+    ["100/8/5", 2.5],
+    ["2+3*4-6/2", 11],
+    ["1.5e2+1", 151],
+    ["249.50", 249.5],
+  ] as const)("%s is %d", (expr, want) => {
+    expect(evaluateExpression(expr)).toBe(want);
+  });
+
+  test.each(["5+", "abc", "", "(2+3", "2+3)", "5(3)", "2**3", "1/0", "*5"])("%j is not an amount", (expr) => {
     expect(evaluateExpression(expr)).toBeNull();
+  });
+
+  test("it never builds code from the text: the site's Content-Security-Policy forbids that, and every amount came back empty", () => {
+    const real = globalThis.Function;
+    globalThis.Function = (() => { throw new EvalError("blocked by Content-Security-Policy"); }) as never;
+    try {
+      expect(evaluateExpression("120+45.50")).toBe(165.5);
+    } finally {
+      globalThis.Function = real;
+    }
   });
 });
 
