@@ -111,7 +111,7 @@ export default function StatsPage() {
           </>
         ) : (
           <div className="px-2 py-3">
-            {trend ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} color={type === "income" ? "var(--income)" : "var(--expense)"} readout /> : <div className="h-[13.5rem]" />}
+            {trend ? <TrendBars data={ranges.map((r, i) => ({ label: r.label, amount: trend[i]?.amount ?? 0 }))} color={type === "income" ? "var(--income)" : "var(--expense)"} /> : <div className="h-[13.5rem]" />}
             <div className="bg-card border-y mt-3">
               {ranges.slice().reverse().map((r, i) => <div key={r.key} className="flex justify-between px-4 py-2 border-b last:border-b-0 text-sm"><span>{/^\d{4}-\d{2}$/.test(r.key) ? monthLabel(r.key) : r.label}</span><Money amount={trend?.[ranges.length - 1 - i]?.amount ?? 0} kind={type} /></div>)}
             </div>

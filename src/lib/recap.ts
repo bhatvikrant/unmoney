@@ -7,6 +7,28 @@ import type { MonthKey } from "../../shared/period";
 
 const key = (userId: string) => `unmoney.recap.${userId}`;
 const yearKey = (userId: string) => `unmoney.recapYear.${userId}`;
+const aiKey = (userId: string) => `unmoney.recapAi.${userId}`;
+
+/**
+ * Whether a recap that has just finished gets its AI insights when it is opened, without asking
+ * again. On from the first "Get insights" on this device (the sheet says so), off again in
+ * Preferences. Per device like the markers below: each device asks once.
+ */
+export function recapAiAuto(userId: string | null): boolean {
+  try {
+    return !!userId && localStorage.getItem(aiKey(userId)) === "on";
+  } catch {
+    return false;
+  }
+}
+
+export function setRecapAiAuto(userId: string, on: boolean) {
+  try {
+    localStorage.setItem(aiKey(userId), on ? "on" : "off");
+  } catch {
+    // private mode: the recap asks again next time
+  }
+}
 
 export function recapSeenMonth(userId: string): MonthKey | null {
   try {
