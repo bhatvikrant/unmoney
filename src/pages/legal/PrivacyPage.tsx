@@ -180,6 +180,16 @@ export default function PrivacyPage() {
             balances from your ledger are sent. The answer only fills in the form: nothing is saved until you save it.
           </p>
           <p className="mt-3">
+            When you import a bank statement and tap "Suggest categories with AI" (nothing is sent until you do), the bank's
+            description of each row that is new to UnMoney, up to 120 characters of it, is sent to the same API with whether
+            the row was money out, money in or a refund, to suggest a note and a category for it. A bank's description can
+            name the shops and people you paid. With them go the names of your categories and the notes you use most. The
+            rows' amounts, dates and balances are not sent, and the file itself stays on your device. If UnMoney cannot tell
+            which column of a statement is which and you tap "Match the columns with AI", the file's header row and the
+            first 5 rows under it (as they are, amounts and dates included, each cell cut to 40 characters) are sent so Claude
+            can say which column holds the date, the description and the amount. The rest of the file is read on your device.
+          </p>
+          <p className="mt-3">
             Anthropic processes this only to return the answer to UnMoney. Under Anthropic's commercial terms, data sent
             through its API is not used to train its models, and it is deleted after a limited retention period. UnMoney checks
             every answer against your real categories and payment methods before it becomes a draft or fills in a form.
