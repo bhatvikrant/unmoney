@@ -51,7 +51,7 @@ test("a sentence, then the browser's own end: reported once, and the recogniser 
   expect(ends).toEqual([["450 swiggy dinner", undefined]]);
   // a go that ended by itself is not cut short on top of that
   expect(r.calls).toEqual(["start"]);
-  expect(trails).toEqual(["on r10 r17 end"]);
+  expect(trails).toEqual(["on r10 r17 end audio:none>none"]);
   // a second end, a late result or a timer changes nothing
   end();
   expect([r.onstart, r.onresult, r.onerror, r.onend]).toEqual([null, null, null, null]);
@@ -131,7 +131,7 @@ test("a last result with no words in it, as the go stops, does not take back wha
   r.onend!();
   expect(texts).toEqual(["40 chai"]);
   expect(ends).toEqual([["40 chai", undefined]]);
-  expect(trails).toEqual(["on r7 tap r0 r0 end"]);
+  expect(trails).toEqual(["on r7 tap r0 r0 end audio:none>none"]);
 
   // and one that only ever had such results heard nothing
   const empty = go();
@@ -141,7 +141,7 @@ test("a last result with no words in it, as the go stops, does not take back wha
   expect(empty.ends).toEqual([]);
   vi.advanceTimersByTime(1 + WAIT.stop);
   expect(empty.ends).toEqual([["", "no-speech"]]);
-  expect(empty.trails).toEqual(["on r0 quiet cut"]);
+  expect(empty.trails).toEqual(["on r0 quiet cut audio:none>none"]);
 });
 
 test("a blocked microphone and a recogniser that will not start are reported with their reason", () => {
@@ -156,6 +156,28 @@ test("a blocked microphone and a recogniser that will not start are reported wit
   expect(broken.ends).toEqual([]);
   vi.advanceTimersByTime(0);
   expect(broken.ends).toEqual([["", "start"]]);
+});
+
+test("where the browser says what the page's sound is for, the microphone is let go of after every go", () => {
+  const audio = { type: "ambient", state: "active" };
+  vi.stubGlobal("navigator", { audioSession: audio });
+  try {
+    const heardOne = go();
+    // the browser's own choice while listening
+    expect(audio.type).toBe("auto");
+    heardOne.r.onstart!();
+    heardOne.r.say("40 chai");
+    heardOne.r.onend!();
+    expect(audio.type).toBe("ambient");
+    expect(heardOne.trails).toEqual(["on r7 end audio:auto/active>ambient/active"]);
+
+    const left = go();
+    expect(audio.type).toBe("auto");
+    left.stop(true);
+    expect(audio.type).toBe("ambient");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 test("leaving the screen stops the mic and reports nothing", () => {
