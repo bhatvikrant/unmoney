@@ -31,15 +31,16 @@ class Fake {
 function go() {
   const ends: [string, string?][] = [];
   const texts: string[] = [];
-  const stop = listen(Fake, { lang: "en-IN", max: 200, onText: (t) => texts.push(t), onEnd: (text, error) => ends.push([text, error]) });
-  return { r: Fake.made.at(-1)!, ends, texts, stop };
+  const trails: string[] = [];
+  const stop = listen(Fake, { lang: "en-IN", max: 200, onText: (t) => texts.push(t), onEnd: (text, error, trail) => { ends.push([text, error]); trails.push(trail); } });
+  return { r: Fake.made.at(-1)!, ends, texts, trails, stop };
 }
 
 beforeEach(() => { vi.useFakeTimers(); Fake.made = []; Fake.failStart = false; });
 afterEach(() => { vi.useRealTimers(); });
 
 test("a sentence, then the browser's own end: reported once, and the recogniser is let go of", () => {
-  const { r, ends, texts } = go();
+  const { r, ends, texts, trails } = go();
   expect([r.lang, r.interimResults]).toEqual(["en-IN", true]);
   r.onstart!();
   r.say("450 swiggy");
@@ -48,6 +49,9 @@ test("a sentence, then the browser's own end: reported once, and the recogniser 
   end();
   expect(texts).toEqual(["450 swiggy", "450 swiggy dinner"]);
   expect(ends).toEqual([["450 swiggy dinner", undefined]]);
+  // a go that ended by itself is not cut short on top of that
+  expect(r.calls).toEqual(["start"]);
+  expect(trails).toEqual(["on r10 r17 end"]);
   // a second end, a late result or a timer changes nothing
   end();
   expect([r.onstart, r.onresult, r.onerror, r.onend]).toEqual([null, null, null, null]);
@@ -115,6 +119,29 @@ test("a tap on stop ends it even when the browser never answers, and is not a fa
   silent.r.fail("no-speech");
   silent.r.onend!();
   expect(silent.ends).toEqual([["", undefined]]);
+});
+
+test("a last result with no words in it, as the go stops, does not take back what was heard", () => {
+  const { r, ends, texts, trails, stop } = go();
+  r.onstart!();
+  r.say("40 chai");
+  stop();
+  r.say("");
+  r.say();
+  r.onend!();
+  expect(texts).toEqual(["40 chai"]);
+  expect(ends).toEqual([["40 chai", undefined]]);
+  expect(trails).toEqual(["on r7 tap r0 r0 end"]);
+
+  // and one that only ever had such results heard nothing
+  const empty = go();
+  empty.r.onstart!();
+  empty.r.say("");
+  vi.advanceTimersByTime(WAIT.first - 1);
+  expect(empty.ends).toEqual([]);
+  vi.advanceTimersByTime(1 + WAIT.stop);
+  expect(empty.ends).toEqual([["", "no-speech"]]);
+  expect(empty.trails).toEqual(["on r0 quiet cut"]);
 });
 
 test("a blocked microphone and a recogniser that will not start are reported with their reason", () => {
