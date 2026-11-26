@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
 import { bookmarksList, draftGet, draftMatches, draftsOpen, noteSuggestions, recentCategories, txGet, txTags, type TxDetail } from "../../../shared/views";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
 import { api } from "../../../convex/_generated/api";
 import { senderAddress } from "../../../shared/gmail/mail";
@@ -19,6 +19,7 @@ import { RECEIPT_MAX_BYTES, RECEIPT_MAX_EDGE, isReceiptMediaType } from "../../.
 import { QUICK_MAX_SENTENCE } from "../../../shared/quickAi";
 import { compressImage } from "@/lib/image";
 import { useDictation } from "@/lib/dictation";
+import { setTraceSender, trace } from "@/lib/voiceTrace";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useLeaveTo, useOpenEntry } from "@/lib/nav";
 import { useColumn } from "@/components/shell/SplitLayout";
@@ -422,12 +423,21 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   const quickEntry = useAction(api.ai.quickEntry);
   const [sentence, setSentence] = useState("");
   const [filling, setFilling] = useState(false);
+  // temporary: the steps of a voice entry go to the server's log (lib/voiceTrace.ts)
+  const voiceTrace = useMutation(api.usage.voiceTrace);
+  useEffect(() => {
+    setTraceSender((trail) => void voiceTrace({ trail }).catch(() => {}));
+    trace("form-shown");
+    return () => trace("form-gone");
+  }, [voiceTrace]);
   async function fillFromSentence(text = sentence) {
+    trace(`fill:${filling ? "busy" : !text.trim() ? "empty" : !navigator.onLine ? "offline" : "send"}:${text.length}`);
     if (filling || !text.trim()) return;
     if (!navigator.onLine) { toast.error("You're offline. Fill in the entry yourself."); return; }
     setFilling(true);
     try {
       const r = await quickEntry({ sentence: text, today: todayISO() });
+      trace("fill:answered");
       const p = latest.current;
       const patch: Partial<Form> = {};
       const type = r.type ?? p.type;
@@ -457,6 +467,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       if (r.time && settings.timeInputEnabled) patch.time = r.time;
       if (r.note) patch.note = r.note;
       if (r.description) patch.description = r.description;
+      trace(`fill:fields:${Object.keys(patch).join(",")}`);
       if (!Object.keys(patch).length) { toast.error("Couldn't make an entry out of that. Fill it in yourself."); return; }
       // a note that was just filled in is not being typed: no list of suggestions under it
       setNotePicked(true);
@@ -464,6 +475,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       setSentence("");
       toast.success("Entry filled in", { description: "Check it before you save" });
     } catch (e) {
+      trace(`fill:failed:${e instanceof ConvexError ? "told" : String((e as Error)?.message ?? e).slice(0, 80)}`);
       // a sentence meant for the person (the month's limit, not set up), or a dropped connection
       toast.error(e instanceof ConvexError ? String(e.data) : "Couldn't fill that in. Enter it yourself this time.");
     } finally {

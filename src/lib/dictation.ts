@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { track } from "./analytics";
+import { trace } from "./voiceTrace";
 
 // TypeScript ships the events but not the recogniser itself (Chrome and Safari only have it as webkit*)
 type Recogniser = {
@@ -108,6 +109,7 @@ export function useDictation(opts: { max: number; onText: (text: string) => void
   useEffect(() => () => stop.current?.(true), []);
 
   function toggle() {
+    trace(stop.current ? "tap-stop" : "tap-start");
     if (stop.current) { stop.current(); return; }
     if (!Recognition) return;
     setListening(true);
@@ -120,6 +122,7 @@ export function useDictation(opts: { max: number; onText: (text: string) => void
         setListening(false);
         // how each go went on which browser: its steps and the length of what was heard, never the words
         track("dictation", { outcome: text ? "heard" : error ?? "nothing", trail });
+        trace(`ended:${text.length}:${error ?? ""}[${trail}]`);
         if (text) cb.current.onDone(text);
         else if (error) cb.current.onError(error);
       },
