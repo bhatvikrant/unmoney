@@ -19,6 +19,7 @@ import { RECEIPT_MAX_BYTES, RECEIPT_MAX_EDGE, isReceiptMediaType } from "../../.
 import { QUICK_MAX_SENTENCE } from "../../../shared/quickAi";
 import { compressImage } from "@/lib/image";
 import { useDictation } from "@/lib/dictation";
+import { track } from "@/lib/analytics";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useLeaveTo, useOpenEntry } from "@/lib/nav";
 import { useColumn } from "@/components/shell/SplitLayout";
@@ -474,8 +475,19 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     max: QUICK_MAX_SENTENCE,
     onText: setSentence,
     onDone: (text) => void fillFromSentence(text),
-    onError: (code) => toast.error(code === "not-allowed" || code === "service-not-allowed" ? "The microphone is blocked. Allow it for UnMoney in your browser, or type the entry." : "Couldn't hear that. Type the entry instead."),
+    onError: (code) => {
+      // which browsers fail and how, to tell a blocked mic from one that went deaf; never what was said
+      track("dictation_failed", { code });
+      toast.error(code === "not-allowed" || code === "service-not-allowed" ? "The microphone is blocked. Allow it for UnMoney in your browser, or type the entry."
+        : code === "no-speech" ? "Didn't hear anything. Tap the mic and try again, or type the entry."
+        : "Couldn't hear that. Type the entry instead.");
+    },
   });
+  /** Filling in needs the connection anyway, so there is no point listening without one. */
+  function toggleMic() {
+    if (!mic.listening && !navigator.onLine) { toast.error("You're offline. Fill in the entry yourself."); return; }
+    mic.toggle();
+  }
 
   const isEdit = !!id;
   const inSeries = !!existing?.repeatId;
@@ -659,10 +671,11 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
               <Input aria-label="Describe the entry in a sentence" value={sentence} maxLength={QUICK_MAX_SENTENCE} disabled={filling} readOnly={mic.listening} placeholder={mic.listening ? "Listening…" : "450 swiggy dinner hdfc yesterday"} className="h-9"
                 onChange={(e) => setSentence(e.target.value)}
                 // Enter here fills the form: stopped before it reaches the form's own Enter, which saves
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void fillFromSentence(); } }} />
+                // (while the mic is on, the sentence fills in once, when it stops)
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (!mic.listening) void fillFromSentence(); } }} />
               {mic.supported ? (
                 <Button variant="outline" size="icon" className={cn("size-9 shrink-0", mic.listening && "border-primary text-primary")} disabled={filling} aria-pressed={mic.listening}
-                  aria-label={mic.listening ? "Stop listening" : "Say the entry"} title={mic.listening ? "Stop listening" : "Say the entry"} onClick={mic.toggle}>
+                  aria-label={mic.listening ? "Stop listening" : "Say the entry"} title={mic.listening ? "Stop listening" : "Say the entry"} onClick={toggleMic}>
                   <Mic className={cn("size-4", mic.listening && "animate-pulse")} />
                 </Button>
               ) : null}
