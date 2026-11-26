@@ -23,6 +23,19 @@ export function heard(results: ArrayLike<ArrayLike<{ transcript: string }>>, max
   return Array.from(results, (r) => r[0].transcript).join(" ").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+/**
+ * Safari's Audio Session API: what the page's sound is for. The iPhone home screen app kept the microphone
+ * on after a go had ended by itself (the recording dot stayed lit until the app was closed). "ambient" is
+ * sound that never records, so setting it makes the phone let go of the microphone; "auto" hands the
+ * choice back to the browser, which records while it listens. Absent in other browsers.
+ */
+function audioSession(type?: "auto" | "ambient"): string {
+  const a = typeof navigator === "undefined" ? undefined : (navigator as { audioSession?: { type: string; state?: string } }).audioSession;
+  if (!a) return "none";
+  try { if (type) a.type = type; } catch { /* not a kind this browser knows */ }
+  return `${a.type}/${a.state}`;
+}
+
 /** How long each wait may take, in ms: the browser's permission prompt, the first word, the next word, and the browser finishing once told to stop. */
 export const WAIT = { prompt: 30_000, first: 8_000, more: 3_000, stop: 1_500 };
 
@@ -36,6 +49,7 @@ export const WAIT = { prompt: 30_000, first: 8_000, more: 3_000, stop: 1_500 };
  * stops early: the words so far still count, unless `drop` (leaving the screen).
  */
 export function listen(Rec: Ctor, o: { lang: string; max: number; onText: (text: string) => void; onEnd: (text: string, error: string | undefined, trail: string) => void }): (drop?: boolean) => void {
+  audioSession("auto");
   const r = new Rec();
   let text = "";
   let error: string | undefined;
@@ -53,6 +67,7 @@ export function listen(Rec: Ctor, o: { lang: string; max: number; onText: (text:
     // a go the browser ended itself is left alone: on iOS, cutting goes short is reported to deafen later ones (WebKit bug 321436)
     if (!byBrowser) try { r.abort(); } catch { /* it never started */ }
     note(byBrowser ? "end" : "cut");
+    note(`audio:${audioSession()}>${audioSession("ambient")}`);
     if (report) o.onEnd(text, text ? undefined : error, trail.join(" "));
   };
   const stop = (reason?: string) => {
@@ -109,7 +124,7 @@ export function useDictation(opts: { max: number; onText: (text: string) => void
   useEffect(() => () => stop.current?.(true), []);
 
   function toggle() {
-    trace(stop.current ? "tap-stop" : "tap-start");
+    trace(`${stop.current ? "tap-stop" : "tap-start"}:audio:${audioSession()}`);
     if (stop.current) { stop.current(); return; }
     if (!Recognition) return;
     setListening(true);
@@ -123,6 +138,8 @@ export function useDictation(opts: { max: number; onText: (text: string) => void
         // how each go went on which browser: its steps and the length of what was heard, never the words
         track("dictation", { outcome: text ? "heard" : error ?? "nothing", trail });
         trace(`ended:${text.length}:${error ?? ""}[${trail}]`);
+        // temporary, with the trace: whether the phone has let go of the microphone a little later
+        setTimeout(() => trace(`later:audio:${audioSession()}`), 5000);
         if (text) cb.current.onDone(text);
         else if (error) cb.current.onError(error);
       },
