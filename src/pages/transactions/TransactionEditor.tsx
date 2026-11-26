@@ -19,7 +19,6 @@ import { RECEIPT_MAX_BYTES, RECEIPT_MAX_EDGE, isReceiptMediaType } from "../../.
 import { QUICK_MAX_SENTENCE } from "../../../shared/quickAi";
 import { compressImage } from "@/lib/image";
 import { useDictation } from "@/lib/dictation";
-import { track } from "@/lib/analytics";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useLeaveTo, useOpenEntry } from "@/lib/nav";
 import { useColumn } from "@/components/shell/SplitLayout";
@@ -476,8 +475,6 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     onText: setSentence,
     onDone: (text) => void fillFromSentence(text),
     onError: (code) => {
-      // which browsers fail and how, to tell a blocked mic from one that went deaf; never what was said
-      track("dictation_failed", { code });
       toast.error(code === "not-allowed" || code === "service-not-allowed" ? "The microphone is blocked. Allow it for UnMoney in your browser, or type the entry."
         : code === "no-speech" ? "Didn't hear anything. Tap the mic and try again, or type the entry."
         : "Couldn't hear that. Type the entry instead.");
