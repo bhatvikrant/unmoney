@@ -43,6 +43,10 @@ npx convex run seed:demo '{"email":"you@example.com"}'
 
 Expenses can be handed to [UnSplit](https://github.com/bhatvikrant/unsplit) to share with others: select entries and tap Split (or open one and tap "Split on UnSplit"). The apps share nothing but the user's Google account, so the handoff is a URL fragment each way: UnMoney opens UnSplit's `/expenses/new` with the entries, UnSplit comes back to `/unsplit/return` with the expense it made, and the entries get a link to it. See [docs/specs/unsplit-split.md](docs/specs/unsplit-split.md). Set `VITE_UNSPLIT_URL` to use a local UnSplit.
 
+## Fill-ups from Unfuel
+
+[Unfuel](https://github.com/bhatvikrant/unfuel) is the fuel log: mileage and cost per kilometre from a photo of the bill and the odometer. More › Unfuel makes a link (and asks which payment method and category fill-ups go to); pasted into Unfuel (More › UnMoney), each fill-up sent from there is added here as an expense, on a button or for every one. Unfuel's server posts to `POST /unfuel/<token>` on the Convex site (`convex/unfuel.ts`), and the expense is added through the same reducer the app uses, once per fill-up. See [docs/specs/unfuel-link.md](docs/specs/unfuel-link.md). Set `VITE_UNFUEL_URL` to point the page's link at a local Unfuel.
+
 ## Deploy
 
 Live at https://unmoney.vikrantbhat.com (moved from https://unmoney.vercel.app, which 308-redirects there; see below). Backend: Convex production deployment `brilliant-cheetah-609` (same project as the dev deployment); frontend: Vercel project `unmoney`. This is what was run to get there:

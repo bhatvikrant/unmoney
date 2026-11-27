@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { resetAnalytics } from "@/lib/analytics";
-import { Bookmark, CalendarClock, ChartNoAxesCombined, ChevronRight, Coins, FileInput, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Sprout, Tags, WalletCards } from "lucide-react";
+import { Bookmark, CalendarClock, ChartNoAxesCombined, ChevronRight, Coins, FileInput, Fuel, HardDriveDownload, Lock, Mail, Palette, PiggyBank, Repeat, SlidersHorizontal, Sparkles, Sprout, Tags, WalletCards } from "lucide-react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { useMemo, type ReactNode } from "react";
@@ -32,6 +32,7 @@ export default function SettingsPage() {
   const visibleAccounts = accounts.filter((a) => !a.hidden && !a.archivedAt);
   const { status, clearLocal, view } = useStore();
   const gmail = useQuery(api.gmail.status);
+  const unfuel = useQuery(api.unfuel.linkStatus);
   const waiting = waitingDrafts(view);
   const running = sipsOf(view).filter((x) => !x.stoppedAt).length;
   const sipsSuggested = useMemo(() => sipSuggestions(view).length, [view]);
@@ -103,6 +104,7 @@ export default function SettingsPage() {
           {link(<HardDriveDownload />, "Backup & export", "/settings/backup")}
           {link(<FileInput />, "Import", "/import", { hint: "Money Manager or a bank statement" })}
           {/* with drafts waiting, the row goes straight to them; their page links to the settings */}
+          {link(<Fuel />, "Unfuel", "/settings/unfuel", { value: unfuel === undefined ? undefined : unfuel ? "On" : "Off", hint: "Fuel fill-ups become expenses" })}
           {link(<Mail />, "Gmail", gmail?.connected && gmail.status !== "reauth" && waiting ? "/gmail" : "/settings/gmail", { value: gmailValue, hint: "Turn money mail into entries", under: ["/gmail", "/settings/gmail"] })}
         </Section>
         {isSuperadmin(user?.email) ? (

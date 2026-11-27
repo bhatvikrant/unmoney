@@ -108,6 +108,7 @@ const TransferExpenseSettings = screen(() => import("@/pages/settings/TransferEx
 const PaymentMethodsSettings = screen(() => import("@/pages/settings/PaymentMethodsSettings"));
 const PreferencesSettings = screen(() => import("@/pages/settings/PreferencesSettings"));
 const GmailSettings = screen(() => import("@/pages/settings/GmailSettings"));
+const UnfuelSettings = screen(() => import("@/pages/settings/UnfuelSettings"));
 const GmailReviewPage = screen(() => import("@/pages/transactions/GmailReviewPage"));
 const UpcomingPage = screen(() => import("@/pages/transactions/UpcomingPage"));
 const SipsPage = screen(() => import("@/pages/transactions/SipsPage"));
@@ -293,6 +294,7 @@ const SignedIn = memo(function SignedIn({ settings: s, user }: { settings: NonNu
             <Route path="payment-methods" element={<PaymentMethodsSettings />} />
             <Route path="preferences" element={<PreferencesSettings />} />
             <Route path="gmail" element={<GmailSettings />} />
+            <Route path="unfuel" element={<UnfuelSettings />} />
           </Route>
           <Route path="import" element={<ImportPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
