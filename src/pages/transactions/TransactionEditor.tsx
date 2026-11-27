@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { useOp, useStore, useView } from "@/lib/store";
 import { bookmarksList, draftGet, draftMatches, draftsOpen, noteSuggestions, recentCategories, txGet, txTags, type TxDetail } from "../../../shared/views";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
 import { api } from "../../../convex/_generated/api";
 import { senderAddress } from "../../../shared/gmail/mail";
@@ -19,6 +19,7 @@ import { RECEIPT_MAX_BYTES, RECEIPT_MAX_EDGE, isReceiptMediaType } from "../../.
 import { QUICK_MAX_SENTENCE } from "../../../shared/quickAi";
 import { compressImage } from "@/lib/image";
 import { useDictation } from "@/lib/dictation";
+import { setTraceSender, trace } from "@/lib/voiceTrace";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { clearLeaveGuard, setLeaveGuard, useCloseEntry, useLeaveTo, useOpenEntry } from "@/lib/nav";
 import { useColumn } from "@/components/shell/SplitLayout";
@@ -422,12 +423,21 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
   const quickEntry = useAction(api.ai.quickEntry);
   const [sentence, setSentence] = useState("");
   const [filling, setFilling] = useState(false);
+  // temporary: the steps of a voice entry go to the server's log (lib/voiceTrace.ts)
+  const voiceTrace = useMutation(api.usage.voiceTrace);
+  useEffect(() => {
+    setTraceSender((trail) => void voiceTrace({ trail }).catch(() => {}));
+    trace("form-shown");
+    return () => trace("form-gone");
+  }, [voiceTrace]);
   async function fillFromSentence(text = sentence) {
+    trace(`fill:${filling ? "busy" : !text.trim() ? "empty" : !navigator.onLine ? "offline" : "send"}:${text.length}`);
     if (filling || !text.trim()) return;
     if (!navigator.onLine) { toast.error("You're offline. Fill in the entry yourself."); return; }
     setFilling(true);
     try {
       const r = await quickEntry({ sentence: text, today: todayISO() });
+      trace("fill:answered");
       const p = latest.current;
       const patch: Partial<Form> = {};
       const type = r.type ?? p.type;
@@ -457,6 +467,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       if (r.time && settings.timeInputEnabled) patch.time = r.time;
       if (r.note) patch.note = r.note;
       if (r.description) patch.description = r.description;
+      trace(`fill:fields:${Object.keys(patch).join(",")}`);
       if (!Object.keys(patch).length) { toast.error("Couldn't make an entry out of that. Fill it in yourself."); return; }
       // a note that was just filled in is not being typed: no list of suggestions under it
       setNotePicked(true);
@@ -464,6 +475,7 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
       setSentence("");
       toast.success("Entry filled in", { description: "Check it before you save" });
     } catch (e) {
+      trace(`fill:failed:${e instanceof ConvexError ? "told" : String((e as Error)?.message ?? e).slice(0, 80)}`);
       // a sentence meant for the person (the month's limit, not set up), or a dropped connection
       toast.error(e instanceof ConvexError ? String(e.data) : "Couldn't fill that in. Enter it yourself this time.");
     } finally {
@@ -474,8 +486,17 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
     max: QUICK_MAX_SENTENCE,
     onText: setSentence,
     onDone: (text) => void fillFromSentence(text),
-    onError: (code) => toast.error(code === "not-allowed" || code === "service-not-allowed" ? "The microphone is blocked. Allow it for UnMoney in your browser, or type the entry." : "Couldn't hear that. Type the entry instead."),
+    onError: (code) => {
+      toast.error(code === "not-allowed" || code === "service-not-allowed" ? "The microphone is blocked. Allow it for UnMoney in your browser, or type the entry."
+        : code === "no-speech" ? "Didn't hear anything. Tap the mic and try again, or type the entry."
+        : "Couldn't hear that. Type the entry instead.");
+    },
   });
+  /** Filling in needs the connection anyway, so there is no point listening without one. */
+  function toggleMic() {
+    if (!mic.listening && !navigator.onLine) { toast.error("You're offline. Fill in the entry yourself."); return; }
+    mic.toggle();
+  }
 
   const isEdit = !!id;
   const inSeries = !!existing?.repeatId;
@@ -659,10 +680,11 @@ function Editor({ initial, id, existing, draft, panel }: { initial: Form; id?: I
               <Input aria-label="Describe the entry in a sentence" value={sentence} maxLength={QUICK_MAX_SENTENCE} disabled={filling} readOnly={mic.listening} placeholder={mic.listening ? "Listening…" : "450 swiggy dinner hdfc yesterday"} className="h-9"
                 onChange={(e) => setSentence(e.target.value)}
                 // Enter here fills the form: stopped before it reaches the form's own Enter, which saves
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void fillFromSentence(); } }} />
+                // (while the mic is on, the sentence fills in once, when it stops)
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (!mic.listening) void fillFromSentence(); } }} />
               {mic.supported ? (
                 <Button variant="outline" size="icon" className={cn("size-9 shrink-0", mic.listening && "border-primary text-primary")} disabled={filling} aria-pressed={mic.listening}
-                  aria-label={mic.listening ? "Stop listening" : "Say the entry"} title={mic.listening ? "Stop listening" : "Say the entry"} onClick={mic.toggle}>
+                  aria-label={mic.listening ? "Stop listening" : "Say the entry"} title={mic.listening ? "Stop listening" : "Say the entry"} onClick={toggleMic}>
                   <Mic className={cn("size-4", mic.listening && "animate-pulse")} />
                 </Button>
               ) : null}

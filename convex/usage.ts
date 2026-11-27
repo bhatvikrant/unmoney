@@ -24,6 +24,18 @@ const PRUNE_BATCH = 500;
 const clip = (s: string, n = 40) => cutText(s, n);
 const bump = (r: Record<string, number>, k: string, by = 1) => ({ ...r, [k]: (r[k] ?? 0) + by });
 
+/**
+ * Temporary (2026-11-26): the steps a device took during a voice entry (src/lib/voiceTrace.ts), written to
+ * the log to find why the iPhone home screen app fills nothing in the second time. Nothing is stored.
+ */
+export const voiceTrace = mutation({
+  args: { trail: v.string() },
+  handler: async (ctx, { trail }) => {
+    const userId = await currentUserId(ctx);
+    if (userId) console.log("voice-trace", userId, trail.slice(0, 3000));
+  },
+});
+
 export const ping = mutation({
   args: {
     sessionId: v.string(),
