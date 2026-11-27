@@ -344,6 +344,25 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_hash", ["tokenHash"]),
 
+  /**
+   * The link Unfuel posts fuel fill-ups to (convex/unfuel.ts), and where they go: a fill-up carries an
+   * amount and a date and nothing about this ledger, so the payment method and category are picked
+   * when the link is made. Only the hash of the token is kept; one link per user.
+   */
+  unfuelLinks: defineTable({
+    userId: v.id("users"),
+    tokenHash: v.string(),
+    createdAt: v.number(),
+    accountId: v.id("accounts"),
+    categoryId: v.id("categories"),
+    subcategoryId: v.optional(v.id("categories")),
+    /** How many fill-ups have come through, and when the last one did. */
+    received: v.number(),
+    lastReceivedAt: v.optional(v.number()),
+  })
+    .index("by_user", ["userId"])
+    .index("by_hash", ["tokenHash"]),
+
   /** Files that arrived through an import link, waiting for the user to review them in the app. */
   pendingImports: defineTable({
     userId: v.id("users"),

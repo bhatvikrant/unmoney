@@ -23,6 +23,7 @@ import type * as lib_changes from "../lib/changes.js";
 import type * as lib_fxFeed from "../lib/fxFeed.js";
 import type * as lib_gmailApi from "../lib/gmailApi.js";
 import type * as lib_gmailCrypto from "../lib/gmailCrypto.js";
+import type * as lib_posthog from "../lib/posthog.js";
 import type * as lib_snapshot from "../lib/snapshot.js";
 import type * as migrations from "../migrations.js";
 import type * as passcode from "../passcode.js";
@@ -30,6 +31,7 @@ import type * as recapAi from "../recapAi.js";
 import type * as repeats from "../repeats.js";
 import type * as seed from "../seed.js";
 import type * as sync from "../sync.js";
+import type * as unfuel from "../unfuel.js";
 import type * as usage from "../usage.js";
 
 import type {
@@ -54,6 +56,7 @@ declare const fullApi: ApiFromModules<{
   "lib/fxFeed": typeof lib_fxFeed;
   "lib/gmailApi": typeof lib_gmailApi;
   "lib/gmailCrypto": typeof lib_gmailCrypto;
+  "lib/posthog": typeof lib_posthog;
   "lib/snapshot": typeof lib_snapshot;
   migrations: typeof migrations;
   passcode: typeof passcode;
@@ -61,6 +64,7 @@ declare const fullApi: ApiFromModules<{
   repeats: typeof repeats;
   seed: typeof seed;
   sync: typeof sync;
+  unfuel: typeof unfuel;
   usage: typeof usage;
 }>;
 

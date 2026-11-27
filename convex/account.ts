@@ -35,7 +35,7 @@ const STEPS: { name: string; take: (ctx: MutationCtx, userId: Id<"users">) => Pr
     also: async (ctx, d) => { if (d.storageId) await deleteFile(ctx, d.storageId); } },
   { name: "fileOwners", take: (ctx, u) => ctx.db.query("fileOwners").withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH),
     also: async (ctx, d) => { if (d.storageId) await deleteFile(ctx, d.storageId); } },
-  ...(["settings", "accountGroups", "accounts", "repeats", "bookmarks", "budgets", "currencies", "importLinks", "categoryCleanups", "history", "gmailConnections", "gmailMemory", "gmailPending", "drafts", "aiUsage", "syncState"] as const).map((t) => ({
+  ...(["settings", "accountGroups", "accounts", "repeats", "bookmarks", "budgets", "currencies", "importLinks", "unfuelLinks", "categoryCleanups", "history", "gmailConnections", "gmailMemory", "gmailPending", "drafts", "aiUsage", "syncState"] as const).map((t) => ({
     name: t, take: (ctx: MutationCtx, u: Id<"users">) => ctx.db.query(t).withIndex("by_user", (q) => q.eq("userId", u)).take(BATCH),
   })),
   // usage counts (convex/usage.ts) and what the superadmin dashboard counted of this user
